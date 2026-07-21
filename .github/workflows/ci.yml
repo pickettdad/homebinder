@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The route-config gate: a config edit that fails schema, referential, or
+      # flag-combination checks never merges.
+      - run: npm run validate:config
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build

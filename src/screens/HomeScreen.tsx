@@ -1,16 +1,23 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { BigButton, formatBytes } from "../ui/bits";
 
 export function HomeScreen() {
   const { sessionRows, route, routeErrors, storage, navigate, resumeSession, abandonSession, showToast } = useApp();
+  // Ref = the synchronous guard (state reads are stale within a render);
+  // state = the disabled-button visual.
+  const resumingRef = useRef(false);
   const [resuming, setResuming] = useState(false);
   const tryResume = (id: string) => {
-    if (resuming) return;
+    if (resumingRef.current) return;
+    resumingRef.current = true;
     setResuming(true);
     resumeSession(id)
       .catch((err) => showToast(err instanceof Error ? err.message : "Could not open this session"))
-      .finally(() => setResuming(false));
+      .finally(() => {
+        resumingRef.current = false;
+        setResuming(false);
+      });
   };
 
   return (

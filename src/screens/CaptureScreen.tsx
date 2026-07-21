@@ -4,7 +4,7 @@
  * Voice per slot policy: disabled | optional | recommended | required.
  * Required voice blocks Next; recommended emphasizes the button; nothing else nags.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { nextIncompleteSlot, reCheckBaseline, slotProgress, isSlotUnlocked } from "../engine/selectors";
 import { PhotoInput } from "../capture/PhotoInput";
@@ -28,6 +28,7 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
   const [lastMediaId, setLastMediaId] = useState<string | null>(null);
   const [excepting, setExcepting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   const { zone, slot } = useMemo(() => {
     for (const z of session?.zones ?? [])
@@ -65,7 +66,8 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
   };
 
   const stopAndSaveVoice = async () => {
-    if (saving) return;
+    if (savingRef.current) return; // synchronous guard — state alone is stale within a render
+    savingRef.current = true;
     setSaving(true);
     try {
       const result = await recorder.stop();
@@ -76,6 +78,7 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Voice note failed to save");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -146,7 +149,9 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
             </span>
             <BigButton variant="ghost" onClick={recorder.cancel}>Discard</BigButton>
           </div>
-          <BigButton onClick={() => void stopAndSaveVoice()}>Stop & save note</BigButton>
+          <BigButton disabled={saving} onClick={() => void stopAndSaveVoice()}>
+            {saving ? "Saving…" : "Stop & save note"}
+          </BigButton>
         </div>
       ) : lastMediaId ? (
         // Post-photo bar: Retake · Add voice note · Next (primary).

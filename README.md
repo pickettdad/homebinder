@@ -59,6 +59,15 @@ is ready — Reload". Tap it when you're *not* mid-visit.
 (Vercel and Cloudflare Pages work the same way if you prefer them; Netlify is just the
 example.)
 
+## Automatic PR reviews
+
+Every pull request gets an automatic Claude review (`.github/workflows/claude-review.yml`),
+replacing the retired Gemini Code Assist bot. One-time setup: create an API key at
+console.anthropic.com, then add it to the repository under **Settings → Secrets and
+variables → Actions → New repository secret**, named `ANTHROPIC_API_KEY`. Until the
+secret exists the review job simply fails without blocking anything; CI merge checks are
+separate and unaffected. Typical cost is a few cents per review.
+
 ## Developer quickstart
 
 ```bash

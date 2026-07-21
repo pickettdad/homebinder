@@ -3,7 +3,7 @@
  * manifest.json first, then per-zone media zips, one share at a time with explicit
  * per-file status (the share sheet's own success signal is not trusted).
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { sessionTotals, visitTwoGaps, zoneCounts } from "../engine/selectors";
 import { planExport, handoffFile, manifestSha256, type ExportPlan, type HandoffResult } from "../export/exportSession";
@@ -15,6 +15,18 @@ export function ExportScreen() {
   const [plan, setPlan] = useState<ExportPlan | null>(null);
   const [statuses, setStatuses] = useState<Record<string, HandoffResult | "pending">>({});
   const [working, setWorking] = useState<string | null>(null);
+  // Synchronous single-flight guard shared by prepare/handoff/finish; `working` is the visual.
+  const workingRef = useRef<string | null>(null);
+  const beginWork = (label: string): boolean => {
+    if (workingRef.current !== null) return false;
+    workingRef.current = label;
+    setWorking(label);
+    return true;
+  };
+  const endWork = () => {
+    workingRef.current = null;
+    setWorking(null);
+  };
 
   if (!session || !config) return null;
 
@@ -23,7 +35,7 @@ export function ExportScreen() {
   const openZones = session.zones.filter((z) => z.gate === "open");
 
   const prepare = async () => {
-    setWorking("prepare");
+    if (!beginWork("prepare")) return;
     try {
       const p = await planExport({ state: session, config, events });
       setPlan(p);
@@ -31,7 +43,7 @@ export function ExportScreen() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Export preparation failed");
     } finally {
-      setWorking(null);
+      endWork();
     }
   };
 
@@ -39,7 +51,7 @@ export function ExportScreen() {
     if (!plan) return;
     const file = plan.files.find((f) => f.name === name);
     if (!file) return;
-    setWorking(name);
+    if (!beginWork(name)) return;
     try {
       const result = await handoffFile(await file.getFile());
       setStatuses((s) => ({ ...s, [name]: result }));
@@ -48,15 +60,15 @@ export function ExportScreen() {
       setStatuses((s) => ({ ...s, [name]: "failed" }));
       showToast(err instanceof Error ? err.message : "Handoff failed");
     } finally {
-      setWorking(null);
+      endWork();
     }
   };
 
   const allHandled = plan !== null && plan.files.every((f) => ["shared", "downloaded"].includes(statuses[f.name] ?? ""));
 
   const finish = async () => {
-    if (!plan || working !== null) return;
-    setWorking("finish");
+    if (!plan) return;
+    if (!beginWork("finish")) return;
     try {
       const sha = await manifestSha256(plan.manifest);
       await dispatch([
@@ -73,7 +85,7 @@ export function ExportScreen() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not record the export");
     } finally {
-      setWorking(null);
+      endWork();
     }
   };
 

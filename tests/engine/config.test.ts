@@ -80,6 +80,14 @@ describe("baseline route config", () => {
     if (!result.ok) expect(result.errors.join(" ")).toContain("circular");
   });
 
+  it("rejects duplicate template ids", () => {
+    const broken = JSON.parse(JSON.stringify(baselineRoute));
+    broken.templates.push(JSON.parse(JSON.stringify(broken.templates[0])));
+    const result = validateRouteConfig(broken);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("duplicate template");
+  });
+
   it("rejects a template that extends itself", () => {
     const broken = JSON.parse(JSON.stringify(baselineRoute));
     broken.templates.find((t: { id: string }) => t.id === "room-routine").extends = "room-routine";

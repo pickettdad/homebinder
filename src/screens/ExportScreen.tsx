@@ -55,7 +55,8 @@ export function ExportScreen() {
   const allHandled = plan !== null && plan.files.every((f) => ["shared", "downloaded"].includes(statuses[f.name] ?? ""));
 
   const finish = async () => {
-    if (!plan) return;
+    if (!plan || working !== null) return;
+    setWorking("finish");
     try {
       const sha = await manifestSha256(plan.manifest);
       await dispatch([
@@ -71,6 +72,8 @@ export function ExportScreen() {
       navigate({ name: "route" });
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not record the export");
+    } finally {
+      setWorking(null);
     }
   };
 
@@ -146,7 +149,7 @@ export function ExportScreen() {
               </div>
             );
           })}
-          <BigButton disabled={!allHandled} onClick={() => void finish()}>
+          <BigButton disabled={!allHandled || working !== null} onClick={() => void finish()}>
             {allHandled ? "Finish — record export" : "Share every file to finish"}
           </BigButton>
         </section>

@@ -33,6 +33,19 @@ export interface SlotState extends PlanSlot {
   exception?: ExceptionState;
 }
 
+export interface FindingState {
+  findingId: string;
+  slotInstanceId: string;
+  mediaIds: string[];
+  severity: "info" | "reshoot" | "anomaly";
+  message: string;
+  confidence: number;
+  model: string;
+  at: string;
+  status: "open" | "cleared" | "deferred" | "reshot";
+  note?: string;
+}
+
 export interface ZoneState {
   zoneId: string;
   label: string;
@@ -40,6 +53,8 @@ export interface ZoneState {
   gate: "open" | "closed";
   closedAt?: string;
   slots: SlotState[];
+  /** "Second look" AI findings — advisory; never affect completeness or the gate. */
+  findings: FindingState[];
 }
 
 export interface SessionState {
@@ -59,6 +74,8 @@ export interface SessionState {
   lastActiveSlotId?: string;
   /** Events referencing slots that no longer resolve (e.g. a removed room). Exported, never lost. */
   orphanEvents: SessionEvent[];
+  /** Total AI token usage across recorded reviews (spend telemetry for the manifest). */
+  reviewUsage: { inputTokens: number; outputTokens: number };
 }
 
 export function fold(config: RouteConfig, events: readonly SessionEvent[]): SessionState {
@@ -90,10 +107,12 @@ export function fold(config: RouteConfig, events: readonly SessionEvent[]): Sess
       intro: z.intro,
       gate: "open",
       slots: z.slots.map((s) => ({ ...s, photos: [], voiceNotes: [] })),
+      findings: [],
     })),
     startedAt: init.at,
     lastEventSeq: 0,
     orphanEvents: [],
+    reviewUsage: { inputTokens: 0, outputTokens: 0 },
   };
 
   const slotIndex = new Map<string, SlotState>();
@@ -174,6 +193,34 @@ export function fold(config: RouteConfig, events: readonly SessionEvent[]): Sess
         break;
       case "ExportProduced":
         break;
+      case "ReviewRequested":
+        break; // job lifecycle lives in storage; the log records that it happened
+      case "ReviewRecorded": {
+        const zone = zoneIndex.get(e.zoneId);
+        if (!zone) { state.orphanEvents.push(e); break; }
+        if (e.usage) {
+          state.reviewUsage.inputTokens += e.usage.inputTokens;
+          state.reviewUsage.outputTokens += e.usage.outputTokens;
+        }
+        for (const f of e.findings) {
+          // Dedupe by findingId: idempotent apply means a duplicate delivery costs
+          // money, never duplicate state.
+          if (zone.findings.some((existing) => existing.findingId === f.findingId)) continue;
+          zone.findings.push({ ...f, model: e.model, at: e.at, status: "open" });
+        }
+        break;
+      }
+      case "ReviewFailed":
+        break;
+      case "ReviewFindingResolved": {
+        const zone = zoneIndex.get(e.zoneId);
+        if (!zone) { state.orphanEvents.push(e); break; }
+        const finding = zone.findings.find((f) => f.findingId === e.findingId);
+        if (!finding) { state.orphanEvents.push(e); break; }
+        finding.status = e.resolution;
+        finding.note = e.note;
+        break;
+      }
       default: {
         // Unknown event type from a different app version: ignore, never crash.
         break;

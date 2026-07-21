@@ -1,13 +1,14 @@
 /** Session home: zones in walk order, completeness at a glance, export entry point. */
 import { useApp } from "../store/sessionStore";
-import { zoneCounts, sessionTotals } from "../engine/selectors";
+import { zoneCounts, sessionTotals, openFindings } from "../engine/selectors";
 import { BigButton, ProgressBar } from "../ui/bits";
 
 export function RouteScreen() {
-  const { session, config, navigate, leaveSession } = useApp();
+  const { session, config, navigate, leaveSession, reviewPending, drainNow, showToast } = useApp();
   if (!session || !config) return null;
 
   const totals = sessionTotals(session, config);
+  const online = typeof navigator === "undefined" || navigator.onLine;
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6 pb-32">
@@ -38,7 +39,14 @@ export function RouteScreen() {
             }`}
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-100">{zone.label}</h2>
+              <h2 className="flex items-center gap-2 text-xl font-semibold text-slate-100">
+                {zone.label}
+                {openFindings(zone) > 0 && (
+                  <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-300">
+                    {openFindings(zone)} finding{openFindings(zone) === 1 ? "" : "s"}
+                  </span>
+                )}
+              </h2>
               <span className="text-sm text-slate-400">
                 {zone.gate === "closed" ? "closed ✓" : `${c.requiredResolved}/${c.requiredTotal} required`}
               </span>
@@ -60,6 +68,18 @@ export function RouteScreen() {
             {totals.requiredResolved}/{totals.requiredTotal} required · {totals.photoCount} photos ·{" "}
             {totals.zonesClosed}/{totals.zonesTotal} zones closed
             {totals.gapCount > 0 && <span className="text-amber-400"> · {totals.gapCount} for visit two</span>}
+            {reviewPending > 0 && (
+              <button
+                type="button"
+                className="ml-2 rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-300"
+                onClick={() => {
+                  if (!online) { showToast("No signal — reviews will run when connected"); return; }
+                  void drainNow().then(() => showToast("Running pending reviews"));
+                }}
+              >
+                {reviewPending} review{reviewPending === 1 ? "" : "s"} pending{online ? " · run now" : ""}
+              </button>
+            )}
           </p>
           <BigButton variant="secondary" onClick={() => navigate({ name: "export" })}>Export</BigButton>
         </div>

@@ -68,6 +68,31 @@ variables → Actions → New repository secret**, named `ANTHROPIC_API_KEY`. Un
 secret exists the review job simply fails without blocking anything; CI merge checks are
 separate and unaffected. Typical cost is a few cents per review.
 
+## "Second look" — the AI zone reviewer (v1a)
+
+When you close a reviewed zone, the app quietly sends that zone's photos (downscaled
+copies — originals never leave the iPad) to Claude for a batch check: reshoot requests
+("glare on the water-heater serial"), anomaly suggestions ("possible efflorescence —
+worth a moisture reading before you leave?"), and consistency notes. Findings are
+**advisory only**: the deterministic gate never waits on them, nothing blocks, and every
+finding is dispositioned by you — Clear, Defer (→ visit-two list), or Reshoot. Offline,
+reviews queue silently and run when there's signal.
+
+**One-time setup (~5 minutes):**
+
+1. In Netlify: **Site configuration → Environment variables**, add two variables:
+   - `ANTHROPIC_API_KEY` — from console.anthropic.com (mark as secret). Typical cost is
+     **under $1 per full visit**; usage is recorded in every export manifest.
+   - `HS_APP_TOKEN` — any long random string you invent (30+ characters). This stops
+     strangers from using your review endpoint.
+2. Redeploy the site (Deploys → Trigger deploy).
+3. In the app: on the home screen, tap **"Second look: not configured"** and paste the
+   same `HS_APP_TOKEN` value. Done — the next reviewed zone close will get a second look.
+
+Which zones get reviewed is route policy: `gate: { review: "ai" }` per zone in
+`src/config/route.baseline.ts` (currently the six equipment-heavy zones). Remove the
+line to turn a zone's review off.
+
 ## Developer quickstart
 
 ```bash

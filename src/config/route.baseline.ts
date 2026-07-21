@@ -12,7 +12,7 @@ import type { RouteConfigInput } from "../engine/schema/routeConfig";
 export const baselineRoute = {
   routeId: "baseline-detached-v1",
   title: "Baseline Inspection — Standard Detached Home",
-  configVersion: "1.0.0",
+  configVersion: "1.1.0",
 
   profileFlags: [
     { id: "has-well", label: "Private well", hint: "Adds wellhead, pressure system, treatment train, and water sampling slots" },
@@ -183,6 +183,7 @@ export const baselineRoute = {
     {
       id: "exterior",
       label: "Exterior circuit",
+      gate: { review: "ai" },
       intro: "Phase 2 — full perimeter, one direction, corner to corner. Weather-dependent: goes first.",
       slots: [
         { id: "ext.elevations", label: "All four elevations, wide", minCaptures: 4 },
@@ -261,6 +262,7 @@ export const baselineRoute = {
     {
       id: "basement",
       label: "Basement & mechanical core",
+      gate: { review: "ai" },
       intro: "Phase 3 — densest zone. Set the thermostat to call for heat BEFORE descending.",
       slots: [
         {
@@ -349,6 +351,7 @@ export const baselineRoute = {
     {
       id: "main-floor",
       label: "Main floor",
+      gate: { review: "ai" },
       intro: "Phase 5 — the room routine in every room. Water run threads through wet rooms.",
       slots: [
         {
@@ -368,6 +371,7 @@ export const baselineRoute = {
     {
       id: "upper-floor",
       label: "Upper floor",
+      gate: { review: "ai" },
       intro: "Phase 6 — same room routine; bedrooms add egress. Detector coverage map completes here.",
       slots: [
         {
@@ -385,6 +389,7 @@ export const baselineRoute = {
     {
       id: "attic",
       label: "Attic",
+      gate: { review: "ai" },
       intro: "Phase 6 — head-and-shoulders from the hatch plus pole camera. NEVER a walk on joists.",
       slots: [
         { id: "attic.hatch", label: "Hatch access + surround", minCaptures: 1 },
@@ -413,6 +418,7 @@ export const baselineRoute = {
     {
       id: "garage",
       label: "Garage",
+      gate: { review: "ai" },
       intro: "Phase 7.",
       slots: [
         {

@@ -66,6 +66,13 @@ const zoneDefSchema = z.object({
   slots: z.array(slotDefSchema).default([]),
   /** Which room kinds this zone accepts, and the template each expands with. */
   rooms: z.array(zoneRoomsSchema).default([]),
+  /**
+   * Gate behavior. review 'ai' queues a best-effort "Second look" batch review when the
+   * zone closes — advisory only; the deterministic gate never waits on it.
+   */
+  gate: z
+    .object({ review: z.enum(["none", "ai"]).default("none") })
+    .default({ review: "none" }),
 });
 export type ZoneDef = z.output<typeof zoneDefSchema>;
 

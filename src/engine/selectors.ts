@@ -86,17 +86,37 @@ export interface GapItem {
   zoneLabel: string;
   reasonId: string;
   note?: string;
+  /** exception = deterministic gate exit; ai-finding = a deferred Second-look item. */
+  source: "exception" | "ai-finding";
 }
 
-/** The visit-two gap list: every exception whose reason feeds the gap list. */
+/** The visit-two gap list: gap-feeding exceptions plus deferred AI findings. */
 export function visitTwoGaps(state: SessionState, config: RouteConfig): GapItem[] {
   const gapReasons = new Set(config.exceptionReasons.filter((r) => r.feedsGapList).map((r) => r.id));
   const gaps: GapItem[] = [];
-  for (const zone of state.zones)
+  for (const zone of state.zones) {
     for (const slot of zone.slots)
       if (slot.exception && gapReasons.has(slot.exception.reasonId))
-        gaps.push({ slot, zoneLabel: zone.label, reasonId: slot.exception.reasonId, note: slot.exception.note });
+        gaps.push({
+          slot, zoneLabel: zone.label, reasonId: slot.exception.reasonId,
+          note: slot.exception.note, source: "exception",
+        });
+    for (const finding of zone.findings) {
+      if (finding.status !== "deferred") continue;
+      const slot = zone.slots.find((s) => s.instanceId === finding.slotInstanceId);
+      if (!slot) continue;
+      gaps.push({
+        slot, zoneLabel: zone.label, reasonId: "ai-finding-deferred",
+        note: finding.message, source: "ai-finding",
+      });
+    }
+  }
   return gaps;
+}
+
+/** Open (undispositioned) Second-look findings for a zone. Advisory — blocks nothing. */
+export function openFindings(zone: ZoneState): number {
+  return zone.findings.filter((f) => f.status === "open").length;
 }
 
 export interface SessionTotals {

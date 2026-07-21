@@ -53,10 +53,32 @@ export interface ConfigSnapshotRow {
 export interface OutboxRow {
   id?: number;
   sessionId: string;
-  refType: "event" | "media";
+  refType: "event" | "media" | "review";
   refId: string;
   status: "pending" | "synced" | "failed";
   attempts: number;
+  createdAt: string;
+}
+
+/**
+ * A "Second look" review job: one queued network request covering a chunk of a zone's
+ * captures. Jobs are created atomically with the ZoneClosed + ReviewRequested events;
+ * the drain loop is their only consumer. Failed jobs re-arm on connectivity, and only
+ * abandoning the session drops them.
+ */
+export interface ReviewJobRow {
+  jobId: string; // UUIDv7; doubles as the Idempotency-Key
+  sessionId: string;
+  zoneId: string;
+  kind: "zone-summary";
+  chunkIndex: number;
+  chunkOf: number;
+  slotInstanceIds: string[];
+  mediaIds: string[];
+  status: "pending" | "inflight" | "done" | "failed";
+  attempts: number;
+  nextAttemptAt: string;
+  lastErrorCode?: string;
   createdAt: string;
 }
 
@@ -66,6 +88,7 @@ export class FieldDb extends Dexie {
   media!: EntityTable<MediaRow, "id">;
   configSnapshots!: EntityTable<ConfigSnapshotRow, "hash">;
   outbox!: EntityTable<OutboxRow, "id">;
+  reviewJobs!: EntityTable<ReviewJobRow, "jobId">;
 
   constructor() {
     super("housesteady-field");
@@ -75,6 +98,9 @@ export class FieldDb extends Dexie {
       media: "id, sessionId, slotInstanceId",
       configSnapshots: "hash",
       outbox: "++id, sessionId, status",
+    });
+    this.version(2).stores({
+      reviewJobs: "jobId, sessionId, status",
     });
   }
 }

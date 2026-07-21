@@ -11,9 +11,27 @@ import { GateScreen } from "../screens/GateScreen";
 import { ExportScreen } from "../screens/ExportScreen";
 
 export function App() {
-  const { ready, screen, sessionId, toast, init } = useApp();
+  const { ready, screen, sessionId, toast, init, drainNow, refreshReviewStatus } = useApp();
 
   useEffect(() => { void init(); }, [init]);
+
+  // Second-look drain triggers: connectivity regained, app foregrounded, and a slow
+  // heartbeat while a session is active. The drain itself is single-flight and no-ops
+  // offline or when unconfigured.
+  useEffect(() => {
+    if (!sessionId) return;
+    const kick = () => { void drainNow(); };
+    const onVisible = () => { if (document.visibilityState === "visible") kick(); };
+    window.addEventListener("online", kick);
+    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(() => { void refreshReviewStatus().then(() => kick()); }, 60_000);
+    kick();
+    return () => {
+      window.removeEventListener("online", kick);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(timer);
+    };
+  }, [sessionId, drainNow, refreshReviewStatus]);
   // Hold the screen awake for the whole visit; re-acquired after camera round-trips
   // and system releases. Status surfaces below so a failure is visible, not silent.
   const wakeLock = useWakeLock(sessionId !== null);
@@ -36,7 +54,9 @@ export function App() {
       {screen.name === "setup" && <SetupScreen />}
       {screen.name === "route" && <RouteScreen />}
       {screen.name === "zone" && <ZoneScreen zoneId={screen.zoneId} />}
-      {screen.name === "capture" && <CaptureScreen slotInstanceId={screen.slotInstanceId} />}
+      {screen.name === "capture" && (
+        <CaptureScreen slotInstanceId={screen.slotInstanceId} findingId={screen.findingId} />
+      )}
       {screen.name === "gate" && <GateScreen zoneId={screen.zoneId} />}
       {screen.name === "export" && <ExportScreen />}
       {toast && (

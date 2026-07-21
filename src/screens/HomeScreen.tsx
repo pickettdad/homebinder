@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
-import { BigButton, formatBytes } from "../ui/bits";
+import { getAppToken, setAppToken } from "../review/queue";
+import { BigButton, Sheet, formatBytes } from "../ui/bits";
 
 export function HomeScreen() {
   const { sessionRows, route, routeErrors, storage, navigate, resumeSession, abandonSession, showToast } = useApp();
@@ -8,6 +9,8 @@ export function HomeScreen() {
   // state = the disabled-button visual.
   const resumingRef = useRef(false);
   const [resuming, setResuming] = useState(false);
+  const [tokenSheet, setTokenSheet] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState("");
   const tryResume = (id: string) => {
     if (resumingRef.current) return;
     resumingRef.current = true;
@@ -79,8 +82,39 @@ export function HomeScreen() {
             {storage.persisted ? "persistent" : "NOT persistent — install to home screen"}
           </p>
         )}
-        <p className="mt-1">Offline-first: nothing here ever waits on a network.</p>
+        <p className="mt-1">
+          Offline-first: nothing here ever waits on a network.{" "}
+          <button type="button" className="underline" onClick={() => setTokenSheet(true)}>
+            Second look: {getAppToken() ? "configured" : "not configured"}
+          </button>
+        </p>
       </footer>
+
+      <Sheet open={tokenSheet} onClose={() => setTokenSheet(false)} title="Second look setup">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-slate-300">
+            Paste the app token (the HS_APP_TOKEN value from your Netlify site's environment
+            variables). Reviews stay off until this is set — everything else works without it.
+          </p>
+          <input
+            value={tokenDraft}
+            onChange={(e) => setTokenDraft(e.target.value)}
+            placeholder="app token"
+            className="rounded-xl bg-slate-900 p-3 font-mono text-sm text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+          />
+          <BigButton
+            disabled={!tokenDraft.trim()}
+            onClick={() => {
+              setAppToken(tokenDraft);
+              setTokenDraft("");
+              setTokenSheet(false);
+              showToast("Second look configured");
+            }}
+          >
+            Save token
+          </BigButton>
+        </div>
+      </Sheet>
     </div>
   );
 }

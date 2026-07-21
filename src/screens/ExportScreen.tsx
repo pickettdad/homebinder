@@ -11,7 +11,7 @@ import { setSessionStatus } from "../storage/sessionRepo";
 import { BigButton, formatBytes } from "../ui/bits";
 
 export function ExportScreen() {
-  const { session, config, events, navigate, dispatch, showToast, refreshSessions } = useApp();
+  const { session, config, events, navigate, dispatch, showToast, refreshSessions, reviewPending } = useApp();
   const [plan, setPlan] = useState<ExportPlan | null>(null);
   const [statuses, setStatuses] = useState<Record<string, HandoffResult | "pending">>({});
   const [working, setWorking] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export function ExportScreen() {
   const prepare = async () => {
     if (!beginWork("prepare")) return;
     try {
-      const p = await planExport({ state: session, config, events });
+      const p = await planExport({ state: session, config, events, reviewPendingCount: reviewPending });
       setPlan(p);
       setStatuses(Object.fromEntries(p.files.map((f) => [f.name, "pending" as const])));
     } catch (err) {
@@ -117,6 +117,15 @@ export function ExportScreen() {
         <p className="rounded-xl border border-amber-500/50 bg-amber-950/30 p-3 text-amber-200">
           {openZones.length} zone{openZones.length === 1 ? " is" : "s are"} still open —
           exporting is allowed, but the manifest will record them as unclosed.
+        </p>
+      )}
+
+      {(reviewPending > 0 || session.zones.some((z) => z.findings.some((f) => f.status === "open"))) && (
+        <p className="rounded-xl bg-slate-800/60 p-3 text-sm text-slate-300">
+          Second look: {reviewPending > 0 && `${reviewPending} review${reviewPending === 1 ? "" : "s"} still pending · `}
+          {session.zones.reduce((n, z) => n + z.findings.filter((f) => f.status === "open").length, 0)} finding
+          {session.zones.reduce((n, z) => n + z.findings.filter((f) => f.status === "open").length, 0) === 1 ? "" : "s"} not
+          dispositioned. Export never waits — the manifest records their status honestly.
         </p>
       )}
 

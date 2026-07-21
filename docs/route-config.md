@@ -29,6 +29,7 @@ Process doc first, then this file, then bump `configVersion` — same commit.
 | `zone.rooms[]` | Which room kinds a zone accepts and the template each expands with. The actual room list is per-house, set at session setup (and add-able mid-visit). |
 | `conditionalBlocks[]` | Slot groups injected into zones when property flags match. `when` is `allOf`/`anyOf`/`not` over declared flag ids — **nothing more expressive, by design**. Logic beyond a flag combination belongs in code that emits a flag. |
 | `exceptionReasons[]` | The allowed gate exits. `requiresNote` forces a short note; `feedsGapList` routes the exception onto the visit-two gap list in the export. |
+| `zone.gate.review` | `none` (default) \| `ai`. With `ai`, closing the zone queues a best-effort "Second look" AI batch review — advisory findings only; the deterministic gate never waits on it. |
 | `tags` + `constraints` | Cross-zone sequencing. `afterAllTagged` locks a slot until every slot carrying the tag is resolved — this is how the basement ceiling re-check waits for the water run. `reCheckOf` shows the referenced slot's photos side-by-side at capture time. |
 
 ## Workflow for a route edit

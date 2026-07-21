@@ -1,3 +1,15 @@
+# Project state — handoff (updated 2026-07-21, v1a)
+
+> **v1a update:** the "Second look" AI zone reviewer shipped: Netlify Function proxy
+> (`netlify/functions/review.mts`, Haiku 4.5, doctrine word-lint, daily cap), review
+> jobs riding the outbox (`src/review/`), Review* events with `actor: 'ai'` provenance,
+> the findings panel with Clear/Defer/Reshoot (`src/ui/SecondLook.tsx`), gap-list wiring
+> for deferrals, manifest `aiReview` section (schema v2), and per-zone `gate.review`
+> config (route v1.1.0). Field test 1 (office run) validated all v0.5 mechanics; the
+> owner's 32-photo equipment corpus exists for tuning v1b nameplate OCR. v1b next:
+> nameplate extraction + verify card, per the v1 design (PR #16 description has the
+> full plan). Original v0.5 handoff below still describes the foundation accurately.
+
 # Project state — v0.5 handoff (2026-07-21)
 
 Read this first when picking the project up in a new session. Pair it with the three

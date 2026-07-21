@@ -4,7 +4,7 @@
  * in one commit — actually functions through Dexie's nested-transaction path.
  */
 import "fake-indexeddb/auto";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { parseRouteConfig } from "../../src/engine/schema/routeConfig";
 import { baselineRoute } from "../../src/config/route.baseline";
 import { createSession, loadEvents, loadSessionConfig } from "../../src/storage/sessionRepo";
@@ -12,6 +12,13 @@ import { db } from "../../src/storage/db";
 import { fold } from "../../src/engine/fold";
 
 describe("createSession", () => {
+  beforeEach(async () => {
+    await Promise.all([
+      db.sessions.clear(), db.configSnapshots.clear(), db.events.clear(),
+      db.media.clear(), db.outbox.clear(),
+    ]);
+  });
+
   it("commits session row, snapshot, events, and outbox atomically and folds cleanly", async () => {
     const config = parseRouteConfig(baselineRoute);
     const sessionId = await createSession({

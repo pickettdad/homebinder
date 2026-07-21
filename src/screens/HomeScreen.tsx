@@ -1,12 +1,17 @@
+import { useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { BigButton, formatBytes } from "../ui/bits";
 
 export function HomeScreen() {
   const { sessionRows, route, routeErrors, storage, navigate, resumeSession, abandonSession, showToast } = useApp();
-  const tryResume = (id: string) =>
-    void resumeSession(id).catch((err) =>
-      showToast(err instanceof Error ? err.message : "Could not open this session"),
-    );
+  const [resuming, setResuming] = useState(false);
+  const tryResume = (id: string) => {
+    if (resuming) return;
+    setResuming(true);
+    resumeSession(id)
+      .catch((err) => showToast(err instanceof Error ? err.message : "Could not open this session"))
+      .finally(() => setResuming(false));
+  };
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -42,7 +47,7 @@ export function HomeScreen() {
                 </p>
               </div>
               {(s.status === "active" || s.status === "completed") && (
-                <BigButton variant="secondary" onClick={() => tryResume(s.id)}>
+                <BigButton variant="secondary" disabled={resuming} onClick={() => tryResume(s.id)}>
                   {s.status === "active" ? "Resume" : "Open"}
                 </BigButton>
               )}

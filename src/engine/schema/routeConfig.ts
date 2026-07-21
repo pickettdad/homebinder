@@ -139,7 +139,11 @@ export const routeConfigSchema = routeConfigObject.superRefine((cfg, ctx) => {
     set.add(id);
   };
 
+  const seenTemplateIds = new Set<string>();
   for (const t of cfg.templates) {
+    // A duplicated template id would be silently shadowed (first match wins everywhere)
+    // — the config layer's promise is that bad edits fail loudly instead.
+    addUnique(seenTemplateIds, t.id, "template");
     if (t.extends && !templateIds.has(t.extends))
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `template ${t.id} extends unknown template ${t.extends}` });
     // Walk the full extends chain: any revisit is a cycle (covers self-extends too).

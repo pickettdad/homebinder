@@ -1,0 +1,41 @@
+# Automatic Claude review on every pull request — the Gemini Code Assist replacement.
+# Requires one repository secret: ANTHROPIC_API_KEY (see README "Automatic PR reviews").
+# The job is skipped gracefully until the secret exists.
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request as a careful staff engineer. Post ONE concise review
+            comment on the PR (use `gh pr comment`).
+
+            Focus, in order: (1) real defects — crashes, data loss, corrupted state,
+            broken offline behavior; (2) violations of this codebase's stated invariants
+            (append-only event log, config purity, fold determinism — see docs/HANDOFF.md
+            and docs/route-config.md); (3) meaningful robustness gaps. Verify each claimed
+            defect against the actual code before reporting it, and state consequences
+            plainly without inflating severity.
+
+            Skip entirely: style nits, speculative guards on unreachable paths, and
+            anything already covered by CI (tests, typecheck, config validation). This is
+            a field app for a solo operator, not a bank — calibrate accordingly. If the
+            diff is sound, say so in two sentences and stop.
+          claude_args: "--max-turns 25"

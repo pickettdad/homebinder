@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* Dark-first field theme: basements, headlamps, gloves. */
+html {
+  background: #020617; /* slate-950 */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* no double-tap zoom delays on capture buttons */
+}
+
+body {
+  overscroll-behavior-y: none; /* no pull-to-refresh mid-visit */
+}
+
+/* Keep text legible if the OS forces light mode; the app supplies its own colors. */
+:root {
+  color-scheme: dark;
+}

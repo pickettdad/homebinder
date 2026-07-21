@@ -71,6 +71,22 @@ describe("baseline route config", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("rejects circular template inheritance (would stack-overflow the plan compiler)", () => {
+    const broken = JSON.parse(JSON.stringify(baselineRoute));
+    // bedroom extends room-routine; point room-routine back at bedroom -> cycle
+    broken.templates.find((t: { id: string }) => t.id === "room-routine").extends = "bedroom";
+    const result = validateRouteConfig(broken);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("circular");
+  });
+
+  it("rejects a template that extends itself", () => {
+    const broken = JSON.parse(JSON.stringify(baselineRoute));
+    broken.templates.find((t: { id: string }) => t.id === "room-routine").extends = "room-routine";
+    const result = validateRouteConfig(broken);
+    expect(result.ok).toBe(false);
+  });
+
   it("rejects duplicate slot ids", () => {
     const broken = JSON.parse(JSON.stringify(baselineRoute));
     broken.zones[1].slots[1].id = broken.zones[1].slots[0].id;

@@ -65,10 +65,14 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
   };
 
   const stopAndSaveVoice = async () => {
-    const result = await recorder.stop();
-    if (result) {
-      await attachVoice(slot.instanceId, result.blob, result.mime, result.durationMs);
-      showToast("Voice note saved");
+    try {
+      const result = await recorder.stop();
+      if (result) {
+        await attachVoice(slot.instanceId, result.blob, result.mime, result.durationMs);
+        showToast("Voice note saved");
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Voice note failed to save");
     }
   };
 

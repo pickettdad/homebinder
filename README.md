@@ -16,7 +16,50 @@ React 19 + TypeScript + Vite + Tailwind · Dexie (IndexedDB) · Zod · Zustand �
 The completeness engine (`src/engine/`) is pure TypeScript with zero DOM/framework
 imports — unit-tested to death, reusable server-side in v1.
 
-## Quickstart
+## Getting it onto your iPad — the simple path
+
+The app is a website that installs like an app. For the camera and microphone to work,
+Apple requires it to live at a secure `https://` web address — so the one-time job is
+connecting this GitHub repository to a free hosting service. Everything below happens
+in a web browser; no terminal, nothing to install on a computer.
+
+**One-time setup (~10 minutes):**
+
+1. If the newest code is still on a branch, merge it first: on this repository's
+   GitHub page, open the **Pull requests** tab, open the pull request, and press
+   **Merge pull request**. (No pull request listed? It's already merged — carry on.)
+2. Go to **netlify.com** and sign up for a free account, choosing **Sign up with
+   GitHub**.
+3. Press **Add new site → Import an existing project → Deploy with GitHub**, and pick
+   the **homebinder** repository from the list.
+4. Netlify detects the build settings by itself. If it asks, the two answers are:
+   build command `npm run build`, publish directory `dist`. Press **Deploy**.
+5. Wait a minute or two. Netlify shows the app's new web address, something like
+   `https://wonderful-name-123.netlify.app`. You can change the name under
+   **Site configuration → Change site name**.
+
+**On the iPad (~2 minutes):**
+
+6. Open that address in **Safari**.
+7. Tap the **Share** button (the square with the arrow pointing up), then
+   **Add to Home Screen**, then **Add**. *This step is required, not cosmetic — it is
+   what lets the iPad keep a whole visit's photos safely on the device.*
+8. From now on, always open the app from its home-screen icon, like any other app.
+9. The first time you tap **Add voice note**, choose **Allow** when iPad asks about
+   the microphone.
+
+**Checking it worked:** the app's front screen should say **"persistent"** in the small
+print at the bottom. Turn on Airplane Mode and tap around — everything should still
+work, because nothing in a visit ever needs the internet.
+
+**Getting updates later:** whenever new code lands on GitHub, Netlify rebuilds the site
+by itself. Next time the app is open with internet, a banner appears — "A new version
+is ready — Reload". Tap it when you're *not* mid-visit.
+
+(Vercel and Cloudflare Pages work the same way if you prefer them; Netlify is just the
+example.)
+
+## Developer quickstart
 
 ```bash
 npm install

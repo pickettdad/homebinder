@@ -86,7 +86,12 @@ export async function createSession(args: {
   const sessionId = uuidv7();
   const now = new Date().toISOString();
 
-  await db.transaction("rw", [db.sessions, db.configSnapshots], async () => {
+  // ONE atomic transaction for snapshot + session row + initial events. A failure at
+  // any point (quota, crash) must never leave a session row without its
+  // SessionInitialized event — such a half-session would make fold() throw on the
+  // resume-on-launch path every launch thereafter. The appendEvents call opens a
+  // nested Dexie transaction, which joins this parent transaction.
+  await db.transaction("rw", [db.sessions, db.configSnapshots, db.events, db.media, db.outbox], async () => {
     const existing = await db.configSnapshots.get(configHash);
     if (!existing)
       await db.configSnapshots.add({
@@ -99,22 +104,22 @@ export async function createSession(args: {
       propertyLabel, flags, createdAt: now, updatedAt: now, lastEventSeq: 0,
     };
     await db.sessions.add(row);
-  });
 
-  await appendEvents(sessionId, [
-    {
-      type: "SessionInitialized",
-      routeId: config.routeId,
-      configVersion: config.configVersion,
-      configHash,
-      flags,
-      propertyLabel,
-    },
-    ...rooms.map((room) => ({
-      type: "RoomAdded" as const,
-      room: { ...room, roomInstanceId: uuidv7() },
-    })),
-  ]);
+    await appendEvents(sessionId, [
+      {
+        type: "SessionInitialized",
+        routeId: config.routeId,
+        configVersion: config.configVersion,
+        configHash,
+        flags,
+        propertyLabel,
+      },
+      ...rooms.map((room) => ({
+        type: "RoomAdded" as const,
+        room: { ...room, roomInstanceId: uuidv7() },
+      })),
+    ]);
+  });
 
   return sessionId;
 }

@@ -14,15 +14,24 @@ export function App() {
   const { ready, screen, sessionId, toast, init } = useApp();
 
   useEffect(() => { void init(); }, [init]);
-  // Hold the screen awake for the whole visit; re-acquired automatically after every
-  // native-camera round-trip (visibility change releases wake locks).
-  useWakeLock(sessionId !== null);
+  // Hold the screen awake for the whole visit; re-acquired after camera round-trips
+  // and system releases. Status surfaces below so a failure is visible, not silent.
+  const wakeLock = useWakeLock(sessionId !== null);
 
   if (!ready) return <div className="flex min-h-dvh items-center justify-center text-slate-400">Loading…</div>;
 
   return (
     <div className="min-h-dvh bg-slate-950 text-slate-100">
       <UpdateBanner />
+      {sessionId !== null && !wakeLock.held && (
+        <div className="pointer-events-none fixed right-3 top-3 z-50 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-medium text-slate-950">
+          {!wakeLock.supported
+            ? "Screen sleep not preventable — raise Auto-Lock in Settings"
+            : wakeLock.error
+              ? `Screen may sleep — wake lock denied (${wakeLock.error})`
+              : "Screen may sleep — wake lock not held"}
+        </div>
+      )}
       {screen.name === "home" && <HomeScreen />}
       {screen.name === "setup" && <SetupScreen />}
       {screen.name === "route" && <RouteScreen />}

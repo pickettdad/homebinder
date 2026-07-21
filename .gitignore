@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dev-dist/
+# generated at build time by scripts/gen-icons.mjs (predev/prebuild hooks)
+public/icons/
+*.local
+.DS_Store

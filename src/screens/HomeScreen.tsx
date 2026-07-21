@@ -2,7 +2,11 @@ import { useApp } from "../store/sessionStore";
 import { BigButton, formatBytes } from "../ui/bits";
 
 export function HomeScreen() {
-  const { sessionRows, route, routeErrors, storage, navigate, resumeSession, abandonSession } = useApp();
+  const { sessionRows, route, routeErrors, storage, navigate, resumeSession, abandonSession, showToast } = useApp();
+  const tryResume = (id: string) =>
+    void resumeSession(id).catch((err) =>
+      showToast(err instanceof Error ? err.message : "Could not open this session"),
+    );
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -38,7 +42,7 @@ export function HomeScreen() {
                 </p>
               </div>
               {(s.status === "active" || s.status === "completed") && (
-                <BigButton variant="secondary" onClick={() => void resumeSession(s.id)}>
+                <BigButton variant="secondary" onClick={() => tryResume(s.id)}>
                   {s.status === "active" ? "Resume" : "Open"}
                 </BigButton>
               )}

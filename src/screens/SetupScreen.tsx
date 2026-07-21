@@ -15,7 +15,7 @@ const DEFAULT_COUNTS: Record<string, number> = {
 };
 
 export function SetupScreen() {
-  const { route, navigate, startSession } = useApp();
+  const { route, navigate, startSession, showToast } = useApp();
   const [propertyLabel, setPropertyLabel] = useState("");
   const [flags, setFlags] = useState<Set<string>>(new Set());
   const [counts, setCounts] = useState<Record<string, number>>(DEFAULT_COUNTS);
@@ -115,6 +115,8 @@ export function SetupScreen() {
           setStarting(true);
           try {
             await startSession({ flags: [...flags], rooms, propertyLabel: propertyLabel.trim() || undefined });
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : "Could not start the session");
           } finally {
             setStarting(false);
           }

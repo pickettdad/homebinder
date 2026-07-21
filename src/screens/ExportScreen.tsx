@@ -56,18 +56,22 @@ export function ExportScreen() {
 
   const finish = async () => {
     if (!plan) return;
-    const sha = await manifestSha256(plan.manifest);
-    await dispatch([
-      {
-        type: "ExportProduced",
-        manifestSha256: sha,
-        files: plan.files.map((f) => ({ name: f.name, bytes: f.bytes })),
-      },
-    ]);
-    await setSessionStatus(session.sessionId, "exported");
-    await refreshSessions();
-    showToast("Export recorded");
-    navigate({ name: "route" });
+    try {
+      const sha = await manifestSha256(plan.manifest);
+      await dispatch([
+        {
+          type: "ExportProduced",
+          manifestSha256: sha,
+          files: plan.files.map((f) => ({ name: f.name, bytes: f.bytes })),
+        },
+      ]);
+      await setSessionStatus(session.sessionId, "exported");
+      await refreshSessions();
+      showToast("Export recorded");
+      navigate({ name: "route" });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not record the export");
+    }
   };
 
   return (

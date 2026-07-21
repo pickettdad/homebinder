@@ -106,9 +106,18 @@ export const useApp = create<AppStore>((set, get) => ({
       sessionRows,
       storage,
     });
-    // Resume-first: an active session reopens where the inspector left off.
+    // Resume-first: an active session reopens where the inspector left off. A resume
+    // failure (corrupted row, storage fault) must degrade to the home screen — never
+    // block startup.
     const active = sessionRows.find((s) => s.status === "active");
-    if (active) await get().resumeSession(active.id);
+    if (active) {
+      try {
+        await get().resumeSession(active.id);
+      } catch (err) {
+        console.error("failed to resume active session", err);
+        get().showToast("Couldn't resume the active session — its data is still on this device");
+      }
+    }
   },
 
   navigate(screen) {

@@ -142,8 +142,18 @@ export const routeConfigSchema = routeConfigObject.superRefine((cfg, ctx) => {
   for (const t of cfg.templates) {
     if (t.extends && !templateIds.has(t.extends))
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `template ${t.id} extends unknown template ${t.extends}` });
-    if (t.extends === t.id)
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `template ${t.id} extends itself` });
+    // Walk the full extends chain: any revisit is a cycle (covers self-extends too).
+    // Without this, a cycle would stack-overflow the plan compiler at runtime.
+    const visited = new Set<string>([t.id]);
+    let parentId = t.extends;
+    while (parentId) {
+      if (visited.has(parentId)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `template ${t.id} has a circular extends chain` });
+        break;
+      }
+      visited.add(parentId);
+      parentId = cfg.templates.find((p) => p.id === parentId)?.extends;
+    }
     const keys = new Set<string>();
     for (const s of t.slots) {
       addUnique(keys, s.key, `step key in template ${t.id}`);

@@ -155,6 +155,15 @@ Default: `action` (fail safe — an unlabeled item can't be auto-suggested). Thi
 crisp mechanical rule for "serious items": seriousness isn't a judgment call at
 suggestion time; it's authored into the master once, per item.
 
+**Owner decision (2026-07-22): the two classes are also two separate LISTS.**
+Documentation items (evidence) and test items (action — door reversal, GFCI trip/reset,
+tissue test, bucket test, valve operation…) never render mixed in one list: the zone
+checklist and the close audit show a **Documentation** section and a **Tests** section.
+Tests are text-documented, not picture-documented: performing one records a
+**result (pass / fail + optional note)** rather than expecting media; a *fail* prompts
+an issue-flagged pin so the finding lands spatially. Master v1.1 should mark test items
+explicitly (the `attest` column) so the split is authored, not inferred.
+
 ### 3.4 Auto-tag suggestions — where they fit without breaking Decision 2
 
 REDESIGN-v2 Decision 2 is "AI on demand only … no automatic reviews," so photo-triggered

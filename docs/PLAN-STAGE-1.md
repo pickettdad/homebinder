@@ -164,7 +164,10 @@ Omit, UUIDv7 ids, and appendEvents stamping all apply unchanged.
     items: creating a `sump-pump` pin never touches "bucket-tested"; creating a
     `garage-door` pin never touches "auto-reverse tested". The pin link may be
     *attached as evidence* when the human records the action, but the pin's existence
-    proves nothing was performed.
+    proves nothing was performed. Action items are **tests** (owner decision in review
+    §3.3): resolving one records a `result: "pass" | "fail"` + optional note in the
+    evidence field — text-documented, no media expected — and a *fail* prompts
+    creating an issue-flagged pin so the finding lands on the canvas.
 
 **Chat:** `ChatMessageSent {threadId, target: pin|zone, text, mediaIds[]}` (actor
 human) · `ChatReplyRecorded {threadId, model, text, usage}` (actor ai, actorId = model
@@ -217,9 +220,11 @@ inbox · audit{zoneId} · export`.
   picker with `typicalLabels` + editable label + `askAtCreation` attributes) + misc
   bucket + inbox badge.
 - **Zone**: canvas strip (wide photos; tap one → Canvas), pin list (number, type, flag),
-  checklist panel (grouped, per review verdict 3/4: core loud, standard quiet, satisfied
-  collapsed), Close → **Audit sheet**: unresolved core items grouped and loud, N/A
-  affordance per item (reason + optional note), close note field, **"Close anyway"
+  checklist panel split into two top-level sections — **Documentation** (attest:
+  evidence) and **Tests** (attest: action) — never mixed (owner decision, review §3.3),
+  each grouped per review verdict 3/4: core loud, standard quiet, satisfied collapsed.
+  Close → **Audit sheet**: same Documentation/Tests split, unresolved core items loud,
+  N/A affordance per item (reason + optional note), close note field, **"Close anyway"
   always enabled** (records `ZoneClosed` with the audit snapshot).
 - **Canvas**: pinch-zoom photo (CSS transform container); tap → new pin (or place anchor
   for an existing pin); anchor dots show pin numbers; layer chips filter (`issues`,

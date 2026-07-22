@@ -131,17 +131,19 @@ window/door counts into the zone record; manual rough-plan fallback.
 
 - Owner's iPad: iPad Pro 11" 3rd gen (2021, M1) — LiDAR ✓, iPadOS 26 ✓. RoomPlan
   requirements met.
-- Owner's Macs are old (MacBook Air 13", somewhere 2010–2017; exact year TBC).
-  **Old Xcode cannot deploy to an iPadOS-26 device**: iPadOS 17 replaced Xcode's device
-  stack (CoreDevice), so Xcode 14.x (the max on officially-supported old macOS) can
-  compile RoomPlan code but cannot install to the iPad, and Apple requires current-SDK
-  builds for TestFlight anyway. Downloading old Xcode (xcodereleases.com) does NOT solve
-  this.
-- Viable paths: (a) **cloud CI + TestFlight, no local Mac in the loop** — recommended
-  baseline; (b) OpenCore Legacy Patcher → modern macOS + Xcode on the Air IF it's
-  2013-or-later (2015–2017 Airs do well; 2010–2012 rough) — enables local debugging of
-  the native module; (c) a used **M1 Mac mini** (~$300–400) erases the problem —
-  economics-session line item if RoomPlan is load-bearing (it is).
+- Owner's Mac confirmed (2026-07-22, from About This Mac): **MacBook Air 13" Early 2015
+  (A1466), 1.6 GHz dual-core i5, 4 GB RAM, macOS Monterey 12.7.6** (its max stock
+  macOS). **Old Xcode cannot deploy to an iPadOS-26 device**: iPadOS 17 replaced
+  Xcode's device stack (CoreDevice), so Xcode 14.2 (Monterey's max) can compile
+  RoomPlan code but cannot install to the iPad — and since 2026-04-28 Apple rejects
+  every App Store Connect upload (TestFlight included) not built with Xcode 26 / the
+  iPadOS 26 SDK. Downloading old Xcode (xcodereleases.com) does NOT solve this.
+- Path decision (settled with the spec confirmation; detail in PLAN-STAGE-0.md §1):
+  (a) **cloud CI + TestFlight, no local Mac in the loop** — the path, not just the
+  baseline; (b) OpenCore Legacy Patcher is **ruled out** for this machine — a 2015 Air
+  takes Sequoia fine, but modern Xcode's practical floor is 8 GB RAM and this Air has
+  4 GB; (c) a used **M1 Mac mini** (~$300–400) stays the escape hatch only if local
+  native debugging ever becomes load-bearing — not needed to start.
 - RoomPlan honesty: weakest in cluttered unfinished utility rooms and useless outdoors —
   which is why photo anchors are first-class forever and the manual plan fallback exists.
 

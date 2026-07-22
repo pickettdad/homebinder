@@ -1,4 +1,14 @@
-# Project state — handoff (updated 2026-07-21, v1a)
+# Project state — handoff
+
+> **⚠ 2026-07-22: v2 REDESIGN ADOPTED — read docs/REDESIGN-v2.md FIRST.** Field test 2
+> (owner's house) falsified the slot-driven walk and the batch AI review. v2 replaces
+> them with free-walk + pin/anchor/layer spatial capture + advisory checklist audits +
+> on-demand recorded AI chat, with RoomPlan shipping early via a native shell. The
+> foundations documented below (event log, storage, export, provenance, config
+> discipline, deploy pipeline) all carry into v2 unchanged; the build-sequencing and UX
+> descriptions below are historical.
+
+# Historical: handoff as of v1a (2026-07-21)
 
 > **v1a update:** the "Second look" AI zone reviewer shipped: Netlify Function proxy
 > (`netlify/functions/review.mts`, Haiku 4.5, doctrine word-lint, daily cap), review

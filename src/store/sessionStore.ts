@@ -18,14 +18,16 @@ import {
   appendEvents, createSession, deleteMedia, listSessions, loadEvents,
   loadSessionConfig, requestPersistence, setSessionStatus,
 } from "../storage/sessionRepo";
-import type { MediaRow, SessionRow } from "../storage/db";
+import { db, type MediaRow, type ReviewJobRow, type SessionRow } from "../storage/db";
+import { drainReviews, enqueueZoneReview, pendingJobs, rearmFailedJobs } from "../review/queue";
+import type { ZoneSummaryResponse } from "../review/protocol";
 
 export type Screen =
   | { name: "home" }
   | { name: "setup" }
   | { name: "route" }
   | { name: "zone"; zoneId: string }
-  | { name: "capture"; slotInstanceId: string }
+  | { name: "capture"; slotInstanceId: string; findingId?: string }
   | { name: "gate"; zoneId: string }
   | { name: "export" };
 
@@ -68,6 +70,12 @@ interface AppStore {
   reopenZone(zoneId: string): Promise<void>;
   completeSession(): Promise<void>;
   showToast(message: string): void;
+
+  /** "Second look" — pending review-job count for the active session (UI pill). */
+  reviewPending: number;
+  refreshReviewStatus(): Promise<void>;
+  drainNow(): Promise<void>;
+  resolveFinding(findingId: string, zoneId: string, resolution: "cleared" | "deferred" | "reshot", note?: string): Promise<void>;
 }
 
 /** Best-effort multi-tab guard: hold a Web Lock per session for the tab's lifetime. */
@@ -226,8 +234,8 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async closeZone(zoneId) {
-    const { session, config } = get();
-    if (!session || !config) throw new Error("no active session");
+    const { session, config, sessionId } = get();
+    if (!session || !config || !sessionId) throw new Error("no active session");
     const zone = session.zones.find((z) => z.zoneId === zoneId);
     if (!zone) throw new Error(`unknown zone ${zoneId}`);
     const outstanding = gateOutstanding(zone);
@@ -236,6 +244,19 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatch([
       { type: "ZoneClosed", zoneId, summary: { captured: c.captured, excepted: c.excepted, deferred: c.deferred } },
     ]);
+    // Second look: enqueue is local-only (IndexedDB) and the drain is fire-and-forget —
+    // the gate is already closed; nothing here can block or reopen it.
+    try {
+      const queued = await enqueueZoneReview(sessionId, zone, config);
+      if (queued > 0) {
+        const events = await loadEvents(sessionId);
+        set({ events, session: fold(config, events) });
+        await get().refreshReviewStatus();
+        void get().drainNow();
+      }
+    } catch (err) {
+      console.error("second look enqueue failed", err);
+    }
   },
 
   async reopenZone(zoneId) {
@@ -253,5 +274,60 @@ export const useApp = create<AppStore>((set, get) => ({
   showToast(message) {
     set({ toast: message });
     setTimeout(() => set((s) => (s.toast === message ? { toast: null } : s)), 4000);
+  },
+
+  reviewPending: 0,
+
+  async refreshReviewStatus() {
+    const { sessionId } = get();
+    if (!sessionId) { set({ reviewPending: 0 }); return; }
+    const jobs = await pendingJobs(sessionId);
+    set({ reviewPending: jobs.length });
+  },
+
+  async drainNow() {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    await rearmFailedJobs(sessionId);
+    await drainReviews(sessionId, {
+      getConfig: () => loadSessionConfig(sessionId),
+      getEvents: () => loadEvents(sessionId),
+      applyResponse: async (job: ReviewJobRow, response: ZoneSummaryResponse) => {
+        // Idempotent apply: the job-status guard runs inside the same transaction as
+        // the event append, so a duplicate delivery can never double-write findings.
+        await db.transaction("rw", [db.sessions, db.events, db.media, db.outbox, db.reviewJobs], async () => {
+          const current = await db.reviewJobs.get(job.jobId);
+          if (!current || current.status === "done") return;
+          await appendEvents(job.sessionId, [{
+            type: "ReviewRecorded",
+            reviewJobId: job.jobId,
+            zoneId: job.zoneId,
+            model: response.model,
+            findings: response.findings,
+            usage: response.usage,
+          }], [], { actor: "ai", actorId: response.model, device: "server", appVersion: "0.5.0" });
+          await db.reviewJobs.update(job.jobId, { status: "done" });
+          await db.outbox.where("sessionId").equals(job.sessionId)
+            .filter((r) => r.refType === "review" && r.refId === job.jobId)
+            .modify({ status: "synced" });
+        });
+      },
+      recordFailure: async (job: ReviewJobRow, code: string) => {
+        await appendEvents(job.sessionId, [
+          { type: "ReviewFailed", reviewJobId: job.jobId, zoneId: job.zoneId, code },
+        ], [], { actor: "system", actorId: "app", device: "client", appVersion: "0.5.0" });
+      },
+    });
+    // Refold from storage: review events were appended outside the dispatch path.
+    const { config } = get();
+    if (config && get().sessionId === sessionId) {
+      const events = await loadEvents(sessionId);
+      set({ events, session: fold(config, events) });
+    }
+    await get().refreshReviewStatus();
+  },
+
+  async resolveFinding(findingId, zoneId, resolution, note) {
+    await get().dispatch([{ type: "ReviewFindingResolved", findingId, zoneId, resolution, note }]);
   },
 }));

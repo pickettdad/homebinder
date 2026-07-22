@@ -35,12 +35,14 @@ export async function planExport(args: {
   state: SessionState;
   config: RouteConfig;
   events: SessionEvent[];
+  reviewPendingCount?: number;
 }): Promise<ExportPlan> {
-  const { state, config, events } = args;
+  const { state, config, events, reviewPendingCount } = args;
   const manifest = buildManifest({
     state, config, events,
     exportedAt: new Date().toISOString(),
     appVersion: APP_VERSION,
+    reviewPendingCount,
   });
 
   const shortId = state.sessionId.slice(0, 8);

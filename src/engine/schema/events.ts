@@ -82,7 +82,42 @@ export type SessionEvent =
       type: "ExportProduced";
       manifestSha256: string;
       files: { name: string; bytes: number; sha256?: string }[];
+    })
+  // ---- v1 "Second look" review events. AI results land as ordinary appended events
+  // ---- (actor 'ai', actorId = model id); human dispositions are later events on top.
+  | (EventBase & {
+      type: "ReviewRequested";
+      reviewJobId: string;
+      zoneId: string;
+      kind: "zone-summary";
+      slotInstanceIds: string[];
+      mediaIds: string[];
+    })
+  | (EventBase & {
+      type: "ReviewRecorded";
+      reviewJobId: string;
+      zoneId: string;
+      model: string;
+      findings: ReviewFindingPayload[];
+      usage?: { inputTokens: number; outputTokens: number };
+    })
+  | (EventBase & { type: "ReviewFailed"; reviewJobId: string; zoneId: string; code: string })
+  | (EventBase & {
+      type: "ReviewFindingResolved";
+      findingId: string;
+      zoneId: string;
+      resolution: "cleared" | "deferred" | "reshot";
+      note?: string;
     });
+
+export interface ReviewFindingPayload {
+  findingId: string;
+  slotInstanceId: string;
+  mediaIds: string[];
+  severity: "info" | "reshoot" | "anomaly";
+  message: string;
+  confidence: number;
+}
 
 export type SessionEventType = SessionEvent["type"];
 

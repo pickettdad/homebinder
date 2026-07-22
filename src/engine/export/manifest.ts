@@ -11,7 +11,7 @@ import type { SessionEvent, Source } from "../schema/events";
 import type { SessionState } from "../fold";
 import { slotProgress, visitTwoGaps, zoneCounts, sessionTotals } from "../selectors";
 
-export const MANIFEST_SCHEMA_VERSION = 1;
+export const MANIFEST_SCHEMA_VERSION = 2;
 
 export interface MediaFileEntry {
   mediaId: string;
@@ -59,6 +59,26 @@ export interface ExportManifest {
   media: MediaFileEntry[];
   orphanEvents: SessionEvent[];
   events: SessionEvent[];
+  /**
+   * "Second look" AI review — a SEPARATE section from the completeness record, so no
+   * downstream reader can mistake suggestions for the deterministic attestation.
+   */
+  aiReview: {
+    findings: {
+      findingId: string;
+      zoneId: string;
+      slotInstanceId: string;
+      severity: string;
+      message: string;
+      confidence: number;
+      model: string;
+      at: string;
+      status: string;
+      note?: string;
+    }[];
+    pendingJobsAtExport: number;
+    usage: { inputTokens: number; outputTokens: number };
+  };
 }
 
 function extensionFor(mime: string): string {
@@ -83,8 +103,10 @@ export function buildManifest(args: {
   events: SessionEvent[];
   exportedAt: string;
   appVersion: string;
+  /** Review jobs still queued/unfinished at export time (export never waits on them). */
+  reviewPendingCount?: number;
 }): ExportManifest {
-  const { state, config, events, exportedAt, appVersion } = args;
+  const { state, config, events, exportedAt, appVersion, reviewPendingCount = 0 } = args;
 
   const media: MediaFileEntry[] = [];
   for (const zone of state.zones) {
@@ -146,5 +168,23 @@ export function buildManifest(args: {
     media,
     orphanEvents: state.orphanEvents,
     events,
+    aiReview: {
+      findings: state.zones.flatMap((zone) =>
+        zone.findings.map((f) => ({
+          findingId: f.findingId,
+          zoneId: zone.zoneId,
+          slotInstanceId: f.slotInstanceId,
+          severity: f.severity,
+          message: f.message,
+          confidence: f.confidence,
+          model: f.model,
+          at: f.at,
+          status: f.status,
+          note: f.note,
+        })),
+      ),
+      pendingJobsAtExport: reviewPendingCount,
+      usage: state.reviewUsage,
+    },
   };
 }

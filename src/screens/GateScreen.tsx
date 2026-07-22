@@ -11,6 +11,7 @@ import { zoneCounts, sessionTotals } from "../engine/selectors";
 import type { SlotState } from "../engine/fold";
 import { BigButton } from "../ui/bits";
 import { ExceptionSheet } from "../ui/ExceptionSheet";
+import { SecondLookPanel } from "../ui/SecondLook";
 
 export function GateScreen({ zoneId }: { zoneId: string }) {
   const { session, config, navigate, closeZone, reopenZone, showToast } = useApp();
@@ -38,10 +39,11 @@ export function GateScreen({ zoneId }: { zoneId: string }) {
           <p className="rounded-xl border border-teal-600/60 bg-teal-950/30 p-4 text-teal-200">
             Zone closed with {c.captured} captured · {c.excepted} excepted · {c.deferred} deferred.
           </p>
-          <BigButton variant="secondary" onClick={() => { void reopenZone(zoneId).then(() => showToast("Zone reopened")); }}>
+          <SecondLookPanel zone={zone} />
+          <BigButton onClick={() => navigate({ name: "route" })}>Continue route</BigButton>
+          <BigButton variant="ghost" onClick={() => { void reopenZone(zoneId).then(() => showToast("Zone reopened")); }}>
             Reopen zone
           </BigButton>
-          <BigButton onClick={() => navigate({ name: "route" })}>Continue route</BigButton>
         </div>
       ) : outstanding.length > 0 ? (
         <div className="flex flex-col gap-3">
@@ -87,8 +89,14 @@ export function GateScreen({ zoneId }: { zoneId: string }) {
           </div>
           <BigButton
             onClick={() => {
+              const reviewed = config.zones.find((z) => z.id === zoneId)?.gate.review === "ai";
               void closeZone(zoneId)
-                .then(() => { showToast(`${zone.label} closed`); navigate({ name: "route" }); })
+                .then(() => {
+                  showToast(`${zone.label} closed`);
+                  // Reviewed zones stay on the closed gate — the natural 30-60s packing-up
+                  // pause is where Second-look findings land. Unreviewed zones move on.
+                  if (!reviewed) navigate({ name: "route" });
+                })
                 .catch((err) => showToast(err instanceof Error ? err.message : "Could not close zone"));
             }}
           >

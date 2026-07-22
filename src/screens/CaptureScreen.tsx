@@ -22,8 +22,8 @@ function Thumb({ mediaId, onTap }: { mediaId: string; onTap?: () => void }) {
   );
 }
 
-export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
-  const { session, config, navigate, capturePhoto, discardPhoto, attachVoice, showToast } = useApp();
+export function CaptureScreen({ slotInstanceId, findingId }: { slotInstanceId: string; findingId?: string }) {
+  const { session, config, navigate, capturePhoto, discardPhoto, attachVoice, showToast, resolveFinding } = useApp();
   const recorder = useVoiceRecorder();
   const [lastMediaId, setLastMediaId] = useState<string | null>(null);
   const [excepting, setExcepting] = useState(false);
@@ -53,11 +53,18 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
     else navigate({ name: "gate", zoneId: zone.zoneId });
   };
 
+  const activeFinding = findingId
+    ? zone.findings.find((f) => f.findingId === findingId && f.status === "open")
+    : undefined;
+
   const onPhoto = async (file: File) => {
     setSaving(true);
     try {
       const id = await capturePhoto(slot.instanceId, file);
       setLastMediaId(id);
+      // A reshoot capture resolves its finding — event-linked, append-only.
+      if (activeFinding && activeFinding.severity === "reshoot")
+        void resolveFinding(activeFinding.findingId, zone.zoneId, "reshot");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Photo failed to save");
     } finally {
@@ -97,6 +104,12 @@ export function CaptureScreen({ slotInstanceId }: { slotInstanceId: string }) {
         </div>
         <BigButton variant="ghost" onClick={() => navigate({ name: "zone", zoneId: zone.zoneId })}>List</BigButton>
       </header>
+
+      {activeFinding && (
+        <p className="rounded-xl border border-amber-500/50 bg-amber-950/30 p-3 text-amber-200">
+          Second look: {activeFinding.message}
+        </p>
+      )}
 
       {slot.guidance && <p className="rounded-xl bg-slate-800/60 p-3 text-slate-300">{slot.guidance}</p>}
 

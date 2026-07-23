@@ -1,15 +1,22 @@
 import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet } from "../../ui/bits";
-import { PinRow } from "./shared";
+import { deriveSessionItems } from "../../engine/v2/checklist";
+import { ChecklistPanel } from "./ChecklistPanel";
+import { PinRow, ZONE_LEVELS, defaultLevelFor } from "./shared";
 
-/** The free walk: zones in creation order, created as you go. Replaces RouteScreen. */
+/** The free walk: zones created as you go, grouped by storey. Replaces RouteScreen. */
 export function WalkScreen() {
-  const { v2Session, v2Config, checklists, navigate, createZone, leaveSession, showToast } = useApp();
+  const {
+    v2Session, v2Config, checklists, navigate, createZone, leaveSession,
+    completeSessionV2, showToast,
+  } = useApp();
   const config = v2Config ?? checklists;
   const [sheet, setSheet] = useState(false);
+  const [finishSheet, setFinishSheet] = useState(false);
   const [typeId, setTypeId] = useState<string | null>(null);
   const [label, setLabel] = useState("");
+  const [level, setLevel] = useState<string>("main");
   const [attrs, setAttrs] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
 
@@ -19,10 +26,19 @@ export function WalkScreen() {
   const miscPins = v2Session.pins.filter((p) => !p.zoneId && !p.retired);
   const askAttrs = config.zoneAttributes.filter((a) => a.askAtCreation);
   const selectedType = config.zoneTypes.find((t) => t.id === typeId);
+  const sessionItems = deriveSessionItems(config, v2Session);
+
+  const levelGroups = [...ZONE_LEVELS, "unassigned"]
+    .map((lvl) => ({
+      level: lvl,
+      zones: v2Session.zones.filter((z) => (z.level ?? "unassigned") === lvl),
+    }))
+    .filter((g) => g.zones.length > 0);
 
   const openSheet = () => {
     setTypeId(null);
     setLabel("");
+    setLevel("main");
     setAttrs(new Set());
     setSheet(true);
   };
@@ -32,7 +48,7 @@ export function WalkScreen() {
     setCreating(true);
     const attributes: Record<string, boolean> = {};
     for (const a of askAttrs) attributes[a.id] = attrs.has(a.id);
-    createZone(typeId, label.trim() || selectedType?.typicalLabels[0] || typeId, attributes)
+    createZone(typeId, label.trim() || selectedType?.typicalLabels[0] || typeId, attributes, level)
       .then((zoneId) => {
         setSheet(false);
         navigate({ name: "zone2", zoneId });
@@ -63,30 +79,35 @@ export function WalkScreen() {
         </BigButton>
       </div>
 
-      <section className="flex flex-col gap-3">
-        {v2Session.zones.map((z) => {
-          const pins = v2Session.pins.filter((p) => p.zoneId === z.zoneId && !p.retired);
-          return (
-            <button
-              key={z.zoneId}
-              type="button"
-              onClick={() => navigate({ name: "zone2", zoneId: z.zoneId })}
-              className="flex items-center gap-3 rounded-xl bg-slate-800 p-4 text-left active:bg-slate-700"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-lg font-medium text-slate-100">{z.label}</p>
-                <p className="text-sm text-slate-400">
-                  {z.zoneType} · {pins.length} pin{pins.length === 1 ? "" : "s"} · {z.canvases.filter((c) => !c.retired).length} canvas
-                </p>
-              </div>
-              {z.closedAt ? (
-                <span className="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">closed</span>
-              ) : (
-                <span className="rounded-full bg-teal-900/60 px-3 py-1 text-xs font-semibold text-teal-300">open</span>
-              )}
-            </button>
-          );
-        })}
+      <section className="flex flex-col gap-4">
+        {levelGroups.map((g) => (
+          <div key={g.level} className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{g.level}</h2>
+            {g.zones.map((z) => {
+              const pins = v2Session.pins.filter((p) => p.zoneId === z.zoneId && !p.retired);
+              return (
+                <button
+                  key={z.zoneId}
+                  type="button"
+                  onClick={() => navigate({ name: "zone2", zoneId: z.zoneId })}
+                  className="flex items-center gap-3 rounded-xl bg-slate-800 p-4 text-left active:bg-slate-700"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-lg font-medium text-slate-100">{z.label}</p>
+                    <p className="text-sm text-slate-400">
+                      {z.zoneType} · {pins.length} pin{pins.length === 1 ? "" : "s"} · {z.canvases.filter((c) => !c.retired).length} canvas
+                    </p>
+                  </div>
+                  {z.closedAt ? (
+                    <span className="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">closed</span>
+                  ) : (
+                    <span className="rounded-full bg-teal-900/60 px-3 py-1 text-xs font-semibold text-teal-300">open</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
         {v2Session.zones.length === 0 && (
           <p className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-slate-400">
             Start where you're standing — create the first zone.
@@ -103,6 +124,17 @@ export function WalkScreen() {
         </section>
       )}
 
+      {v2Session.zones.length > 0 && !v2Session.completedAt && (
+        <BigButton variant="secondary" onClick={() => setFinishSheet(true)}>
+          Finish visit — house-level checks
+        </BigButton>
+      )}
+      {v2Session.completedAt && (
+        <p className="rounded-xl bg-emerald-950/50 p-4 text-center text-emerald-300">
+          Visit completed {new Date(v2Session.completedAt).toLocaleString()}
+        </p>
+      )}
+
       <Sheet open={sheet} onClose={() => setSheet(false)} title="New zone">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-2">
@@ -113,6 +145,7 @@ export function WalkScreen() {
                 onClick={() => {
                   setTypeId(t.id);
                   if (!label.trim()) setLabel(t.typicalLabels[0] ?? t.id);
+                  setLevel(t.id === "basement" || t.id === "crawlspace" ? "basement" : t.id === "attic" ? "attic" : defaultLevelFor(t.inherits));
                 }}
                 className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${
                   typeId === t.id ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
@@ -142,6 +175,22 @@ export function WalkScreen() {
             placeholder="Label (what the owner calls it)"
             className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
           />
+          {typeId && (
+            <div className="flex flex-wrap gap-2">
+              {ZONE_LEVELS.map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  onClick={() => setLevel(lvl)}
+                  className={`rounded-full px-3 py-1.5 text-sm ring-1 ${
+                    level === lvl ? "bg-teal-700 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+                  }`}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+          )}
           {typeId && askAttrs.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {askAttrs.map((a) => (
@@ -166,6 +215,25 @@ export function WalkScreen() {
             </div>
           )}
           <BigButton disabled={!typeId || creating} onClick={create}>Create zone</BigButton>
+        </div>
+      </Sheet>
+
+      <Sheet open={finishSheet} onClose={() => setFinishSheet(false)} title="House-level checks">
+        <div className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto">
+          <ChecklistPanel items={sessionItems} />
+          <BigButton
+            onClick={() => {
+              void completeSessionV2().then(() => {
+                setFinishSheet(false);
+                showToast("Visit completed — data stays on this device");
+              });
+            }}
+          >
+            Complete visit
+          </BigButton>
+          <p className="text-xs text-slate-500">
+            Completing never blocks on unresolved items — they're recorded, same as a zone close.
+          </p>
         </div>
       </Sheet>
     </div>

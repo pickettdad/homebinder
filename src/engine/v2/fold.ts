@@ -29,6 +29,8 @@ export interface MediaRef {
   bytes: number;
   at: string;
   durationMs?: number;
+  /** Context caption ("panel, before dead-front photo") — set via MediaCaptioned. */
+  caption?: string;
   source: Source;
 }
 
@@ -50,6 +52,8 @@ export interface ZoneStateV2 {
   zoneId: string;
   zoneType: string;
   label: string;
+  /** Storey grouping for the walk list; absent on pre-level zones. */
+  level?: string;
   attributes: Record<string, boolean>;
   closedAt?: string;
   closeNote?: string;
@@ -172,13 +176,23 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
   const pin = (id: string) => state.pins.find((p) => p.pinId === id);
   const orphan = (e: V2SessionEvent) => state.orphanEvents.push(e);
 
-  /** Remove a media ref from every holder (pin/zone/inbox); true if found anywhere. */
+  const allMediaLists = () => [
+    state.inbox,
+    ...state.pins.flatMap((p) => [p.photos, p.voiceNotes]),
+    ...state.zones.flatMap((z) => [z.photos, z.voiceNotes]),
+  ];
+
+  const findMedia = (mediaId: string): MediaRef | undefined => {
+    for (const list of allMediaLists()) {
+      const ref = list.find((m) => m.mediaId === mediaId);
+      if (ref) return ref;
+    }
+    return undefined;
+  };
+
+  /** Remove a media ref from every holder (pin/zone/inbox); undefined if unknown. */
   const detachMedia = (mediaId: string): MediaRef | undefined => {
-    for (const list of [
-      state.inbox,
-      ...state.pins.flatMap((p) => [p.photos, p.voiceNotes]),
-      ...state.zones.flatMap((z) => [z.photos, z.voiceNotes]),
-    ]) {
+    for (const list of allMediaLists()) {
       const idx = list.findIndex((m) => m.mediaId === mediaId);
       if (idx !== -1) return list.splice(idx, 1)[0];
     }
@@ -245,6 +259,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
           zoneId: e.zoneId,
           zoneType: e.zoneType,
           label: e.label,
+          level: e.level,
           attributes: { ...e.attributes },
           canvases: [],
           photos: [],
@@ -253,6 +268,12 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
         });
         state.lastActiveZoneId = e.zoneId;
         break;
+      case "ZoneLevelSet": {
+        const z = zone(e.zoneId);
+        if (!z) orphan(e);
+        else z.level = e.level;
+        break;
+      }
       case "ZoneRenamed": {
         const z = zone(e.zoneId);
         if (!z) orphan(e);
@@ -401,6 +422,12 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
       case "MediaDiscarded":
         if (!detachMedia(e.mediaId)) orphan(e);
         break;
+      case "MediaCaptioned": {
+        const ref = findMedia(e.mediaId);
+        if (!ref) orphan(e);
+        else ref.caption = e.text;
+        break;
+      }
       case "MediaReassigned": {
         const ref = detachMedia(e.mediaId);
         if (!ref) {

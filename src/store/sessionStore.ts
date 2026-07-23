@@ -84,9 +84,11 @@ interface AppStore {
   // ---- v2 actions (the pin model). All dispatch through the same atomic append path.
   startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string }): Promise<void>;
   dispatchV2(payloads: V2EventPayload[], media?: MediaRow[]): Promise<V2SessionEvent[]>;
-  createZone(zoneType: string, label: string, attributes: Record<string, boolean>): Promise<string>;
+  createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string): Promise<string>;
   renameZone(zoneId: string, label: string): Promise<void>;
   createPin(zoneId?: string): Promise<string>;
+  /** Create + type + anchor a pin in ONE transaction — the canvas tap and stamp-mode path. */
+  createPinAt(zoneId: string, canvasId: string, x: number, y: number, pinType?: PinTypeRef): Promise<string>;
   setPinType(pinId: string, pinType: PinTypeRef): Promise<void>;
   setPinFlag(pinId: string, flag: PinFlag | null): Promise<void>;
   assignPin(pinId: string, zoneId?: string): Promise<void>;
@@ -98,6 +100,7 @@ interface AppStore {
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
   discardMediaV2(mediaId: string): Promise<void>;
   reassignMedia(mediaId: string, target: CaptureTarget): Promise<void>;
+  captionMedia(mediaId: string, text: string): Promise<void>;
   addNote(target: CaptureTarget, text: string): Promise<string>;
   editNote(noteId: string, text: string): Promise<void>;
   resolveItem(scope: ItemScope, itemId: string, resolution: ItemResolution): Promise<void>;
@@ -105,6 +108,7 @@ interface AppStore {
   /** Advisory close — records the audit snapshot and a note; NEVER blocks. */
   closeZoneV2(zoneId: string, note?: string): Promise<void>;
   reopenZoneV2(zoneId: string): Promise<void>;
+  completeSessionV2(): Promise<void>;
 
   dispatch(payloads: EventPayload[], media?: MediaRow[]): Promise<void>;
   capturePhoto(slotInstanceId: string, file: File | Blob, mime?: string): Promise<string>;
@@ -264,9 +268,9 @@ export const useApp = create<AppStore>((set, get) => ({
     return appended;
   },
 
-  async createZone(zoneType, label, attributes) {
+  async createZone(zoneType, label, attributes, level) {
     const zoneId = uuidv7();
-    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes }]);
+    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes, level }]);
     return zoneId;
   },
 
@@ -279,6 +283,16 @@ export const useApp = create<AppStore>((set, get) => ({
     // pinNumber 0 is a placeholder — appendEvents stamps the real permanent number
     // inside the transaction; the refold picks it up from the stored event.
     await get().dispatchV2([{ type: "PinCreated", pinId, pinNumber: 0, zoneId }]);
+    return pinId;
+  },
+
+  async createPinAt(zoneId, canvasId, x, y, pinType) {
+    const pinId = uuidv7();
+    await get().dispatchV2([
+      { type: "PinCreated", pinId, pinNumber: 0, zoneId },
+      ...(pinType ? [{ type: "PinTyped", pinId, pinType } as const] : []),
+      { type: "AnchorPlaced", anchorId: uuidv7(), pinId, canvasId, x, y },
+    ]);
     return pinId;
   },
 
@@ -371,6 +385,10 @@ export const useApp = create<AppStore>((set, get) => ({
     });
   },
 
+  async captionMedia(mediaId, text) {
+    await get().dispatchV2([{ type: "MediaCaptioned", mediaId, text }]);
+  },
+
   async addNote(target, text) {
     const noteId = uuidv7();
     await get().dispatchV2([{ type: "NoteAdded", noteId, target, text }]);
@@ -399,6 +417,14 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async reopenZoneV2(zoneId) {
     await get().dispatchV2([{ type: "ZoneReopened", zoneId }]);
+  },
+
+  async completeSessionV2() {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    await get().dispatchV2([{ type: "SessionCompleted" }]);
+    await setSessionStatus(sessionId, "completed");
+    await get().refreshSessions();
   },
 
   async dispatch(payloads, media = []) {

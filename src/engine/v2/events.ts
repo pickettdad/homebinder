@@ -95,9 +95,12 @@ export type V2SessionEvent =
       zoneType: string;
       label: string;
       attributes: Record<string, boolean>;
+      /** Storey grouping for the walk list: "basement" | "main" | "second" | … | "exterior". */
+      level?: string;
     })
   | (EventBase & { type: "ZoneRenamed"; zoneId: string; label: string })
   | (EventBase & { type: "ZoneRetyped"; zoneId: string; zoneType: string })
+  | (EventBase & { type: "ZoneLevelSet"; zoneId: string; level: string })
   | (EventBase & { type: "ZoneAttributesSet"; zoneId: string; attributes: Record<string, boolean> })
   | (EventBase & { type: "ZoneClosed"; zoneId: string; note?: string; audit: ZoneAuditSnapshot })
   | (EventBase & { type: "ZoneReopened"; zoneId: string; note?: string })
@@ -118,6 +121,8 @@ export type V2SessionEvent =
   | (EventBase & { type: "VoiceNoteAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
   | (EventBase & { type: "MediaDiscarded"; mediaId: string })
   | (EventBase & { type: "MediaReassigned"; mediaId: string; target: CaptureTarget })
+  /** Short context caption on a capture ("panel, before dead-front photo") — travels with it. */
+  | (EventBase & { type: "MediaCaptioned"; mediaId: string; text: string })
   | (EventBase & { type: "NoteAdded"; noteId: string; target: CaptureTarget; text: string })
   | (EventBase & { type: "NoteEdited"; noteId: string; text: string })
   | (EventBase & { type: "NoteReassigned"; noteId: string; target: CaptureTarget })

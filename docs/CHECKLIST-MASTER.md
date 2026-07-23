@@ -1,7 +1,14 @@
-# HouseSteady Field Assistant — Checklist Master (v1.2)
+# HouseSteady Field Assistant — Checklist Master (v1.2.1)
 
-**Version:** v1.2 · **Date:** 2026-07-22 · **Supersedes:** v1.1 (2026-07-22)
+**Version:** v1.2.1 · **Date:** 2026-07-23 · **Supersedes:** v1.2 (2026-07-22)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
+
+**Changelog v1.2 → v1.2.1** (owner-dictated edits, transcribed verbatim):
+- `attest` flipped action → evidence on `sit.shoreline`, `fc.comparison`, `wh.anode`, `hp.snow` — the Documentation/Tests split is user-facing and none of these is a test; `rgh.comparison` is the precedent. Principle recorded in §2 for future rows.
+- `bsm.finished-behind` moved from the `basement` list into `rough-base` with trigger `zone.finished`, reworded ("Concealed areas behind finished surfaces recorded as not inspected") — the trigger now carries the "if finished" condition, and the item fires in any finished rough zone (basement, garage, attic, …). Id retained; prefix goes historical, same as `liv.egress`.
+- `tr.species` restored to the `tree` component (note · standard · evidence).
+- §8: apartment/condo parked marker restored.
+- Table B: `has_plumbing` and `exterior_wall` annotated **reserved** — declared, not yet consumed, deliberately. (A freeze-protection item triggered on `zone.has_plumbing` in unheated zones is a candidate for the post-field-test content pass.)
 
 **Changelog v1.1 → v1.2** (adjudicates the v1.2 change-request list, CHECKLIST-MASTER-REVIEW §6):
 - **Accepted — egress gap:** `liv.egress` moved from the `living-space` list into `interior-base` (its `zone.sleeping` trigger comes with it), so *any* interior zone marked as sleeping — including a basement rec room — carries the core egress item. Id retained per id-stability rule; the `liv.` prefix is now historical, which is fine (ids are opaque).
@@ -49,6 +56,10 @@ exterior-base ──┬── elevation
 **Attest (always wins over satisfy kind):**
 - `evidence` — the item is satisfied by something existing (nameplate photo, typed pin, entered value). Matching evidence surfaces the item as *proposed* — one confirming human tap records it. Retiring the evidence reopens it.
 - `action` — a **test**: satisfiable only by a deliberate human tap recording `pass | fail` + optional note. No software path may ever mark it — not pin creation, not tagging, not AI. A *fail* prompts an issue-flagged pin so the finding lands on the canvas.
+
+**Attest for `note` items (v1.2.1 principle):** a `note` item is `action` only when it
+attests to what the inspector *did* or how thoroughly they looked (`att.access-honesty`,
+`rgh.wiring-legacy`); notes recording a property of the thing observed are `evidence`.
 
 **Rendering rule (owner decision):** Documentation (`evidence`) and Tests (`action`) are separate sections in the zone panel and the close audit — never mixed. Tests are text-documented, not media-documented.
 
@@ -111,16 +122,17 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 
 ### `rough-base`
 
-| id | text | satisfy | tier | attest | scope |
-|---|---|---|---|---|---|
-| `rgh.structure` | Visible framing, beams, posts, sill/rim inspected; movement noted | check | core | action | baseline |
-| `rgh.foundation` | Foundation walls circuited; every crack pinned, measured, photographed with scale | pin `foundation-crack` | core | action | baseline |
-| `rgh.comparison` | Comparison-photo positions established and pinned | pin `comparison-position` | core | evidence | baseline |
-| `rgh.moisture` | Efflorescence, staining, damp lines metered | measure | core | action | baseline, monthly |
-| `rgh.insulation` | Insulation type and depth recorded where visible | measure (in) | standard | action | baseline |
-| `rgh.pests` | Droppings, frass, nesting, entry points | check | standard | action | baseline, monthly |
-| `rgh.wiring-legacy` | Visible wiring types noted; knob-and-tube or aluminum flagged as issue pins | note | core | action | baseline |
-| `rgh.storage-hazard` | Fuel, solvent, paint storage conditions | check | standard | action | baseline |
+| id | text | satisfy | tier | attest | scope | trigger |
+|---|---|---|---|---|---|---|
+| `rgh.structure` | Visible framing, beams, posts, sill/rim inspected; movement noted | check | core | action | baseline | — |
+| `rgh.foundation` | Foundation walls circuited; every crack pinned, measured, photographed with scale | pin `foundation-crack` | core | action | baseline | — |
+| `rgh.comparison` | Comparison-photo positions established and pinned | pin `comparison-position` | core | evidence | baseline | — |
+| `rgh.moisture` | Efflorescence, staining, damp lines metered | measure | core | action | baseline, monthly | — |
+| `rgh.insulation` | Insulation type and depth recorded where visible | measure (in) | standard | action | baseline | — |
+| `rgh.pests` | Droppings, frass, nesting, entry points | check | standard | action | baseline, monthly | — |
+| `rgh.wiring-legacy` | Visible wiring types noted; knob-and-tube or aluminum flagged as issue pins | note | core | action | baseline | — |
+| `rgh.storage-hazard` | Fuel, solvent, paint storage conditions | check | standard | action | baseline | — |
+| `bsm.finished-behind` | Concealed areas behind finished surfaces recorded as *not inspected* | note | core | action | baseline | `zone.finished` |
 
 ### `exterior-base`
 
@@ -189,7 +201,6 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 |---|---|---|---|---|
 | `bsm.ceiling-wet-rooms` | Ceiling below every wet room above examined (pre-water-run look) | check | core | action |
 | `bsm.windows-wells` | Basement windows and wells: drainage, security; egress if sleeping zone | check | standard | action |
-| `bsm.finished-behind` | If finished: what's concealed recorded as *not inspected* | note | core | action |
 | `bsm.humidity` | Humidity reading recorded | measure (%RH) | standard | action |
 | `bsm.stairs` | Stair treads, rail, headroom, lighting | check | standard | action |
 
@@ -286,7 +297,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `sit.septic-protection` | Bed area: nothing parked, built, or deep-rooted | check | core | action | `property.septic` |
 | `sit.trees` | Trees overhanging structures pinned | pin `tree` | standard | evidence | — |
 | `sit.retaining` | Retaining walls pinned: lean, drainage, condition | pin `retaining-wall` | standard | evidence | — |
-| `sit.shoreline` | Shoreline/dock captured; erosion comparison positions established | pin `comparison-position\|dock` | core | action | `property.waterfront` |
+| `sit.shoreline` | Shoreline/dock captured; erosion comparison positions established | pin `comparison-position\|dock` | core | evidence | `property.waterfront` |
 | `sit.outbuildings` | Outbuildings identified; each gets a zone if substantial | check | standard | action | — |
 | `sit.measurements` | Driveway/walkway dimensions captured | measure | standard | action | — |
 
@@ -314,7 +325,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `wh.venting` | Venting condition and connection | check | core | action |
 | `wh.pan` | Drain pan / location risk assessed | check | standard | action |
 | `wh.ownership` | Owned vs. rented recorded | note | standard | evidence |
-| `wh.anode` | Anode access noted | note | standard | action |
+| `wh.anode` | Anode access noted | note | standard | evidence |
 
 ### `furnace`
 | id | text | satisfy | tier | attest |
@@ -347,7 +358,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `hp.disconnect` | Service disconnect present | check | core | action |
 | `hp.lineset` | Line insulation condition | check | standard | action |
 | `hp.condensate` | Condensate handling | check | standard | action |
-| `hp.snow` | Winter snow-clearance path noted | note | standard | action |
+| `hp.snow` | Winter snow-clearance path noted | note | standard | evidence |
 
 ### `hrv-erv`
 | id | text | satisfy | tier | attest |
@@ -476,7 +487,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `fc.orientation` | Orientation recorded (horiz/vert/diag/stepped) | note | core | evidence |
 | `fc.activity` | Active vs. historical indicators assessed | check | core | action |
 | `fc.moisture` | Damp/efflorescence at crack | check | core | action |
-| `fc.comparison` | Comparison position established | pin `comparison-position` | core | action |
+| `fc.comparison` | Comparison position established | pin `comparison-position` | core | evidence |
 
 ### `comparison-position`
 | id | text | satisfy | tier | attest |
@@ -560,6 +571,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `tr.proximity` | Proximity to structures recorded | note | core | evidence |
 | `tr.deadwood` | Deadwood/limbs over roof assessed | check | core | action |
 | `tr.lean` | Lean or root heave | check | standard | action |
+| `tr.species` | Species recorded if known | note | standard | evidence |
 
 ### `floor-drain`
 | id | text | satisfy | tier | attest |
@@ -634,8 +646,8 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `finished` | Finished space | yes |
 | `sleeping` | Used for sleeping | yes |
 | `has_stairs` | Contains stairs | yes |
-| `has_plumbing` | Contains plumbing | no (derived from pins/observation) |
-| `exterior_wall` | Has exterior wall(s) | no |
+| `has_plumbing` | Contains plumbing | no (derived from pins/observation — **reserved**, not yet consumed) |
+| `exterior_wall` | Has exterior wall(s) | no (**reserved**, not yet consumed) |
 
 ## C. N/A reasons
 
@@ -662,6 +674,6 @@ Dialect: `id | text | satisfy | tier | attest`.
 
 ## 8. Deferred content passes
 
-Monthly-subset coherence · seasonal mapping · stub components · guidance text (schema field exists; downspout↔grading linkage and similar cross-references land here) · binder traceability marks.
+Monthly-subset coherence · seasonal mapping · stub components · guidance text (schema field exists; downspout↔grading linkage and similar cross-references land here) · binder traceability marks · apartment/condo zone types — parked (per Scope v4).
 
-**Status:** v1.2 — adjudicates CHECKLIST-MASTER-REVIEW §6 in full. Regeneration expected diffs: `liv.egress` relocated to interior-base; five zone-item texts changed; `fp.chimney` added; no id retired, no tier changed except as listed.
+**Status:** v1.2.1 — v1.2 adjudications plus the six owner-dictated edits above. Regeneration expected diffs: four attest flips; `bsm.finished-behind` relocated to rough-base (triggered on `zone.finished`); `tr.species` added; 266 items.

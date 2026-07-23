@@ -4,7 +4,10 @@ import { getAppToken, setAppToken } from "../review/queue";
 import { BigButton, Sheet, formatBytes } from "../ui/bits";
 
 export function HomeScreen() {
-  const { sessionRows, route, routeErrors, storage, navigate, resumeSession, abandonSession, showToast } = useApp();
+  const {
+    sessionRows, route, routeErrors, checklists, checklistErrors, storage,
+    navigate, resumeSession, abandonSession, showToast,
+  } = useApp();
   // Ref = the synchronous guard (state reads are stale within a render);
   // state = the disabled-button visual.
   const resumingRef = useRef(false);
@@ -28,20 +31,25 @@ export function HomeScreen() {
       <header>
         <h1 className="text-3xl font-bold text-slate-100">HouseSteady Field Assistant</h1>
         <p className="mt-1 text-slate-400">
-          {route ? `${route.title} — config v${route.configVersion}` : "Route config failed validation"}
+          {checklists
+            ? `Pin model — checklists v${checklists.configVersion}`
+            : "Checklist config failed validation"}
         </p>
       </header>
 
-      {routeErrors.length > 0 && (
+      {checklistErrors.length > 0 && (
         <div className="rounded-xl border border-rose-500 bg-rose-950/50 p-4 text-rose-200">
-          <p className="font-semibold">The route config is invalid — sessions can't start until it's fixed:</p>
+          <p className="font-semibold">The checklist config is invalid — sessions can't start until it's fixed:</p>
           <ul className="mt-2 list-disc pl-5 text-sm">
-            {routeErrors.map((e, i) => (<li key={i}>{e}</li>))}
+            {checklistErrors.map((e, i) => (<li key={i}>{e}</li>))}
           </ul>
         </div>
       )}
+      {routeErrors.length > 0 && route === null && (
+        <p className="text-sm text-slate-500">Legacy route config invalid ({routeErrors.length} errors) — only affects old sessions.</p>
+      )}
 
-      <BigButton disabled={!route} onClick={() => navigate({ name: "setup" })}>
+      <BigButton disabled={!checklists} onClick={() => navigate({ name: "setup2" })}>
         Start new inspection
       </BigButton>
 

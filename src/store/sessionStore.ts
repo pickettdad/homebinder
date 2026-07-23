@@ -14,9 +14,18 @@ import { sha256Hex } from "../engine/canonical";
 import { gateOutstanding } from "../engine/gate";
 import { zoneCounts } from "../engine/selectors";
 import { loadRoute } from "../config/loadRoute";
+import { loadChecklists } from "../config/loadChecklists";
+import type { ChecklistConfig } from "../engine/schema/checklistConfig";
+import type {
+  CaptureTarget, ItemResolution, ItemScope, PinFlag, PinTypeRef, V2EventPayload, V2SessionEvent,
+} from "../engine/v2/events";
+import { foldV2, type SessionStateV2 } from "../engine/v2/fold";
+import { auditSnapshot, deriveZoneAudit } from "../engine/v2/checklist";
 import {
-  appendEventsV1 as appendEvents, createSession, deleteMedia, listSessions,
-  loadEventsV1 as loadEvents, loadSessionConfig, requestPersistence, setSessionStatus,
+  appendEvents as appendAnyEvents, appendEventsV1 as appendEvents, createSession,
+  createSessionV2, deleteMedia, listSessions, loadEvents as loadStoredEvents,
+  loadEventsV1 as loadEvents, loadSessionChecklistConfig, loadSessionConfig,
+  requestPersistence, setSessionStatus,
 } from "../storage/sessionRepo";
 import { db, type MediaRow, type ReviewJobRow, type SessionRow } from "../storage/db";
 import { drainReviews, enqueueZoneReview, pendingJobs, rearmFailedJobs } from "../review/queue";
@@ -29,7 +38,14 @@ export type Screen =
   | { name: "zone"; zoneId: string }
   | { name: "capture"; slotInstanceId: string; findingId?: string }
   | { name: "gate"; zoneId: string }
-  | { name: "export" };
+  | { name: "export" }
+  // ---- v2 pin-model screens
+  | { name: "setup2" }
+  | { name: "walk" }
+  | { name: "zone2"; zoneId: string }
+  | { name: "pin"; pinId: string }
+  | { name: "canvas"; canvasId: string; zoneId: string; placePinId?: string }
+  | { name: "inbox" };
 
 interface AppStore {
   ready: boolean;
@@ -46,6 +62,13 @@ interface AppStore {
   storage: { persisted: boolean; usage?: number; quota?: number } | null;
   toast: string | null;
 
+  /** v2 pin model: validated bundled checklist config + active-session state. */
+  checklists: ChecklistConfig | null;
+  checklistErrors: string[];
+  v2Config: ChecklistConfig | null;
+  v2Session: SessionStateV2 | null;
+  v2Events: V2SessionEvent[];
+
   init(): Promise<void>;
   navigate(screen: Screen): void;
   refreshSessions(): Promise<void>;
@@ -57,6 +80,31 @@ interface AppStore {
   resumeSession(sessionId: string): Promise<void>;
   leaveSession(): void;
   abandonSession(sessionId: string): Promise<void>;
+
+  // ---- v2 actions (the pin model). All dispatch through the same atomic append path.
+  startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string }): Promise<void>;
+  dispatchV2(payloads: V2EventPayload[], media?: MediaRow[]): Promise<V2SessionEvent[]>;
+  createZone(zoneType: string, label: string, attributes: Record<string, boolean>): Promise<string>;
+  renameZone(zoneId: string, label: string): Promise<void>;
+  createPin(zoneId?: string): Promise<string>;
+  setPinType(pinId: string, pinType: PinTypeRef): Promise<void>;
+  setPinFlag(pinId: string, flag: PinFlag | null): Promise<void>;
+  assignPin(pinId: string, zoneId?: string): Promise<void>;
+  retirePin(pinId: string, note?: string): Promise<void>;
+  addCanvas(zoneId: string, file: File | Blob, mime?: string): Promise<string>;
+  placeAnchor(pinId: string, canvasId: string, x: number, y: number): Promise<void>;
+  removeAnchor(anchorId: string): Promise<void>;
+  capturePhotoV2(target: CaptureTarget, file: File | Blob, mime?: string): Promise<string>;
+  attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
+  discardMediaV2(mediaId: string): Promise<void>;
+  reassignMedia(mediaId: string, target: CaptureTarget): Promise<void>;
+  addNote(target: CaptureTarget, text: string): Promise<string>;
+  editNote(noteId: string, text: string): Promise<void>;
+  resolveItem(scope: ItemScope, itemId: string, resolution: ItemResolution): Promise<void>;
+  reopenItem(scope: ItemScope, itemId: string): Promise<void>;
+  /** Advisory close — records the audit snapshot and a note; NEVER blocks. */
+  closeZoneV2(zoneId: string, note?: string): Promise<void>;
+  reopenZoneV2(zoneId: string): Promise<void>;
 
   dispatch(payloads: EventPayload[], media?: MediaRow[]): Promise<void>;
   capturePhoto(slotInstanceId: string, file: File | Blob, mime?: string): Promise<string>;
@@ -102,15 +150,29 @@ export const useApp = create<AppStore>((set, get) => ({
   sessionRows: [],
   storage: null,
   toast: null,
+  checklists: null,
+  checklistErrors: [],
+  v2Config: null,
+  v2Session: null,
+  v2Events: [],
 
   async init() {
     const loaded = loadRoute();
+    let checklists: ChecklistConfig | null = null;
+    let checklistErrors: string[] = [];
+    try {
+      checklists = loadChecklists();
+    } catch (err) {
+      checklistErrors = [err instanceof Error ? err.message : String(err)];
+    }
     const storage = await requestPersistence().catch(() => null);
     const sessionRows = await listSessions();
     set({
       ready: true,
       route: loaded.ok ? loaded.config : null,
       routeErrors: loaded.ok ? [] : loaded.errors,
+      checklists,
+      checklistErrors,
       sessionRows,
       storage,
     });
@@ -144,18 +206,37 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async resumeSession(sessionId) {
+    const row = await db.sessions.get(sessionId);
+    if (row?.kind === "v2") {
+      const v2Config = await loadSessionChecklistConfig(sessionId);
+      const v2Events = (await loadStoredEvents(sessionId)) as V2SessionEvent[];
+      const v2Session = foldV2(v2Events);
+      acquireSessionLock(sessionId);
+      const zoneId = v2Session.lastActiveZoneId;
+      set({
+        sessionId, v2Config, v2Session, v2Events,
+        config: null, session: null, events: [],
+        screen: zoneId && !v2Session.completedAt ? { name: "zone2", zoneId } : { name: "walk" },
+      });
+      await get().refreshSessions();
+      return;
+    }
     const config = await loadSessionConfig(sessionId);
     const events = await loadEvents(sessionId);
     const session = fold(config, events);
     acquireSessionLock(sessionId);
-    set({ sessionId, config, session, events });
+    set({ sessionId, config, session, events, v2Config: null, v2Session: null, v2Events: [] });
     const zoneId = session.lastActiveZoneId ?? session.zones[0]?.zoneId;
     set({ screen: zoneId && !session.completedAt ? { name: "zone", zoneId } : { name: "route" } });
     await get().refreshSessions();
   },
 
   leaveSession() {
-    set({ sessionId: null, config: null, session: null, events: [], screen: { name: "home" } });
+    set({
+      sessionId: null, config: null, session: null, events: [],
+      v2Config: null, v2Session: null, v2Events: [],
+      screen: { name: "home" },
+    });
     void get().refreshSessions();
   },
 
@@ -163,6 +244,161 @@ export const useApp = create<AppStore>((set, get) => ({
     await setSessionStatus(sessionId, "abandoned");
     if (get().sessionId === sessionId) get().leaveSession();
     await get().refreshSessions();
+  },
+
+  // ---- v2 pin model ------------------------------------------------------------
+
+  async startSessionV2({ propertyFlags, propertyLabel }) {
+    const checklists = get().checklists;
+    if (!checklists) throw new Error("no valid checklist config");
+    const sessionId = await createSessionV2({ config: checklists, propertyFlags, propertyLabel });
+    await get().resumeSession(sessionId);
+  },
+
+  async dispatchV2(payloads, media = []) {
+    const { sessionId, v2Session } = get();
+    if (!sessionId || !v2Session) throw new Error("no active v2 session");
+    const appended = (await appendAnyEvents(sessionId, payloads, media)) as V2SessionEvent[];
+    const v2Events = [...get().v2Events, ...appended];
+    set({ v2Events, v2Session: foldV2(v2Events) });
+    return appended;
+  },
+
+  async createZone(zoneType, label, attributes) {
+    const zoneId = uuidv7();
+    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes }]);
+    return zoneId;
+  },
+
+  async renameZone(zoneId, label) {
+    await get().dispatchV2([{ type: "ZoneRenamed", zoneId, label }]);
+  },
+
+  async createPin(zoneId) {
+    const pinId = uuidv7();
+    // pinNumber 0 is a placeholder — appendEvents stamps the real permanent number
+    // inside the transaction; the refold picks it up from the stored event.
+    await get().dispatchV2([{ type: "PinCreated", pinId, pinNumber: 0, zoneId }]);
+    return pinId;
+  },
+
+  async setPinType(pinId, pinType) {
+    await get().dispatchV2([{ type: "PinTyped", pinId, pinType }]);
+  },
+
+  async setPinFlag(pinId, flag) {
+    await get().dispatchV2([{ type: "PinFlagged", pinId, flag }]);
+  },
+
+  async assignPin(pinId, zoneId) {
+    await get().dispatchV2([{ type: "PinAssigned", pinId, zoneId }]);
+  },
+
+  async retirePin(pinId, note) {
+    await get().dispatchV2([{ type: "PinRetired", pinId, note }]);
+  },
+
+  async addCanvas(zoneId, file, mimeOverride) {
+    const { sessionId } = get();
+    if (!sessionId) throw new Error("no active session");
+    const canvasId = uuidv7();
+    const mediaId = uuidv7();
+    const mime = mimeOverride ?? ((file instanceof File ? file.type : "") || "image/jpeg");
+    const sha256 = await sha256Hex(file);
+    const row: MediaRow = {
+      id: mediaId, sessionId, targetKind: "zone", targetId: zoneId, kind: "photo",
+      mime, bytes: file.size, sha256, capturedAt: new Date().toISOString(), blob: file,
+    };
+    await get().dispatchV2(
+      [{ type: "CanvasAdded", canvasId, zoneId, kind: "photo", media: { mediaId, sha256, mime, bytes: file.size } }],
+      [row],
+    );
+    return canvasId;
+  },
+
+  async placeAnchor(pinId, canvasId, x, y) {
+    await get().dispatchV2([{ type: "AnchorPlaced", anchorId: uuidv7(), pinId, canvasId, x, y }]);
+  },
+
+  async removeAnchor(anchorId) {
+    await get().dispatchV2([{ type: "AnchorRemoved", anchorId }]);
+  },
+
+  async capturePhotoV2(target, file, mimeOverride) {
+    const { sessionId } = get();
+    if (!sessionId) throw new Error("no active session");
+    const mediaId = uuidv7();
+    const mime = mimeOverride ?? ((file instanceof File ? file.type : "") || "image/jpeg");
+    const sha256 = await sha256Hex(file);
+    const row: MediaRow = {
+      id: mediaId, sessionId, kind: "photo",
+      targetKind: target.kind, targetId: target.kind === "inbox" ? undefined : target.id,
+      mime, bytes: file.size, sha256, capturedAt: new Date().toISOString(), blob: file,
+    };
+    await get().dispatchV2(
+      [{ type: "PhotoAdded", media: { mediaId, sha256, mime, bytes: file.size }, target }],
+      [row],
+    );
+    return mediaId;
+  },
+
+  async attachVoiceV2(target, blob, mime, durationMs) {
+    const { sessionId } = get();
+    if (!sessionId) throw new Error("no active session");
+    const mediaId = uuidv7();
+    const sha256 = await sha256Hex(blob);
+    const row: MediaRow = {
+      id: mediaId, sessionId, kind: "voice",
+      targetKind: target.kind, targetId: target.kind === "inbox" ? undefined : target.id,
+      mime, bytes: blob.size, sha256, capturedAt: new Date().toISOString(), durationMs, blob,
+    };
+    await get().dispatchV2(
+      [{ type: "VoiceNoteAdded", media: { mediaId, sha256, mime, bytes: blob.size }, target, durationMs }],
+      [row],
+    );
+  },
+
+  async discardMediaV2(mediaId) {
+    await get().dispatchV2([{ type: "MediaDiscarded", mediaId }]);
+    await deleteMedia([mediaId]);
+  },
+
+  async reassignMedia(mediaId, target) {
+    await get().dispatchV2([{ type: "MediaReassigned", mediaId, target }]);
+    await db.media.update(mediaId, {
+      targetKind: target.kind,
+      targetId: target.kind === "inbox" ? undefined : target.id,
+    });
+  },
+
+  async addNote(target, text) {
+    const noteId = uuidv7();
+    await get().dispatchV2([{ type: "NoteAdded", noteId, target, text }]);
+    return noteId;
+  },
+
+  async editNote(noteId, text) {
+    await get().dispatchV2([{ type: "NoteEdited", noteId, text }]);
+  },
+
+  async resolveItem(scope, itemId, resolution) {
+    await get().dispatchV2([{ type: "ItemResolved", scope, itemId, resolution }]);
+  },
+
+  async reopenItem(scope, itemId) {
+    await get().dispatchV2([{ type: "ItemReopened", scope, itemId }]);
+  },
+
+  async closeZoneV2(zoneId, note) {
+    const { v2Config, v2Session } = get();
+    if (!v2Config || !v2Session) throw new Error("no active v2 session");
+    // Advisory close: the audit is recorded, never enforced (REDESIGN decision 1).
+    const audit = auditSnapshot(deriveZoneAudit(v2Config, v2Session, zoneId));
+    await get().dispatchV2([{ type: "ZoneClosed", zoneId, note: note?.trim() || undefined, audit }]);
+  },
+
+  async reopenZoneV2(zoneId) {
+    await get().dispatchV2([{ type: "ZoneReopened", zoneId }]);
   },
 
   async dispatch(payloads, media = []) {

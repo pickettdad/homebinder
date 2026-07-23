@@ -290,6 +290,37 @@ describe("checklist derivation (real config)", () => {
     expect(foundation.status).toEqual({ kind: "unresolved" });
   });
 
+  it("component evidence-pin items propose from pins in OTHER zones (fp.chimney × elevation chimney)", () => {
+    const state = foldV2(
+      mkEvents([
+        ...baseEvents,
+        { type: "ZoneCreated", zoneId: "elv", zoneType: "elevation", label: "North side", attributes: {} },
+        { type: "PinCreated", pinId: "fp", pinNumber: 1, zoneId: "bed" },
+        { type: "PinTyped", pinId: "fp", pinType: { kind: "component", componentType: "fireplace" } },
+        { type: "PinCreated", pinId: "ch", pinNumber: 2, zoneId: "elv" },
+        { type: "PinTyped", pinId: "ch", pinType: { kind: "component", componentType: "chimney" } },
+      ]),
+    );
+    const items = deriveComponentItems(config, state, "bed");
+    const link = items.find((d) => d.item.id === "fp.chimney")!;
+    expect(link.item.attest).toBe("evidence");
+    expect(link.status).toEqual({ kind: "proposed", pinIds: ["ch"] });
+    // The WETT flag on the same fireplace is action — never proposed by anything.
+    expect(items.find((d) => d.item.id === "fp.wett")!.status).toEqual({ kind: "unresolved" });
+  });
+
+  it("v1.2.1: finished-behind fires in any finished rough zone via zone.finished", () => {
+    const state = foldV2(
+      mkEvents([
+        ...baseEvents,
+        { type: "ZoneCreated", zoneId: "gar", zoneType: "garage", label: "Garage", attributes: { finished: true } },
+        { type: "ZoneCreated", zoneId: "crawl", zoneType: "crawlspace", label: "Crawl", attributes: {} },
+      ]),
+    );
+    expect(deriveZoneItems(config, state, "gar").map((d) => d.item.id)).toContain("bsm.finished-behind");
+    expect(deriveZoneItems(config, state, "crawl").map((d) => d.item.id)).not.toContain("bsm.finished-behind");
+  });
+
   it("session items surface with pin.* refs house-wide (wood-heat catch hidden without flag)", () => {
     const state = foldV2(mkEvents(baseEvents));
     const ids = deriveSessionItems(config, state).map((d) => d.item.id);

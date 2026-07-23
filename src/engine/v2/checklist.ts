@@ -129,6 +129,10 @@ export function deriveComponentItems(
   zoneId: string,
 ): DerivedItem[] {
   const out: DerivedItem[] = [];
+  // Proposal search for a component's own satisfy:pin evidence items (fc.comparison →
+  // comparison-position, fp.chimney → chimney) spans the whole session: the evidencing
+  // pin legitimately lives in another zone (the chimney pin is on an elevation).
+  const allPins = state.pins.filter((p) => !p.retired);
   for (const p of zonePins(state, zoneId)) {
     if (p.pinType?.kind !== "component") continue;
     const type = p.pinType.componentType;
@@ -140,10 +144,34 @@ export function deriveComponentItems(
         item,
         scope,
         group: `#${p.number} ${type}`,
-        status: statusOf(state, scope, item, [p]),
+        status: statusOf(state, scope, item, allPins),
       });
   }
   return out;
+}
+
+/**
+ * Deterministic pin-type priors for the type picker (review §3.4): component types the
+ * zone's own checklist references first, then the rest of the library, stubs last.
+ * Freeform is a UI affordance, always offered — it is not a component type.
+ */
+export function suggestedPinTypes(config: ChecklistConfig, zoneType: string): string[] {
+  const zt = config.zoneTypes.find((t) => t.id === zoneType);
+  const referenced: string[] = [];
+  const collect = (items: ChecklistItem[]) => {
+    for (const item of items) for (const t of item.pinTypes ?? []) if (!referenced.includes(t)) referenced.push(t);
+  };
+  for (const baseId of zt?.inherits ?? []) collect(config.baseLists.find((b) => b.id === baseId)?.items ?? []);
+  collect(config.zoneLists.find((zl) => zl.zoneType === zoneType)?.items ?? []);
+  const rest = config.componentLists
+    .filter((c) => !c.stub)
+    .flatMap((c) => c.types)
+    .filter((t) => !referenced.includes(t));
+  const stubs = config.componentLists
+    .filter((c) => c.stub)
+    .flatMap((c) => c.types)
+    .filter((t) => !referenced.includes(t));
+  return [...referenced, ...rest, ...stubs];
 }
 
 /** Session items — surface only in the session-close audit (review §3.2). */

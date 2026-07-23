@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.2.0",
+  "configVersion": "1.2.1",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -544,6 +544,21 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "scope": [
             "baseline"
           ]
+        },
+        {
+          "id": "bsm.finished-behind",
+          "text": "Concealed areas behind finished surfaces recorded as *not inspected*",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ],
+          "trigger": {
+            "anyOf": [
+              "zone.finished"
+            ]
+          }
         }
       ]
     },
@@ -935,16 +950,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "text": "Basement windows and wells: drainage, security; egress if sleeping zone",
           "satisfy": "check",
           "tier": "standard",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "bsm.finished-behind",
-          "text": "If finished: what's concealed recorded as *not inspected*",
-          "satisfy": "note",
-          "tier": "core",
           "attest": "action",
           "scope": [
             "baseline"
@@ -1530,7 +1535,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "dock"
           ],
           "tier": "core",
-          "attest": "action",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ],
@@ -1704,7 +1709,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "text": "Anode access noted",
           "satisfy": "note",
           "tier": "standard",
-          "attest": "action",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]
@@ -1936,7 +1941,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "text": "Winter snow-clearance path noted",
           "satisfy": "note",
           "tier": "standard",
-          "attest": "action",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]
@@ -2774,7 +2779,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "comparison-position"
           ],
           "tier": "core",
-          "attest": "action",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]
@@ -3242,6 +3247,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "satisfy": "check",
           "tier": "standard",
           "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "tr.species",
+          "text": "Species recorded if known",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]

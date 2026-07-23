@@ -9,6 +9,46 @@ import { ZoneScreen } from "../screens/ZoneScreen";
 import { CaptureScreen } from "../screens/CaptureScreen";
 import { GateScreen } from "../screens/GateScreen";
 import { ExportScreen } from "../screens/ExportScreen";
+import { SetupV2Screen } from "../screens/v2/SetupV2Screen";
+import { WalkScreen } from "../screens/v2/WalkScreen";
+import { ZoneV2Screen } from "../screens/v2/ZoneV2Screen";
+import { PinScreen } from "../screens/v2/PinScreen";
+import { CanvasScreen } from "../screens/v2/CanvasScreen";
+import { InboxScreen } from "../screens/v2/InboxScreen";
+import { PhotoInput } from "../capture/PhotoInput";
+import type { CaptureTarget } from "../engine/v2/events";
+
+/**
+ * Global camera (REDESIGN-v2 §3): a shutter on every in-session v2 screen. Captures
+ * default to the screen's context — the open zone or pin — and to the inbox anywhere
+ * else. Shoot first, file when hands are free.
+ */
+function GlobalCamera() {
+  const { screen, v2Session, capturePhotoV2, showToast } = useApp();
+  if (!v2Session || v2Session.completedAt) return null;
+  if (!["walk", "zone2", "pin", "inbox"].includes(screen.name)) return null;
+
+  let target: CaptureTarget = { kind: "inbox" };
+  let where = "inbox";
+  if (screen.name === "zone2") {
+    target = { kind: "zone", id: screen.zoneId };
+    where = "zone";
+  } else if (screen.name === "pin") {
+    target = { kind: "pin", id: screen.pinId };
+    where = "pin";
+  }
+
+  return (
+    <div className="fixed bottom-6 right-6 z-40">
+      <PhotoInput
+        onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast(`Photo → ${where}`))}
+        className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-600 text-3xl shadow-lg active:bg-teal-500"
+      >
+        📷
+      </PhotoInput>
+    </div>
+  );
+}
 
 export function App() {
   const { ready, screen, sessionId, toast, init, drainNow, refreshReviewStatus } = useApp();
@@ -59,6 +99,15 @@ export function App() {
       )}
       {screen.name === "gate" && <GateScreen zoneId={screen.zoneId} />}
       {screen.name === "export" && <ExportScreen />}
+      {screen.name === "setup2" && <SetupV2Screen />}
+      {screen.name === "walk" && <WalkScreen />}
+      {screen.name === "zone2" && <ZoneV2Screen zoneId={screen.zoneId} />}
+      {screen.name === "pin" && <PinScreen pinId={screen.pinId} />}
+      {screen.name === "canvas" && (
+        <CanvasScreen canvasId={screen.canvasId} zoneId={screen.zoneId} placePinId={screen.placePinId} />
+      )}
+      {screen.name === "inbox" && <InboxScreen />}
+      <GlobalCamera />
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center">
           <p className="rounded-full bg-slate-700 px-5 py-3 text-slate-100 shadow-lg">{toast}</p>

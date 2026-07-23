@@ -169,9 +169,9 @@ function parseTaggedHeading(line: string, n: number): { ids: string[]; note?: st
 export function parseMaster(markdown: string): ChecklistConfigInput {
   const lines = markdown.split("\n");
 
-  const versionMatch = markdown.match(/\*\*Version:\*\*\s*v(\d+)\.(\d+)/);
-  if (!versionMatch) throw new MasterParseError(0, "no '**Version:** vX.Y' header found");
-  const configVersion = `${versionMatch[1]}.${versionMatch[2]}.0`;
+  const versionMatch = markdown.match(/\*\*Version:\*\*\s*v(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!versionMatch) throw new MasterParseError(0, "no '**Version:** vX.Y[.Z]' header found");
+  const configVersion = `${versionMatch[1]}.${versionMatch[2]}.${versionMatch[3] ?? "0"}`;
 
   const cfg: ChecklistConfigInput = {
     configId: "checklists-baseline",

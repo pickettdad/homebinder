@@ -5,7 +5,7 @@ import { PhotoInput } from "../../capture/PhotoInput";
 import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { suggestedPinTypes } from "../../engine/v2/checklist";
 import type { PinFlag } from "../../engine/v2/events";
-import { FlagChip, PinBadge, Thumb, pinTypeLabel } from "./shared";
+import { FlagChip, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
 
 const FLAGS: PinFlag[] = ["fine", "monitor", "issue"];
 
@@ -16,7 +16,6 @@ export function PinScreen({ pinId }: { pinId: string }) {
     capturePhotoV2, attachVoiceV2, discardMediaV2, addNote, editNote, showToast,
   } = useApp();
   const [typeSheet, setTypeSheet] = useState(false);
-  const [freeform, setFreeform] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
   const [editingNote, setEditingNote] = useState<{ id: string; text: string } | null>(null);
   const recorder = useVoiceRecorder();
@@ -149,11 +148,13 @@ export function PinScreen({ pinId }: { pinId: string }) {
         </div>
       </section>
 
-      <section className="flex items-center justify-between rounded-xl bg-slate-800 p-4">
-        <p className="text-sm text-slate-300">
-          Voice notes: {pin.voiceNotes.length}
-          {pin.voiceNotes.length > 0 && ` (${pin.voiceNotes.map((v) => formatDuration(v.durationMs ?? 0)).join(", ")})`}
-        </p>
+      <section className="flex items-center justify-between gap-3 rounded-xl bg-slate-800 p-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-200">
+            Audio evidence{pin.voiceNotes.length > 0 ? ` (${pin.voiceNotes.map((v) => formatDuration(v.durationMs ?? 0)).join(", ")})` : ""}
+          </p>
+          <p className="text-xs text-slate-500">For sounds — a rattling fan, a banging pipe. Notes are better typed or dictated above.</p>
+        </div>
         {recorder.state === "recording" ? (
           <BigButton variant="danger" onClick={() => void stopRecording()}>
             Stop {formatDuration(recorder.elapsedMs)}
@@ -205,46 +206,11 @@ export function PinScreen({ pinId }: { pinId: string }) {
       </BigButton>
 
       <Sheet open={typeSheet} onClose={() => setTypeSheet(false)} title={`Type for pin #${pin.number}`}>
-        <div className="flex flex-col gap-3">
-          <div className="flex max-h-80 flex-wrap gap-2 overflow-y-auto">
-            {typeChoices.map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => {
-                  void setPinType(pinId, { kind: "component", componentType: t }).then(() => setTypeSheet(false));
-                }}
-                className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${
-                  pin.pinType?.kind === "component" && pin.pinType.componentType === t
-                    ? "bg-teal-600 text-white ring-teal-500"
-                    : "bg-slate-800 text-slate-300 ring-slate-600"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <input
-              value={freeform}
-              onChange={(e) => setFreeform(e.target.value)}
-              placeholder="Freeform — anything unidentified"
-              className="flex-1 rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
-            />
-            <BigButton
-              variant="secondary"
-              disabled={!freeform.trim()}
-              onClick={() => {
-                void setPinType(pinId, { kind: "freeform", label: freeform.trim() }).then(() => {
-                  setFreeform("");
-                  setTypeSheet(false);
-                });
-              }}
-            >
-              Set
-            </BigButton>
-          </div>
-        </div>
+        <TypePicker
+          choices={typeChoices}
+          current={pin.pinType}
+          onPick={(pinType) => void setPinType(pinId, pinType).then(() => setTypeSheet(false))}
+        />
       </Sheet>
     </div>
   );

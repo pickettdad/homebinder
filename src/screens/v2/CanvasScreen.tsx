@@ -1,20 +1,30 @@
 import { useRef, useState } from "react";
 import { useApp } from "../../store/sessionStore";
-import { BigButton } from "../../ui/bits";
+import { BigButton, Sheet } from "../../ui/bits";
 import { useMediaUrl } from "../../ui/useMediaUrl";
+import { suggestedPinTypes } from "../../engine/v2/checklist";
+import type { PinTypeRef } from "../../engine/v2/events";
+import { TypePicker, pinTypeLabel } from "./shared";
 
 /**
  * A photo canvas: pinch-zoom + pan, anchor dots with pin numbers, tap-to-pin.
- * With placePinId set, a tap places an anchor for that pin; otherwise a tap creates a
- * new pin at that spot (number assigned by the storage transaction).
+ * - placePinId set → a tap places an anchor for that pin.
+ * - Stamp mode → each tap creates a NEW typed pin (own permanent number) right there.
+ *   Field test 3: "mark every receptacle" needs one identity per receptacle so a single
+ *   one can be flagged monitor — stamping makes that a tap per outlet.
+ * - Otherwise → a tap creates an untyped pin and opens it.
+ * Tapping an existing dot opens actions (open pin / remove this anchor).
  *
  * Coordinates: taps are normalized against the transformed image's bounding rect, so
  * the math is zoom-independent. Anchors are absolutely positioned INSIDE the
  * transformed element and track pan/zoom for free.
  */
 export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: string; zoneId: string; placePinId?: string }) {
-  const { v2Session, navigate, createPin, placeAnchor, showToast } = useApp();
+  const { v2Session, v2Config, navigate, createPinAt, placeAnchor, removeAnchor, showToast } = useApp();
   const [busy, setBusy] = useState(false);
+  const [stampType, setStampType] = useState<PinTypeRef | null>(null);
+  const [stampSheet, setStampSheet] = useState(false);
+  const [anchorSheet, setAnchorSheet] = useState<{ anchorId: string; pinId: string; number: number } | null>(null);
   const view = useRef({ scale: 1, tx: 0, ty: 0 });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<{ dist: number; scale: number; mid: { x: number; y: number }; tx: number; ty: number } | null>(null);
@@ -25,7 +35,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
   const zone = v2Session?.zones.find((z) => z.zoneId === zoneId);
   const canvas = zone?.canvases.find((c) => c.canvasId === canvasId);
   const url = useMediaUrl(canvas?.media.mediaId);
-  if (!v2Session || !zone || !canvas) return null;
+  if (!v2Session || !v2Config || !zone || !canvas) return null;
 
   const placePin = placePinId ? v2Session.pins.find((p) => p.pinId === placePinId) : undefined;
   const anchored = v2Session.pins
@@ -105,12 +115,18 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
           navigate({ name: "pin", pinId: placePinId });
         })
         .finally(done);
-    } else {
-      void createPin(zoneId)
-        .then(async (pinId) => {
-          await placeAnchor(pinId, canvasId, x, y);
-          navigate({ name: "pin", pinId });
+    } else if (stampType) {
+      // Stamp mode: stay on the canvas — one tap, one new typed pin.
+      void createPinAt(zoneId, canvasId, x, y, stampType)
+        .then((pinId) => {
+          const n = useApp.getState().v2Session?.pins.find((p) => p.pinId === pinId)?.number;
+          showToast(`#${n ?? "?"} ${pinTypeLabel(stampType)}`);
         })
+        .catch((err) => showToast(err instanceof Error ? err.message : "Could not stamp pin"))
+        .finally(done);
+    } else {
+      void createPinAt(zoneId, canvasId, x, y)
+        .then((pinId) => navigate({ name: "pin", pinId }))
         .catch((err) => showToast(err instanceof Error ? err.message : "Could not place pin"))
         .finally(done);
     }
@@ -121,8 +137,18 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
       <header className="flex items-center gap-3 p-4">
         <BigButton variant="ghost" onClick={() => navigate({ name: "zone2", zoneId })}>←</BigButton>
         <p className="flex-1 text-sm text-slate-300">
-          {placePin ? `Tap where pin #${placePin.number} lives` : "Tap to drop a new pin · pinch to zoom"}
+          {placePin
+            ? `Tap where pin #${placePin.number} lives`
+            : stampType
+              ? `Stamping ${pinTypeLabel(stampType)} — every tap is a NEW numbered pin`
+              : "Tap to drop a new pin · pinch to zoom"}
         </p>
+        {!placePinId &&
+          (stampType ? (
+            <BigButton variant="danger" onClick={() => setStampType(null)}>Stop</BigButton>
+          ) : (
+            <BigButton variant="secondary" onClick={() => setStampSheet(true)}>Stamp</BigButton>
+          ))}
       </header>
       <div
         className="relative flex-1 overflow-hidden"
@@ -143,7 +169,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigate({ name: "pin", pinId: pin.pinId });
+                    setAnchorSheet({ anchorId: anchor.anchorId, pinId: pin.pinId, number: pin.number });
                   }}
                   className={`absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-sm font-bold text-white ring-2 ring-slate-950 ${
                     pin.flag === "issue" ? "bg-rose-600" : pin.flag === "monitor" ? "bg-amber-600" : "bg-teal-600"
@@ -157,6 +183,53 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
           )}
         </div>
       </div>
+
+      <Sheet open={stampSheet} onClose={() => setStampSheet(false)} title="Stamp pins">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-slate-400">
+            Pick a type, then every tap drops a new pin with its own number — so one
+            receptacle can be flagged without painting the rest.
+          </p>
+          <TypePicker
+            choices={suggestedPinTypes(v2Config, zone.zoneType)}
+            onPick={(pinType) => {
+              setStampType(pinType);
+              setStampSheet(false);
+            }}
+          />
+        </div>
+      </Sheet>
+
+      <Sheet
+        open={anchorSheet !== null}
+        onClose={() => setAnchorSheet(null)}
+        title={anchorSheet ? `Pin #${anchorSheet.number}` : ""}
+      >
+        {anchorSheet && (
+          <div className="flex flex-col gap-3">
+            <BigButton onClick={() => navigate({ name: "pin", pinId: anchorSheet.pinId })}>
+              Open pin #{anchorSheet.number}
+            </BigButton>
+            <BigButton
+              variant="danger"
+              onClick={() => {
+                void removeAnchor(anchorSheet.anchorId)
+                  .then(() => {
+                    setAnchorSheet(null);
+                    showToast("Marker removed — the pin and its number remain");
+                  })
+                  .catch((err) => showToast(err instanceof Error ? err.message : "Could not remove"));
+              }}
+            >
+              Remove this marker
+            </BigButton>
+            <p className="text-xs text-slate-500">
+              Removing a marker only takes it off this photo — the pin keeps its number,
+              record, and any other placements. To drop the whole pin, open it and retire.
+            </p>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }

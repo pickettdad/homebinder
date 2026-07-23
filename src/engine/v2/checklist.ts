@@ -195,6 +195,36 @@ export function deriveZoneAudit(
 
 const unresolvedKinds = new Set(["unresolved", "proposed"]);
 
+export interface AuditGroup {
+  key: string;
+  items: DerivedItem[];
+}
+
+export interface AuditView {
+  /** attest: evidence — the Documentation list. */
+  documentation: AuditGroup[];
+  /** attest: action — the Tests list. Never mixed with Documentation (owner decision). */
+  tests: AuditGroup[];
+}
+
+/**
+ * The rendering rule made data (master §2): Documentation and Tests are separate
+ * sections; within each, items group by their rendered-group key in first-appearance
+ * order (base lists, then the zone's own sub-groups, then per-pin component groups).
+ */
+export function buildAuditView(items: DerivedItem[]): AuditView {
+  const split = (attest: "evidence" | "action"): AuditGroup[] => {
+    const groups: AuditGroup[] = [];
+    for (const d of items.filter((d) => d.item.attest === attest)) {
+      const g = groups.find((g) => g.key === d.group);
+      if (g) g.items.push(d);
+      else groups.push({ key: d.group, items: [d] });
+    }
+    return groups;
+  };
+  return { documentation: split("evidence"), tests: split("action") };
+}
+
 /** The advisory-close snapshot recorded into ZoneClosed (never blocks). */
 export function auditSnapshot(items: DerivedItem[]): {
   coreUnresolved: string[];

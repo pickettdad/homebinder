@@ -12,6 +12,7 @@ import { foldV2, resolutionKey } from "../../src/engine/v2/fold";
 import {
   activeRefs,
   auditSnapshot,
+  buildAuditView,
   deriveComponentItems,
   deriveSessionItems,
   deriveZoneAudit,
@@ -143,6 +144,59 @@ describe("foldV2 core", () => {
     expect(reopened.zones[0]!.audit).toBeUndefined();
   });
 
+  it("zone levels: set at creation, corrected later; ghost zone orphans", () => {
+    const state = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {}, level: "basement" },
+        { type: "ZoneCreated", zoneId: "z2", zoneType: "living-space", label: "Guest", attributes: {} },
+        { type: "ZoneLevelSet", zoneId: "z2", level: "second" },
+        { type: "ZoneLevelSet", zoneId: "ghost", level: "attic" },
+      ]),
+    );
+    expect(state.zones[0]!.level).toBe("basement");
+    expect(state.zones[1]!.level).toBe("second");
+    expect(state.orphanEvents).toHaveLength(1);
+  });
+
+  it("captions travel with the capture through a retag; unknown media orphans", () => {
+    const state = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "kitchen", label: "K", attributes: {} },
+        { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+        { type: "PhotoAdded", media: media(1), target: { kind: "inbox" } },
+        { type: "MediaCaptioned", mediaId: "m1", text: "panel, dead-front off" },
+        { type: "MediaReassigned", mediaId: "m1", target: { kind: "pin", id: "p1" } },
+        { type: "MediaCaptioned", mediaId: "ghost", text: "x" },
+      ]),
+    );
+    expect(state.pins[0]!.photos[0]!.caption).toBe("panel, dead-front off");
+    expect(state.orphanEvents).toHaveLength(1);
+  });
+
+  it("removing one anchor leaves the pin, its number, and its other anchors (field test 3)", () => {
+    const state = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "CanvasAdded", canvasId: "c1", zoneId: "z1", kind: "photo", media: media(1) },
+        { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+        { type: "AnchorPlaced", anchorId: "a1", pinId: "p1", canvasId: "c1", x: 0.1, y: 0.1 },
+        { type: "AnchorPlaced", anchorId: "a2", pinId: "p1", canvasId: "c1", x: 0.9, y: 0.9 },
+        { type: "AnchorRemoved", anchorId: "a1" },
+      ]),
+    );
+    expect(state.pins[0]!.anchors.map((a) => a.anchorId)).toEqual(["a2"]);
+    expect(state.pins[0]!.number).toBe(1);
+    expect(state.pins[0]!.retired).toBeUndefined();
+  });
+
+  it("SessionCompleted stamps completedAt", () => {
+    const state = foldV2(mkEvents([init, { type: "SessionCompleted" }]));
+    expect(state.completedAt).toBeDefined();
+  });
+
   it("orphans events with unknown references instead of dropping or throwing", () => {
     const state = foldV2(
       mkEvents([
@@ -266,6 +320,28 @@ describe("checklist derivation (real config)", () => {
     expect(new Set(nameplates.map((d) => (d.scope.kind === "pin" ? d.scope.pinId : "")))).toEqual(new Set(["p1", "p2"]));
     // Freeform pins attach nothing (REDESIGN §3 / utl.unidentified pathway).
     expect(items.some((d) => d.scope.kind === "pin" && d.scope.pinId === "p3")).toBe(false);
+  });
+
+  it("audit view: documentation and tests never mix, grouped, nothing dropped (step 4 UI contract)", () => {
+    const state = foldV2(
+      mkEvents([
+        ...baseEvents,
+        { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "utl" },
+        { type: "PinTyped", pinId: "p1", pinType: { kind: "component", componentType: "water-heater" } },
+      ]),
+    );
+    const items = deriveZoneAudit(config, state, "utl");
+    const view = buildAuditView(items);
+    for (const g of view.documentation) for (const d of g.items) expect(d.item.attest).toBe("evidence");
+    for (const g of view.tests) for (const d of g.items) expect(d.item.attest).toBe("action");
+    const total = [...view.documentation, ...view.tests].reduce((n, g) => n + g.items.length, 0);
+    expect(total).toBe(items.length); // partition — every derived item appears exactly once
+    expect(view.tests.length).toBeGreaterThan(0); // utility has real tests (TPR, sniffer…)
+    // Groups keyed and non-empty, first-appearance order preserved within a section.
+    for (const g of [...view.documentation, ...view.tests]) {
+      expect(g.key).toBeTruthy();
+      expect(g.items.length).toBeGreaterThan(0);
+    }
   });
 
   it("proposes evidence pin items from a matching typed pin, NEVER action items", () => {

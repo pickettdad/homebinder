@@ -33,6 +33,7 @@ export function useWakeLock(active: boolean): WakeLockStatus {
         lock = acquired;
         setStatus({ supported, held: true, error: null });
         acquired.addEventListener("release", () => {
+          if (lock === acquired) lock = null;
           if (disposed) return;
           setStatus((s) => ({ ...s, held: false }));
           // Delay avoids a tight loop if the system insists on releasing.
@@ -46,11 +47,20 @@ export function useWakeLock(active: boolean): WakeLockStatus {
     const onVisibility = () => {
       if (document.visibilityState === "visible") void acquire();
     };
+    // Field test 3: auto-resume at launch requests the lock with NO user gesture, which
+    // iPadOS denies (NotAllowedError) — and it stayed denied until the user happened to
+    // navigate around. Any tap counts as a gesture, so retry on the next pointerdown
+    // whenever the lock isn't held.
+    const onPointerDown = () => {
+      if (!lock) void acquire();
+    };
     void acquire();
     document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("pointerdown", onPointerDown, { passive: true });
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("pointerdown", onPointerDown);
       void lock?.release().catch(() => {});
       setStatus({ supported, held: false, error: null });
     };

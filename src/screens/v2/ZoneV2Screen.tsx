@@ -3,6 +3,7 @@ import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet } from "../../ui/bits";
 import { PhotoInput } from "../../capture/PhotoInput";
 import { auditSnapshot, deriveZoneAudit } from "../../engine/v2/checklist";
+import { ChecklistPanel } from "./ChecklistPanel";
 import { PinRow, Thumb } from "./shared";
 
 /** A zone during the walk: canvases, pins, advisory close. Checklist panel lands in step 4. */
@@ -20,7 +21,11 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
 
   const pins = v2Session.pins.filter((p) => p.zoneId === zoneId && !p.retired);
   const canvases = zone.canvases.filter((c) => !c.retired);
-  const audit = auditSnapshot(deriveZoneAudit(v2Config, v2Session, zoneId));
+  const auditItems = deriveZoneAudit(v2Config, v2Session, zoneId);
+  const audit = auditSnapshot(auditItems);
+  const coreOpen = auditItems.filter(
+    (d) => d.item.tier === "core" && (d.status.kind === "unresolved" || d.status.kind === "proposed"),
+  );
 
   const newPin = () => {
     setBusy(true);
@@ -103,9 +108,14 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
         )}
       </section>
 
+      <section className="flex flex-col gap-3">
+        <h2 className="font-semibold text-slate-300">Checklist</h2>
+        <ChecklistPanel items={auditItems} />
+      </section>
+
       <section className="flex items-center justify-between rounded-xl bg-slate-800 p-4">
         <p className="text-sm text-slate-300">
-          Zone photos: {zone.photos.length} · voice: {zone.voiceNotes.length}
+          Zone photos: {zone.photos.length} · audio: {zone.voiceNotes.length}
         </p>
         <PhotoInput
           onPhoto={(file) =>
@@ -125,6 +135,15 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             </span>
             , {audit.standardUnresolved} standard, {audit.naCount} N/A.
           </p>
+          {coreOpen.length > 0 && (
+            <ul className="max-h-48 overflow-y-auto rounded-xl bg-slate-900/70 p-3 text-sm text-amber-200/90">
+              {coreOpen.map((d) => (
+                <li key={`${d.item.id}-${d.scope.kind === "pin" ? d.scope.pinId : ""}`} className="py-0.5">
+                  • {d.item.text}
+                </li>
+              ))}
+            </ul>
+          )}
           <textarea
             value={closeNote}
             onChange={(e) => setCloseNote(e.target.value)}

@@ -322,14 +322,17 @@ map / issues index from those two, and the schema comment says so.
 
 ## 9. Build order (each step lands green on CI)
 
-1. Checklist schema + generator + generated config + drift CI (§2)
-2. Events v2 + fold v2 + Dexie v3 + tests (§3–4) — app still renders v1 UI at this point
-3. Walk/Zone/Pin/Canvas screens + global camera + inbox (§5)
-4. Checklist panel + advisory close + session audit (§5)
+1. ✅ Checklist schema + generator + generated config + drift CI (§2)
+2. ✅ Events v2 + fold v2 + Dexie v3 + tests (§3–4) — app still renders v1 UI at this point
+3. ✅ Walk/Zone/Pin/Canvas screens + global camera + inbox (§5) — field test 3 ran here
+4. ✅ Checklist panel + advisory close + session audit (§5) — landed with the field-test-3
+   feedback batch: zone storey levels, canvas stamp mode + anchor removal, searchable
+   type picker, inbox delete/caption, wake-lock gesture retry, voice reframed as audio
+   evidence. Video evidence noted as a future capture kind (owner request, not yet built).
 5. Layers (selectors + canvas chips)
 6. Chat: protocol, function, queue, pin/zone UI, offline path (§6)
 7. Manifest v3 + export rework; delete slot machinery + SecondLook + review function (§1)
-8. Deploy, smoke, field test 3
+8. Deploy, smoke, field test 4
 
 Steps 2–7 are the days-scale core; nothing blocks on Stage 0, and the moment step 3
 exists the owner can walk a real zone on the installed PWA.

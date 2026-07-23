@@ -151,13 +151,15 @@ At the owner's house, on the installed TestFlight build:
   provisioning, API-key role issues). Fallback ladder: manual cert+profile secrets →
   fastlane. Budget one debugging session; the "hello shell" milestone exists to spend
   it early.
-- **WKWebView storage durability**: IndexedDB in the shell persists and Safari's 7-day
-  ITP eviction doesn't apply in practice, but iOS may reclaim webview storage under
-  disk pressure and `navigator.storage.persist()` is a no-op — **fine for Stage 0
-  because the shell is a scan instrument, not the data store** (the PWA remains the
-  daily driver; scans are exported immediately). Before Stage 2 makes the shell
-  primary, add a native durability mitigation (filesystem export or SQLite mirror via
-  plugin). Recorded here so convergence doesn't forget it.
+- **WKWebView storage durability — a Stage 2 GATE, not a note** (owner decision
+  2026-07-23): IndexedDB in the shell persists and Safari's 7-day ITP eviction doesn't
+  apply in practice, but iOS may reclaim webview storage under disk pressure and
+  `navigator.storage.persist()` is a no-op. Fine for Stage 0 because the shell is a
+  scan instrument, not the data store (the PWA remains the daily driver; scans are
+  exported immediately). **The shell does not become the daily driver until the native
+  durability mitigation (filesystem export or SQLite mirror via plugin) exists and is
+  verified on-device.** When PLAN-STAGE-2 is written, this gate transfers into it as
+  an entry criterion.
 - **Runner-image drift**: Xcode default on `macos-26` changes ~weekly; the explicit
   `xcode-select` pin plus a listed fallback keeps builds reproducible.
 - **Enrollment delay** (24–48 h, occasionally longer on ID verification) gates the

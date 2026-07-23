@@ -77,26 +77,25 @@ Item {
 }
 ```
 
-**Generator:** `scripts/gen-checklists.mts` parses CHECKLIST-MASTER.md's tables with a
-strict fail-closed dialect matching what the master actually contains:
-`id | text | satisfy | tier [| scope] [| trigger]` — scope columns exist only in the §5
-base tables (§6 zone tables default to `[baseline]`), and the satisfy cell is
-sub-parsed (inline pin types/alternatives, `measure (unit)` parens) into the schema's
-`pinTypes`/`unit` fields. §7 prose rows are blocked until master v1.1 normalizes them
-to tables. Emits `src/config/checklists.generated.ts`. **Committed, not gitignored** —
-deliberate divergence from the `gen-icons.mjs` pattern, because CI must prove master ↔
-generated agreement: new CI step runs the generator and fails on any diff
-(byte-identical), plus `validate:config` extends to the new schema. Session pinning
-reuses `configSnapshots` verbatim: `SessionInitialized` carries
-`configId`/`configVersion`/`configHash` exactly as today.
-
-**Interim content note:** until master v1.1 lands the errata, the generator ships with
-a companion `overrides.ts` carrying everything the v1 tables cannot express, each entry
-citing the review section it implements: the typo/pinTypes fixes (review §2), per-item
-`attest` classifications, `sessionItems` (review §3.2 / verdict 6), `zoneAttributes`,
-`propertyFlags` (incl. `property.gas`), `naReasons`, and the `layers` definitions.
-Overrides shrink as master v1.1+ absorbs them (the v1.1 ask is spelled out in review
-§4); they are explicit data, never silent generator behavior.
+**Generator (BUILT — step 1 landed):** `scripts/gen-checklists.mts` (pure lib in
+`scripts/lib/genChecklists.ts`) parses the master's **v1.1 dialect**:
+`id | text | satisfy | tier | attest [| scope] [| trigger]` for base/zone/session
+tables (scope defaults to `[baseline]`), `id | text | satisfy | tier | attest` for §7
+component tables (incl. shared headings serving multiple pin types and reserved-id
+stubs), plus vocabulary tables A–D (property flags, zone attributes, N/A reasons,
+layers) and the §4 taxonomy. Satisfy cells sub-parse pin types/alternatives and
+`measure (unit)`; trigger cells sub-parse `a|b` as anyOf with namespace-prefix
+inheritance; bold sub-headings become rendered-group keys on items (both decisions
+recorded in review §6 pending §0 ratification). Malformed anything **fails closed**
+naming the line. Emits `src/config/checklists.generated.ts` — **committed, not
+gitignored** (deliberate divergence from the `gen-icons.mjs` pattern):
+`tests/engine/checklists.test.ts` regenerates in-memory and asserts byte-identity,
+schema validity, hash stability, and the content invariants (per-group core cap ≤ 8,
+session items < 10); `validate:config` now runs it in CI. Session pinning reuses
+`configSnapshots` verbatim: `SessionInitialized` carries
+`configId`/`configVersion`/`configHash` exactly as today; `loadChecklists()`
+(`src/config/loadChecklists.ts`) is the loader seam. The once-planned `overrides.ts`
+is unnecessary — v1.1 authors everything the runtime needs.
 
 ---
 
@@ -256,7 +255,19 @@ inbox · audit{zoneId} · export`.
   `reviewCore.ts` doctrine — identify, never adjudicate; the word-lint survives as a
   reply post-filter.
 - Model: default `claude-sonnet-5` (identification quality is the point; volume is a
-  handful of asks per visit — cost negligible), env-overridable like today.
+  handful of asks per visit — cost negligible; intro pricing $2/$10 per MTok through
+  2026-08-31), env-overridable like today. **Verified migration facts for `chat.mts`**
+  (owner note 2026-07-23, confirmed against current API docs): omitting `thinking`
+  runs **adaptive thinking by default** (leave it on — identification benefits);
+  `budget_tokens` and non-default `temperature`/`top_p`/`top_k` are **rejected with a
+  400** (`review.mts` sets neither — nothing to strip); the new tokenizer runs **~30%
+  more tokens** for the same text vs Sonnet 4.6. Consequences: `max_tokens` must NOT
+  be ported from `review.mts`'s 2000 — adaptive thinking counts against it, so a
+  tight cap yields mostly-thinking + truncated answer; use ≥ 8192 and check
+  `stop_reason == "max_tokens"` server-side. The byte caps (3.5 MB client budget,
+  5.5 MB body, 20 images) are byte-based and carry over unchanged; the daily cap is
+  request-based and carries over. No assistant prefill (irrelevant here — the thread's
+  assistant turns are history, not a trailing prefill).
 - Queue: `enqueueChat` writes `chatJobs` + outbox + `ChatMessageSent` in one
   transaction ("ask anyway" offline is therefore free); the existing drain triggers
   (online listener, visibilitychange, interval — currently in `App.tsx`) re-point to

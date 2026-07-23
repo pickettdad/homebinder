@@ -289,3 +289,28 @@ owner-edited, and none of it blocks generation.
     unfinished basements); `has_plumbing`/`exterior_wall` are declared but unused.
     Either trigger `bsm.finished-behind` on `zone.finished` or mark the attributes
     reserved.
+
+---
+
+## 7. v1.2 adjudication record (2026-07-23)
+
+v1.2 landed and adjudicates §6; the generator regenerated **drift-clean on the first
+parse** (v1.2.0, 265 items — the +1 is the restored `fp.chimney`). Rulings accepted as
+final: egress → `interior-base` (any sleeping zone now carries the core item, id
+retained); hose-bib remedy via `utl.pressure` as the test's single home (right call —
+a per-pin `hb.pressure` would demand the test at every bib for a once-per-house
+measurement); stale test verbs stripped from the three evidence items; table refs and
+the group-key formula fixed; both generator dialect readings ratified as authored;
+`alm.location` / `rc.location` / `cir.smoke-placement` rejected as intentional (the
+pin's anchor is the location record; coverage lives in `ses.alarm-coverage`);
+downspout↔grading deferred to the guidance pass.
+
+**§6 items v1.2 did not adjudicate** (carried forward; none block anything):
+- §6.11 attest-direction inconsistencies — `sit.shoreline`/`fc.comparison` are
+  `action` while the equivalent `rgh.comparison` is `evidence`; `wh.anode`/`hp.snow`
+  are notes marked `action`. Fail-safe direction, cosmetic only.
+- §6.12 unconsumed zone attributes — `finished` is asked at every zone creation and
+  drives nothing (`bsm.finished-behind` remains untriggered prose); `has_plumbing` /
+  `exterior_wall` declared but unused.
+- `tr.species` (dropped v1 fragment, unmentioned) and the v1 "apartment/condo —
+  parked" marker, which now exists nowhere in the master.

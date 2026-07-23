@@ -135,16 +135,34 @@ describe("content invariants (master v1.1 discipline)", () => {
     expect(utility.items.find((i) => i.id === "utl.pressure")?.unit).toBe("psi");
   });
 
-  it("v1.1 verdicts hold: int.alarms demoted, egress on zone.sleeping, alarm coverage at session close", () => {
+  it("review verdicts hold: int.alarms demoted, egress in interior-base on zone.sleeping, alarm coverage at session close", () => {
     const interior = cfg.baseLists.find((b) => b.id === "interior-base")!;
     const alarms = interior.items.find((i) => i.id === "int.alarms");
     expect(alarms?.tier).toBe("standard");
     expect(alarms?.pinTypes).toEqual(["smoke-alarm", "co-alarm"]);
 
-    const living = cfg.zoneLists.find((z) => z.zoneType === "living-space")!;
-    expect(living.items.find((i) => i.id === "liv.egress")?.trigger).toEqual({ anyOf: ["zone.sleeping"] });
+    // v1.2: liv.egress lives in interior-base so ANY sleeping zone gets the core
+    // egress item (id retained per id-stability — the liv. prefix is historical).
+    const egress = interior.items.find((i) => i.id === "liv.egress");
+    expect(egress?.trigger).toEqual({ anyOf: ["zone.sleeping"] });
+    expect(egress?.tier).toBe("core");
 
     expect(cfg.sessionItems.some((i) => i.id === "ses.alarm-coverage")).toBe(true);
+  });
+
+  it("v1.2 adjudications hold: test verbs out of evidence items, fp.chimney restored", () => {
+    const utility = cfg.zoneLists.find((z) => z.zoneType === "utility")!;
+    expect(utility.items.find((i) => i.id === "utl.sump")?.text).not.toMatch(/bucket/i);
+    const garage = cfg.zoneLists.find((z) => z.zoneType === "garage")!;
+    expect(garage.items.find((i) => i.id === "gar.door-reverse")?.text).not.toMatch(/tested/i);
+    const elevation = cfg.zoneLists.find((z) => z.zoneType === "elevation")!;
+    expect(elevation.items.find((i) => i.id === "elv.hose-bibs")?.text).not.toMatch(/pressure/i);
+    expect(elevation.items.find((i) => i.id === "elv.deck")?.text).not.toMatch(/grab/i);
+
+    const fireplace = cfg.componentLists.find((c) => c.types.includes("fireplace"));
+    const chimneyLink = fireplace?.items.find((i) => i.id === "fp.chimney");
+    expect(chimneyLink?.pinTypes).toEqual(["chimney"]);
+    expect(chimneyLink?.attest).toBe("evidence");
   });
 
   it("stub component types are referenceable (dock via sit.shoreline)", () => {

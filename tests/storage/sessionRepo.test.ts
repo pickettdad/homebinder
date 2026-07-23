@@ -10,6 +10,7 @@ import { baselineRoute } from "../../src/config/route.baseline";
 import { createSession, loadEvents, loadSessionConfig } from "../../src/storage/sessionRepo";
 import { db } from "../../src/storage/db";
 import { fold } from "../../src/engine/fold";
+import type { SessionEvent } from "../../src/engine/schema/events";
 
 describe("createSession", () => {
   beforeEach(async () => {
@@ -35,7 +36,7 @@ describe("createSession", () => {
     expect(session?.status).toBe("active");
     expect(session?.lastEventSeq).toBe(3); // SessionInitialized + 2 RoomAdded
 
-    const events = await loadEvents(sessionId);
+    const events = (await loadEvents(sessionId)) as SessionEvent[];
     expect(events.map((e) => e.type)).toEqual(["SessionInitialized", "RoomAdded", "RoomAdded"]);
 
     const outboxRows = await db.outbox.where("sessionId").equals(sessionId).toArray();

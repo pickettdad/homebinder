@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.1.0",
+  "configVersion": "1.2.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -358,6 +358,21 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "baseline",
             "monthly"
           ]
+        },
+        {
+          "id": "liv.egress",
+          "text": "Sleeping-room window egress: opens fully; size and sill height measured",
+          "satisfy": "measure",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ],
+          "trigger": {
+            "anyOf": [
+              "zone.sleeping"
+            ]
+          }
         },
         {
           "id": "int.owner-quirks",
@@ -717,7 +732,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "utl.pressure",
-          "text": "Static water pressure measured",
+          "text": "Static water pressure measured (gauge threads onto any hose bib)",
           "satisfy": "measure",
           "unit": "psi",
           "tier": "core",
@@ -743,7 +758,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "utl.sump",
-          "text": "Sump pinned and bucket-tested if present",
+          "text": "Sump pump pinned if present",
           "satisfy": "pin",
           "pinTypes": [
             "sump-pump"
@@ -1113,21 +1128,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "zoneType": "living-space",
       "items": [
         {
-          "id": "liv.egress",
-          "text": "Sleeping-room window egress: opens fully, size and sill height",
-          "satisfy": "measure",
-          "tier": "core",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ],
-          "trigger": {
-            "anyOf": [
-              "zone.sleeping"
-            ]
-          }
-        },
-        {
           "id": "liv.fireplace",
           "text": "Fireplace/stove pinned if present (N/A otherwise)",
           "satisfy": "pin",
@@ -1167,7 +1167,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "items": [
         {
           "id": "gar.door-reverse",
-          "text": "Overhead door pinned; auto-reverse tested — both beam and pressure",
+          "text": "Overhead door and opener pinned",
           "satisfy": "pin",
           "pinTypes": [
             "garage-door"
@@ -1359,7 +1359,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "elv.hose-bibs",
-          "text": "Hose bibs pinned; one pressure-tested",
+          "text": "Hose bibs pinned",
           "satisfy": "pin",
           "pinTypes": [
             "hose-bib"
@@ -1382,7 +1382,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "elv.deck",
-          "text": "Decks/steps pinned; rails grab-tested; ledger connection",
+          "text": "Decks and steps pinned",
           "satisfy": "pin",
           "pinTypes": [
             "deck"
@@ -2520,6 +2520,19 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "satisfy": "check",
           "tier": "core",
           "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "fp.chimney",
+          "text": "Associated chimney/flue pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "chimney"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]

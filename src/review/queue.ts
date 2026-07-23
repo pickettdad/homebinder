@@ -176,7 +176,8 @@ async function buildRequest(job: ReviewJobRow, callbacks: DrainCallbacks): Promi
     if (rawBytes + d.bytes > RAW_BYTE_BUDGET && images.length > 0) break; // byte guard; remainder re-chunks via 413 path if ever hit
     rawBytes += d.bytes;
     images.push({
-      mediaId, slotInstanceId: row.slotInstanceId,
+      // Review jobs only ever reference v1 (slot-addressed) media rows.
+      mediaId, slotInstanceId: row.slotInstanceId ?? "",
       width: d.width, height: d.height, dataBase64: d.base64,
     });
   }

@@ -1,24 +1,27 @@
-# HouseSteady Field Assistant — Checklist Master (v1.1)
+# HouseSteady Field Assistant — Checklist Master (v1.2)
 
-**Version:** v1.1 · **Date:** 2026-07-22 · **Supersedes:** v1 (2026-07-22)
+**Version:** v1.2 · **Date:** 2026-07-22 · **Supersedes:** v1.1 (2026-07-22)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
-**This revision implements** `docs/CHECKLIST-MASTER-REVIEW.md`: all §2 errata; the §1 verdicts (cap restated per rendered group; grouped rendering generalized; alarm coverage moved to session level; zone-type + label ratified); the §3 runtime vocabulary as authored tables (attest, session items, property flags, zone attributes, N/A reasons, layers) so `overrides.ts` shrinks to whatever this file still cannot express.
 
-**Changelog v1 → v1.1**
-- Errata 1–9 fixed (review §2): `wet.under-sink` satisfy corrected; `property.gas` added; `liv.egress` retriggered on `zone.sleeping`; `cir.stairs-rails` on `zone.has_stairs`; `liv.fireplace` untriggered + demoted (N/A path; session catch added instead); pin-type alternatives use `a|b`; missing pin types added (`floor-drain`, `cleanout`, `backwater-valve`, `register`, `vent-termination`, `appliance`); all 18 unnamed `satisfy: pin` items resolved (typed, or re-authored as check/photo/note where the two-list model made that more honest); `binder` marked optional and dropped from tables (traceability is a later content pass).
-- `attest` column authored on every item (review §3.3 + owner decision): `evidence` = software may propose satisfaction, one human tap confirms; `action` = a test — human attestation only, recorded as pass/fail + optional note, fail prompts an issue-flagged pin. Rendering: Documentation and Tests are separate sections, never mixed.
-- Session items added (review §3.2 / verdict 6): alarm-coverage judgment, post-water-run re-checks (moved out of `wet-base`/`basement`), interior-exhaust ↔ exterior-termination reconciliation, intake-trigger confirmation, wood-heat pinned catch. `wet.below-check` removed; `bsm.ceiling-wet-rooms` reworded to the pre-look only.
-- Tier discipline restated (verdicts 3–4): the core cap is **per rendered group** (≤ ~8 core per base list, zone list, or component list); **every** zone audit renders grouped (group keys = inheritance source + pin identity); satisfied groups collapse.
-- §7 normalized to generator-parseable tables with ids; stubs carry reserved ids.
+**Changelog v1.1 → v1.2** (adjudicates the v1.2 change-request list, CHECKLIST-MASTER-REVIEW §6):
+- **Accepted — egress gap:** `liv.egress` moved from the `living-space` list into `interior-base` (its `zone.sleeping` trigger comes with it), so *any* interior zone marked as sleeping — including a basement rec room — carries the core egress item. Id retained per id-stability rule; the `liv.` prefix is now historical, which is fine (ids are opaque).
+- **Accepted with a different remedy — `elv.hose-bibs`:** diagnosis correct (an `evidence` item whose text claimed a test). Remedy adjusted: the pressure test already exists as `utl.pressure` (action); the elv text was a stale echo, now deleted. A per-pin `hb.pressure` is deliberately **not** added — component items attach to every pin of the type, which would demand the test at every bib when it is performed once per house. `utl.pressure` text now names where the gauge goes.
+- **Accepted — stale test verbs:** `utl.sump`, `gar.door-reverse`, `elv.deck` reworded to pin-only language; their tests live where they belong, as action items on the component (`sp.bucket`, `gd.beam`/`gd.pressure`, `dk.rails`/`dk.ledger`).
+- **Accepted — internal defects:** "table E" references corrected to table C; §2 group-key formula now includes authored sub-headings; §0 now declares the trigger-cell `a|b` shorthand. **Both generator readings implemented pending ratification are hereby ratified as authored** (sub-headings as group keys; `a|b` = anyOf with prefix inheritance).
+- **Accepted — restore:** `fp.chimney` (fireplace ↔ chimney linkage) restored as a standard evidence item.
+- **Rejected as intentional drops:** `alm.location` and the receptacle location fragment (the pin's anchor and zone assignment *are* the location record — a text field would duplicate the canvas); `cir.smoke-placement` (absorbed by `ses.alarm-coverage` per review verdict 6 — restoring it per-zone recreates the wallpaper that verdict removed). Downspout↔grading linkage deferred to the guidance content pass.
+
+**Changelog v1 → v1.1** (retained for the record): all nine review errata fixed; `attest` authored on every item with the Documentation/Tests two-list rule; session items added; tier cap restated per rendered group; §7 normalized to generator-parseable tables; vocabulary tables A–D added.
 
 ---
 
-## 0. Table dialect (for the generator — v1.1)
+## 0. Table dialect (for the generator — v1.2)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
-- Satisfy cell sub-parses as before: pin types inline (`` pin `water-main` ``, alternatives `` pin `furnace|boiler|heat-pump` ``), measure units in parens (`measure (psi)`).
-- Vocabulary tables (§§ A–E at end): columns as declared per table.
+- Satisfy cell sub-parses: pin types inline (`` pin `water-main` ``, alternatives `` pin `furnace|boiler|heat-pump` ``), measure units in parens (`measure (psi)`).
+- **Trigger cells:** `|` means anyOf; ids after the first inherit the prefix of the first (`property.gas|propane` ⇒ `property.gas` OR `property.propane`).
+- Vocabulary tables (A–D at end): columns as declared per table.
 - Malformed rows fail closed.
 
 ---
@@ -28,7 +31,7 @@
 Items attach three ways:
 - **Zone items** — properties of the space (present from zone creation, composed by inheritance).
 - **Component items** — properties of a thing (attach when a typed pin is created; travel with it).
-- **Session items** — properties of the house or the visit as a whole (surface only in the session-close audit; review §3.2). Fewer than ten; not a third taxonomy, an attachment point.
+- **Session items** — properties of the house or the visit as a whole (surface only in the session-close audit). Fewer than ten; an attachment point, not a third taxonomy.
 
 **Inheritance:**
 ```
@@ -41,7 +44,7 @@ exterior-base ──┬── elevation
 
 ## 2. Item semantics
 
-**Tiers & rendering:** `core` surfaces loudly at the audit; `standard` lists quietly. Cap: ≤ ~8 core **per rendered group**. Every zone audit renders grouped; satisfied groups collapse. Close is never blocked; unresolved state is recorded with the close note.
+**Tiers & rendering:** `core` surfaces loudly at the audit; `standard` lists quietly. Cap: ≤ ~8 core **per rendered group**. Every zone audit renders grouped; group keys are the inheritance source, the zone's own list (split by authored sub-headings where present), and each pin's component list. Satisfied groups collapse. Close is never blocked; unresolved state is recorded with the close note.
 
 **Attest (always wins over satisfy kind):**
 - `evidence` — the item is satisfied by something existing (nameplate photo, typed pin, entered value). Matching evidence surfaces the item as *proposed* — one confirming human tap records it. Retiring the evidence reopens it.
@@ -49,7 +52,7 @@ exterior-base ──┬── elevation
 
 **Rendering rule (owner decision):** Documentation (`evidence`) and Tests (`action`) are separate sections in the zone panel and the close audit — never mixed. Tests are text-documented, not media-documented.
 
-**States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table E, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` N/A lands on the visit-two gap list automatically.
+**States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table C, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` and `no-access` N/A land on the visit-two gap list automatically.
 
 **Suggestions:** deterministic zone-type priors and (Stage 2) RoomPlan candidates may propose pin types; on-demand AI may suggest when asked. Proposals touch `evidence` items only, and only as proposals. Never automatic per-photo classification.
 
@@ -57,7 +60,7 @@ exterior-base ──┬── elevation
 
 Closed vocabulary: `property.*` (table A) · `zone.*` (table B) · `pin.*` (presence of a pin type in the zone). Combinators: allOf / anyOf / not.
 
-## 4. Zone taxonomy (ratified)
+## 4. Zone taxonomy
 
 Typed zone + editable label; **labels are display-only and never drive logic.**
 
@@ -81,18 +84,19 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 
 ### `interior-base`
 
-| id | text | satisfy | tier | attest | scope |
-|---|---|---|---|---|---|
-| `int.canvas` | Zone has a canvas (plan scan or wide photos covering all walls) | check | core | evidence | baseline |
-| `int.surfaces` | Ceiling, walls, floor scanned for stains, cracks, slope, separation | check | core | action | baseline |
-| `int.moisture-suspect` | Any stain or suspect area metered and the reading recorded | measure | core | action | baseline, monthly |
-| `int.windows` | Windows operated, locked, latched; seal-fog noted — pin defects | check | standard | action | baseline |
-| `int.doors` | Doors operate, latch, no binding | check | standard | action | baseline |
-| `int.receptacles` | Representative receptacles tested; every GFCI tripped and reset — pin failures as issues | check | core | action | baseline |
-| `int.lighting` | Switches and fixtures function | check | standard | action | baseline |
-| `int.registers` | Supply/return registers unblocked, airflow confirmed — pin problem registers | check | standard | action | baseline |
-| `int.alarms` | Smoke/CO alarms in this zone pinned (manufacture dates photographed) | pin `smoke-alarm\|co-alarm` | standard | evidence | baseline, monthly |
-| `int.owner-quirks` | Anything the owner flagged in this room verified and captured | note | standard | action | baseline |
+| id | text | satisfy | tier | attest | scope | trigger |
+|---|---|---|---|---|---|---|
+| `int.canvas` | Zone has a canvas (plan scan or wide photos covering all walls) | check | core | evidence | baseline | — |
+| `int.surfaces` | Ceiling, walls, floor scanned for stains, cracks, slope, separation | check | core | action | baseline | — |
+| `int.moisture-suspect` | Any stain or suspect area metered and the reading recorded | measure | core | action | baseline, monthly | — |
+| `int.windows` | Windows operated, locked, latched; seal-fog noted — pin defects | check | standard | action | baseline | — |
+| `int.doors` | Doors operate, latch, no binding | check | standard | action | baseline | — |
+| `int.receptacles` | Representative receptacles tested; every GFCI tripped and reset — pin failures as issues | check | core | action | baseline | — |
+| `int.lighting` | Switches and fixtures function | check | standard | action | baseline | — |
+| `int.registers` | Supply/return registers unblocked, airflow confirmed — pin problem registers | check | standard | action | baseline | — |
+| `int.alarms` | Smoke/CO alarms in this zone pinned (manufacture dates photographed) | pin `smoke-alarm\|co-alarm` | standard | evidence | baseline, monthly | — |
+| `liv.egress` | Sleeping-room window egress: opens fully; size and sill height measured | measure | core | action | baseline | `zone.sleeping` |
+| `int.owner-quirks` | Anything the owner flagged in this room verified and captured | note | standard | action | baseline | — |
 
 ### `wet-base`
 
@@ -104,8 +108,6 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `wet.fan` | Exhaust fan runs, tissue test passed, termination traced to exterior | check | core | action | baseline |
 | `wet.caulk-grout` | Caulk and grout condition at all wet joints | check | standard | action | baseline |
 | `wet.surround-moisture` | Tub/shower/backsplash surround metered | measure | core | action | baseline |
-
-*(v1's `wet.below-check` moved to session item `ses.below-recheck`.)*
 
 ### `rough-base`
 
@@ -151,13 +153,13 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `utl.main-shutoff` | Main water shutoff pinned, photographed wide, tagged | pin `water-main` | core | evidence |
 | `utl.pipe-material` | Supply pipe material identified with close-up (copper/PEX/poly-B/Kitec/galv) | photo | core | evidence |
 | `utl.drain-material` | Drain/vent material identified (ABS/cast iron/clay evidence) | photo | core | evidence |
-| `utl.pressure` | Static water pressure measured | measure (psi) | core | action |
+| `utl.pressure` | Static water pressure measured (gauge threads onto any hose bib) | measure (psi) | core | action |
 | `utl.water-heater` | Water heater pinned | pin `water-heater` | core | evidence |
 
 **Drainage**
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `utl.sump` | Sump pinned and bucket-tested if present | pin `sump-pump` | core | evidence |
+| `utl.sump` | Sump pump pinned if present | pin `sump-pump` | core | evidence |
 | `utl.floor-drain` | Floor drain located, clear, trap primed | pin `floor-drain` | standard | evidence |
 | `utl.backwater` | Backwater valve located or confirmed absent | pin `backwater-valve` | core | evidence |
 | `utl.cleanout` | Sewer cleanout located | pin `cleanout` | standard | evidence |
@@ -223,7 +225,6 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 
 | id | text | satisfy | tier | attest | trigger |
 |---|---|---|---|---|---|
-| `liv.egress` | Sleeping-room window egress: opens fully, size and sill height | measure | core | action | `zone.sleeping` |
 | `liv.fireplace` | Fireplace/stove pinned if present (N/A otherwise) | pin `fireplace` | standard | evidence | — |
 
 ### `circulation`
@@ -236,7 +237,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `gar.door-reverse` | Overhead door pinned; auto-reverse tested — both beam and pressure | pin `garage-door` | core | evidence |
+| `gar.door-reverse` | Overhead door and opener pinned | pin `garage-door` | core | evidence |
 | `gar.fire-separation` | House door self-closes and latches; separation intact | check | core | action |
 | `gar.co-pathway` | CO pathway to living space assessed; alarm coverage | check | core | action |
 | `gar.slab` | Slab condition, cracks, drainage | check | standard | action |
@@ -268,9 +269,9 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `elv.downspouts` | Every downspout pinned at its discharge point | pin `downspout` | core | evidence |
-| `elv.hose-bibs` | Hose bibs pinned; one pressure-tested | pin `hose-bib` | core | evidence |
+| `elv.hose-bibs` | Hose bibs pinned | pin `hose-bib` | core | evidence |
 | `elv.windows-ext` | Windows/doors from outside: sills, flashing, seal fog | check | standard | action |
-| `elv.deck` | Decks/steps pinned; rails grab-tested; ledger connection | pin `deck` | core | evidence |
+| `elv.deck` | Decks and steps pinned | pin `deck` | core | evidence |
 | `elv.chimney` | Chimney pinned: cap, crown, flashing, mortar | pin `chimney` | core | evidence |
 | `elv.service-entry` | Electrical service entry, mast, meter captured | photo | core | evidence |
 | `elv.hvac-exterior` | AC/heat pump pinned: level, clearance, line insulation | pin `heat-pump` | core | evidence |
@@ -299,7 +300,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `ses.triggers-confirmed` | Intake-declared property flags confirmed or corrected on site | check | core | action | — |
 | `ses.wood-heat-pinned` | Wood-burning appliance pinned and WETT flag recorded | pin `fireplace` | core | evidence | `property.wood_heat` |
 
-## 7. Component library (normalized tables)
+## 7. Component library
 
 Dialect: `id | text | satisfy | tier | attest`.
 
@@ -438,6 +439,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `fp.clearances` | Clearances to combustibles | check | core | action |
 | `fp.wett` | Wood: WETT-class inspection flag recorded — never cleared by us | check | core | action |
 | `fp.gas-valve` | Gas: valve located | check | core | action |
+| `fp.chimney` | Associated chimney/flue pinned | pin `chimney` | standard | evidence |
 | `fp.sweep` | Last-sweep evidence noted | note | standard | evidence |
 
 ### `dryer-duct`
@@ -658,8 +660,8 @@ Dialect: `id | text | satisfy | tier | attest`.
 
 ---
 
-## 8. Deferred content passes (unchanged from v1 §8)
+## 8. Deferred content passes
 
-Monthly-subset coherence · seasonal mapping · stub components · guidance text (schema field exists; old slot guidance is raw material) · binder traceability marks.
+Monthly-subset coherence · seasonal mapping · stub components · guidance text (schema field exists; downspout↔grading linkage and similar cross-references land here) · binder traceability marks.
 
-**Status:** v1.1 — implements CHECKLIST-MASTER-REVIEW in full. Generator note: dialect gains the `attest` column and tables A–D; `overrides.ts` should shrink to layers-only or empty.
+**Status:** v1.2 — adjudicates CHECKLIST-MASTER-REVIEW §6 in full. Regeneration expected diffs: `liv.egress` relocated to interior-base; five zone-item texts changed; `fp.chimney` added; no id retired, no tier changed except as listed.

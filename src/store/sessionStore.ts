@@ -15,8 +15,8 @@ import { gateOutstanding } from "../engine/gate";
 import { zoneCounts } from "../engine/selectors";
 import { loadRoute } from "../config/loadRoute";
 import {
-  appendEvents, createSession, deleteMedia, listSessions, loadEvents,
-  loadSessionConfig, requestPersistence, setSessionStatus,
+  appendEventsV1 as appendEvents, createSession, deleteMedia, listSessions,
+  loadEventsV1 as loadEvents, loadSessionConfig, requestPersistence, setSessionStatus,
 } from "../storage/sessionRepo";
 import { db, type MediaRow, type ReviewJobRow, type SessionRow } from "../storage/db";
 import { drainReviews, enqueueZoneReview, pendingJobs, rearmFailedJobs } from "../review/queue";
@@ -321,7 +321,8 @@ export const useApp = create<AppStore>((set, get) => ({
     // Refold from storage: review events were appended outside the dispatch path.
     const { config } = get();
     if (config && get().sessionId === sessionId) {
-      const events = await loadEvents(sessionId);
+      // The store only ever drives v1 sessions today; v2 logs never reach this path.
+      const events = (await loadEvents(sessionId)) as SessionEvent[];
       set({ events, session: fold(config, events) });
     }
     await get().refreshReviewStatus();

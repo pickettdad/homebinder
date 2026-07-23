@@ -12,8 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "validate:config": "vitest run tests/engine/config.test.ts",
-    "gen:icons": "node scripts/gen-icons.mjs"
+    "validate:config": "vitest run tests/engine/config.test.ts tests/engine/checklists.test.ts",
+    "gen:icons": "node scripts/gen-icons.mjs",
+    "gen:checklists": "node scripts/gen-checklists.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.5",

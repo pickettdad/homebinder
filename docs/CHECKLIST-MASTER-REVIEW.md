@@ -217,3 +217,100 @@ downstream), Stage 1 adds:
 Monthly-subset coherence, seasonal mapping, stub components, and guidance text are
 content passes, not build blockers. Stage 1 implements `scope` filtering so the monthly
 pass is pure content work when it comes.
+
+---
+
+## 6. v1.1 intake review (2026-07-23)
+
+Master v1.1 landed and **implements this review in full** — verified item-by-item
+against v1 and the review: all 9 errata, the §1 verdicts (cap per rendered group,
+grouped rendering generalized, alarm coverage at session level, `int.alarms` demoted),
+`attest` on all 264 item rows, session items (5), and the vocabulary as authored tables
+(A–D). The generator (`scripts/gen-checklists.mts`) parses v1.1 directly and the
+config validates; the planned `overrides.ts` is unnecessary and was never created.
+Everything below is a **change-request list for master v1.2** — the master stays
+owner-edited, and none of it blocks generation.
+
+### Dialect decisions the generator implements, pending §0 ratification
+
+1. **Trigger-cell `a|b` shorthand** parses as `anyOf` with namespace-prefix
+   inheritance: `property.gas|propane` ≡ anyOf(property.gas, property.propane);
+   `—` = no trigger. §0 declares sub-parsing for the satisfy cell only — v1.2 should
+   add this one line so the fail-closed claim is honest.
+2. **Bold sub-headings are rendered-group keys** (items carry `group`). This is
+   load-bearing for the cap: without it the utility zone list is a single 14–17-core
+   group. The §2/changelog group-key formula ("inheritance source + pin identity")
+   should gain "+ declared sub-headings". With it, no group exceeds 6 core (CI asserts
+   ≤ 8).
+
+### The one to fix soonest
+
+3. **`elv.hose-bibs` — "one pressure-tested" is `evidence` and no `hose-bib`
+   component item carries a pressure test.** Unlike the parallel cases (sump →
+   `sp.bucket`, garage door → `gd.beam`/`gd.pressure`, deck → `dk.rails`, all action),
+   the only record of this test in the whole system is an item software may
+   propose-satisfy from pin creation — exactly what §3.3 forbids. v1.2: reword the
+   zone item to "Hose bibs pinned" and add `hb.pressure` (check, action) — or flip
+   the item to `action`.
+
+### Silent content loss v1 → v1.1 (confirm or restore, then changelog)
+
+4. `alm.location` [C] dropped from smoke/co-alarm — other components kept their
+   locate-photo items (`wm.wide`, `gs.wide`, `pnl.wide`, `sl.photo`), and alarm
+   locations feed `ses.alarm-coverage`'s judgment.
+5. `cir.smoke-placement` (core) removed — plausibly subsumed by `ses.alarm-coverage`,
+   but undocumented.
+6. Window/door **"egress dimensions if bedroom [C]"** dropped, and `liv.egress` lives
+   only in `living-space` — a sleeping basement rec-room or bunkie gets no core egress
+   item (only standard `bsm.windows-wells`). Recommend moving `liv.egress` into
+   `interior-base` with its `zone.sleeping` trigger (costs nothing where false).
+7. Four standard fragments dropped in the §7 normalization: `receptacle-gfci`
+   location, fireplace **chimney-linkage pin**, downspout **grading-tie**, tree
+   species. The two cross-links have no v1.1 successor of any kind.
+8. Changelog gaps: `ac-condenser` → `heat-pump` merge unmentioned; §8 claims
+   "unchanged from v1" but drops the parked apartment/condo bullet.
+
+### Minor consistency notes
+
+9. **"Table E" dangles**: §0 says "§§ A–E", §2 says "reason from table E" — tables
+   run A–D and N/A reasons are table C. (The generator anchors on real headings, so
+   this misleads only human readers.)
+10. Stale test language in three `evidence` zone items — `utl.sump` ("bucket-tested"),
+    `gar.door-reverse` ("auto-reverse tested"), `elv.deck` ("grab-tested"). Each test
+    IS separately gated by a core action component item, so the data has a backstop,
+    but the zone item renders under Documentation while its text claims a test.
+    Reword to pure pin-documentation text in v1.2.
+11. Attest-direction inconsistencies (fail-safe direction, no data risk):
+    `sit.shoreline`/`fc.comparison` are `action` while the equivalent
+    `rgh.comparison` is `evidence`; `wh.anode`/`hp.snow` are notes marked `action`.
+    Align or declare deliberate.
+12. Unconsumed zone attributes: `finished` is asked at every zone creation and drives
+    nothing (`bsm.finished-behind`'s "If finished:" is prose, untriggered — it nags in
+    unfinished basements); `has_plumbing`/`exterior_wall` are declared but unused.
+    Either trigger `bsm.finished-behind` on `zone.finished` or mark the attributes
+    reserved.
+
+---
+
+## 7. v1.2 adjudication record (2026-07-23)
+
+v1.2 landed and adjudicates §6; the generator regenerated **drift-clean on the first
+parse** (v1.2.0, 265 items — the +1 is the restored `fp.chimney`). Rulings accepted as
+final: egress → `interior-base` (any sleeping zone now carries the core item, id
+retained); hose-bib remedy via `utl.pressure` as the test's single home (right call —
+a per-pin `hb.pressure` would demand the test at every bib for a once-per-house
+measurement); stale test verbs stripped from the three evidence items; table refs and
+the group-key formula fixed; both generator dialect readings ratified as authored;
+`alm.location` / `rc.location` / `cir.smoke-placement` rejected as intentional (the
+pin's anchor is the location record; coverage lives in `ses.alarm-coverage`);
+downspout↔grading deferred to the guidance pass.
+
+**§6 items v1.2 did not adjudicate** (carried forward; none block anything):
+- §6.11 attest-direction inconsistencies — `sit.shoreline`/`fc.comparison` are
+  `action` while the equivalent `rgh.comparison` is `evidence`; `wh.anode`/`hp.snow`
+  are notes marked `action`. Fail-safe direction, cosmetic only.
+- §6.12 unconsumed zone attributes — `finished` is asked at every zone creation and
+  drives nothing (`bsm.finished-behind` remains untriggered prose); `has_plumbing` /
+  `exterior_wall` declared but unused.
+- `tr.species` (dropped v1 fragment, unmentioned) and the v1 "apartment/condo —
+  parked" marker, which now exists nowhere in the master.

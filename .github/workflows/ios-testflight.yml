@@ -90,8 +90,12 @@ jobs:
             printf '\n' >> "$APPDELEGATE"
             grep -v '^import ' "$f" >> "$APPDELEGATE" || true
           done
+          # Repoint the root controller at MainViewController by FLAT name only (drop customModule):
+          # UIKit then resolves it via NSClassFromString against the @objc(MainViewController) name,
+          # which is module-independent. Setting customModule="App" here is what black-screened build 3
+          # (unresolved class → UIKit falls back to a plain black UIViewController).
           STORYBOARD="ios/App/App/Base.lproj/Main.storyboard"
-          sed -i '' 's#customClass="CAPBridgeViewController" customModule="Capacitor"#customClass="MainViewController" customModule="App" customModuleProvider="target"#' "$STORYBOARD"
+          sed -i '' 's#customClass="CAPBridgeViewController" customModule="Capacitor"#customClass="MainViewController"#' "$STORYBOARD"
           grep -q 'customClass="MainViewController"' "$STORYBOARD" || { echo "ERROR: Main.storyboard root-controller patch did not apply — RoomPlan plugin would not register."; exit 1; }
 
       - name: Write the App Store Connect API key

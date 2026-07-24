@@ -120,7 +120,7 @@ let draining = false;
 /** Single-flight drain: processes due jobs for a session until none remain or offline. */
 export async function drainReviews(sessionId: string, callbacks: DrainCallbacks): Promise<void> {
   if (draining) return;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   const token = getAppToken();
   if (!token) return; // Second look not configured — quietly do nothing
   draining = true;
@@ -133,7 +133,7 @@ export async function drainReviews(sessionId: string, callbacks: DrainCallbacks)
       const job = due[0];
       if (!job) break;
       await runJob(job, token, callbacks);
-      if (typeof navigator !== "undefined" && !navigator.onLine) break;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) break;
     }
   } finally {
     draining = false;

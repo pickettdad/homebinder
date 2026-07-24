@@ -1,6 +1,9 @@
 node_modules/
 dist/
 dev-dist/
+# Stage 0: the native iOS project is generated on the CI runner (no Mac to commit one).
+# Committed once real native code lands — see PLAN-STAGE-0 §5.
+ios/
 # generated at build time by scripts/gen-icons.mjs (predev/prebuild hooks)
 public/icons/
 *.local

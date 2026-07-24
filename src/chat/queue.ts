@@ -5,6 +5,7 @@
  * The reply lands as a ChatReplyRecorded event whenever it lands — desk-side or on site.
  */
 import { db, type ChatJobRow } from "../storage/db";
+import { API_BASE } from "../config/apiBase";
 import { downscaleForReview } from "../review/downscale";
 import {
   CHAT_API_VERSION,
@@ -136,7 +137,7 @@ async function postChat(request: ChatRequest, token: string): Promise<ChatRespon
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": request.job.jobId, "X-HS-Token": token },
       body: JSON.stringify(request),

@@ -3,9 +3,12 @@
  * surprise refresh. The waiting service worker activates only on an explicit tap.
  */
 import { useRegisterSW } from "virtual:pwa-register/react";
+import { isNativePlatform } from "./platform";
 
 export function UpdateBanner() {
-  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
+  // Inside the native shell the app is the bundled `dist`; a service worker can't register
+  // on the `capacitor://` scheme (and isn't needed), so skip auto-registration there.
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW({ immediate: !isNativePlatform() });
   if (!needRefresh) return null;
   return (
     <div className="flex items-center justify-between gap-3 bg-teal-600 px-4 py-2 text-slate-950">

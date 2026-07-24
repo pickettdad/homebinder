@@ -7,6 +7,7 @@
  * session drops pending work.
  */
 import { db, type ReviewJobRow } from "../storage/db";
+import { API_BASE } from "../config/apiBase";
 import { appendEvents } from "../storage/sessionRepo";
 import type { RouteConfig } from "../engine/schema/routeConfig";
 import type { SessionEvent } from "../engine/schema/events";
@@ -217,7 +218,7 @@ async function postReview(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch("/api/review", {
+    const res = await fetch(`${API_BASE}/review`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -6,6 +6,7 @@ import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { suggestedPinTypes } from "../../engine/v2/checklist";
 import type { PinFlag } from "../../engine/v2/events";
 import { FlagChip, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
+import { ChatPanel } from "./ChatPanel";
 
 const FLAGS: PinFlag[] = ["fine", "monitor", "issue"];
 
@@ -216,6 +217,8 @@ export function PinScreen({ pinId }: { pinId: string }) {
           </BigButton>
         ))}
       </section>
+
+      <ChatPanel pinId={pinId} readOnly={ro} />
 
       <section className="flex flex-col gap-2">
         <h2 className="font-semibold text-slate-300">Placement ({pin.anchors.length} anchor{pin.anchors.length === 1 ? "" : "s"})</h2>

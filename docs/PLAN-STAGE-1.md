@@ -278,6 +278,13 @@ inbox · audit{zoneId} · export`.
 - **API base URL becomes configurable** (`VITE_API_BASE`, default same-origin `/api`) —
   the recon flagged that `capacitor://` origins break the same-origin assumption; doing
   it now costs nothing and unblocks Stage 0's shell pointing at Netlify.
+- **Interaction model — desk-side review is first-class (owner, 2026-07-25).** The likely
+  *common* case is asynchronous: the inspector photographs and moves on in the field, then
+  works through pins **at the desk that evening**. In-field chat is the exception (ask on
+  site to capture more before leaving). So the thread is a normal pin/zone panel — full
+  history, readable and continuable at a desk — **not** a one-handed field widget. The
+  recorded-not-streamed design already fits this: an ask enqueues, a reply lands whenever
+  it lands (evening, online), and the thread reads like a conversation either place.
 
 ## 7. Manifest v3 (the binder-builder contract)
 
@@ -319,6 +326,41 @@ because the manifest carries both the ingredients (pins with type/flag/anchors) 
 definitions (the config snapshot's `layers`) — the binder builder derives the shutoffs
 map / issues index from those two, and the schema comment says so.
 
+### 7a. The manifest is a ROUND TRIP, not a one-way export (owner, 2026-07-25)
+
+Field → binder builder is the manifest above. **Binder builder → field is a *session
+plan***: a per-property, per-visit list of carried items imported at session start and
+surfaced *alongside* the standard checklist:
+
+- deferred / no-access gaps from prior visits, monitors due for re-measure, comparison
+  positions due for re-shoot, owner-flagged follow-ups, equipment service verifications.
+
+**Contract — specify both sides in step 7 even though the import can't be built until the
+binder builder exists:**
+- **Session plan is SESSION DATA, never config.** Config stays versioned /
+  content-hashed / byte-identical everywhere; the session plan is per-property and must
+  never touch the generated config or its hash. It rides in as its own import artifact,
+  folds into session state as (probably) session-scoped items + pre-seeded pin
+  expectations, and is provenance-tagged `system` with its source binder id.
+- **Why this is load-bearing, not a nicety:** it is *the recurring-visit mechanism*. A
+  monthly visit = standard monthly-scope items **+ this house's open items**. Without the
+  import the app can only run generic visits — it can't know this house carried three
+  deferred gaps and a monitor due for re-measure. Design the import shape now so step 7's
+  manifest is the matching half of the contract.
+
+### 7b. Equipment-registry guarantees (future third product: regional equipment analytics)
+
+Cross-client regional equipment analytics is a future product; the manifest is its data
+source, so every **equipment pin** must carry, guaranteed:
+- **canonical component type** where one exists (not just the freeform/nickname);
+- **verbatim nickname and freeform text** (already in §7 telemetry);
+- a **nameplate photo reference** (the mediaId of the nameplate shot);
+- any **age evidence** — install date, serial — captured as structured fields, not buried
+  in a note.
+- **Longitudinal identity:** permanent pin numbers already give a pin the same identity
+  across visits — **preserve that explicitly in the manifest** (pin number is the join key
+  a cross-visit/cross-client aggregator relies on).
+
 ## 8. Testing + acceptance
 
 - Unit (Vitest, extending the existing suites): fold v2 (zones/pins/anchors/retag/
@@ -348,7 +390,13 @@ map / issues index from those two, and the schema comment says so.
    (`engine/v2/layers.ts`); canvas chip row filters anchor dots by flag/component
    type, only offering layers that match a pin on that canvas. Export layer views
    reuse the same predicate (per §7).
-6. Chat: protocol, function, queue, pin/zone UI, offline path (§6)
+6. ✅ Chat: protocol, function, queue, pin/zone UI, offline path (§6) — recorded
+   (not streamed) `claude-sonnet-5` assistant; `src/chat/{protocol,queue}.ts` +
+   `netlify/functions/chat.mts` + `lib/chatCore.ts` (doctrine + word-lint backstop);
+   pin-scoped `ChatPanel` (desk-side first-class); "ask anyway" offline via the
+   ChatMessageSent-then-queue path; AI provenance on replies. Zone scope is wired
+   through the engine; the zone-scope UI is a fast follow. (Note: the v1 SecondLook
+   review function is retired in step 7, not here — chat runs alongside it until then.)
 7. Manifest v3 + export rework; delete slot machinery + SecondLook + review function (§1)
 8. Deploy, smoke, field test 4
 

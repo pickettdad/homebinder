@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
-import { BigButton, formatBytes } from "../ui/bits";
+import { BigButton, Sheet, formatBytes } from "../ui/bits";
+import { getAppToken, setAppToken } from "../chat/queue";
 
 export function HomeScreen() {
   const {
@@ -11,6 +12,8 @@ export function HomeScreen() {
   // state = the disabled-button visual.
   const resumingRef = useRef(false);
   const [resuming, setResuming] = useState(false);
+  const [tokenSheet, setTokenSheet] = useState(false);
+  const [tokenDraft, setTokenDraft] = useState("");
   const tryResume = (id: string) => {
     if (resumingRef.current) return;
     resumingRef.current = true;
@@ -87,8 +90,41 @@ export function HomeScreen() {
             {storage.persisted ? "persistent" : "NOT persistent — install to home screen"}
           </p>
         )}
-        <p className="mt-1">Offline-first: nothing here ever waits on a network.</p>
+        <p className="mt-1">
+          Offline-first: nothing here ever waits on a network.{" "}
+          <button type="button" className="underline" onClick={() => setTokenSheet(true)}>
+            AI assistant: {getAppToken() ? "on" : "set up"}
+          </button>
+        </p>
       </footer>
+
+      <Sheet open={tokenSheet} onClose={() => setTokenSheet(false)} title="AI assistant setup">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-slate-300">
+            Paste the app token (the <span className="font-mono">HS_APP_TOKEN</span> value from the
+            Netlify site's environment variables). The in-pin assistant stays off until this is set —
+            everything else works without it, and you can still ask questions offline; they answer once
+            the token is in and you're online.
+          </p>
+          <input
+            value={tokenDraft}
+            onChange={(e) => setTokenDraft(e.target.value)}
+            placeholder="app token"
+            className="rounded-xl bg-slate-900 p-3 font-mono text-sm text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+          />
+          <BigButton
+            disabled={!tokenDraft.trim()}
+            onClick={() => {
+              setAppToken(tokenDraft);
+              setTokenDraft("");
+              setTokenSheet(false);
+              showToast("Assistant configured");
+            }}
+          >
+            Save token
+          </BigButton>
+        </div>
+      </Sheet>
     </div>
   );
 }

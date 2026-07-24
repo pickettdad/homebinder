@@ -353,3 +353,30 @@ with their own item lists.
 
 **Cross-refs:** nickname/freeform manifest fields (`PLAN-STAGE-1.md` §7); the
 type-scoped plan-anchor rule that will also read off these types (`PLAN-STAGE-2-NOTES.md`).
+
+**Owner adjudication (2026-07-25) — sub-types INHERIT the parent's item list.** A
+component sub-type does not restate its parent's items; it inherits them and adds only
+its distinctive ones, mirroring the zone-type→base-list inheritance already in the master:
+
+- `water-treatment` becomes a **base** component list: nameplate, position in train,
+  settings, consumables, bypass.
+- `water-softener` **inherits** that and adds only: salt level & bridging, resin age,
+  regeneration cycle.
+- `sediment-filter` inherits and adds: cartridge spec, change date.
+
+Consequences (why this is the right shape): a split is **three or four new lines, not a
+restated eight**; shared checks stay **byte-identical** across sub-types (no drift); and
+**no split can silently drop a parent item** (inheritance guarantees the base is always
+present). Vocabulary still lands in the master during the content pass, telemetry-driven —
+not invented now.
+
+**Generator effort (flagged per owner request): moderate, not trivial, low-risk.** No
+component-list inheritance exists today — component lists are standalone (`genChecklists.ts`
+parses `types` + `items` per heading; only *zone types* carry `inherits`). Adding it means:
+(1) a `inherits?` field on `componentListSchema`; (2) the generator reads an "inherits"
+annotation on a component heading, same dialect as the zone-type table's inherits column;
+(3) `deriveComponentItems` walks the chain and composes parent-then-own items (dedup by id,
+own wins), exactly as `deriveZoneItems` already composes base lists; (4) tests. The pattern
+is established (zone-type inheritance), so this is a focused, well-bounded change to land
+alongside the content pass — not a blocker, and nothing to build until the vocabulary is
+authored.

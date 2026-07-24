@@ -30,6 +30,26 @@ import {
 import { db, type MediaRow, type ReviewJobRow, type SessionRow } from "../storage/db";
 import { drainReviews, enqueueZoneReview, pendingJobs, rearmFailedJobs } from "../review/queue";
 import type { ZoneSummaryResponse } from "../review/protocol";
+import { drainChat, rearmFailedChat } from "../chat/queue";
+import type { ChatResponse, ChatScope } from "../chat/protocol";
+
+type ChatTarget = { kind: "pin"; id: string } | { kind: "zone"; id: string };
+
+/** Snapshot the pin/zone the thread is about, for the stateless chat request. */
+function buildChatScope(s: SessionStateV2, target: ChatTarget): ChatScope {
+  if (target.kind === "pin") {
+    const p = s.pins.find((x) => x.pinId === target.id);
+    const zone = p?.zoneId ? s.zones.find((z) => z.zoneId === p.zoneId) : undefined;
+    const notes = (p?.noteIds ?? []).map((id) => s.notes.get(id)?.text).filter((t): t is string => !!t);
+    const type = p?.pinType?.kind === "component" ? p.pinType.componentType : p?.pinType?.kind === "freeform" ? p.pinType.label : undefined;
+    return { kind: "pin", pinNumber: p?.number ?? 0, pinType: type, label: p?.label, flag: p?.flag ?? null, zoneLabel: zone?.label, zoneType: zone?.zoneType, notes };
+  }
+  const zone = s.zones.find((z) => z.zoneId === target.id);
+  const pinIndex = s.pins
+    .filter((p) => p.zoneId === target.id && !p.retired)
+    .map((p) => ({ number: p.number, type: p.pinType?.kind === "component" ? p.pinType.componentType : undefined, flag: p.flag ?? null }));
+  return { kind: "zone", zoneLabel: zone?.label ?? "", zoneType: zone?.zoneType ?? "", pinIndex };
+}
 
 /**
  * Structural edits (new pins, canvases, anchors, filing captures) are refused when the
@@ -133,6 +153,10 @@ interface AppStore {
   completeSessionV2(): Promise<void>;
   /** Un-complete a finished visit so it can be edited again; the reason is logged. */
   reopenSessionV2(reason: string): Promise<void>;
+  /** Ask the in-product assistant about a pin/zone; records the ask, queues the reply. */
+  sendChatMessage(target: ChatTarget, text: string, mediaIds: string[]): Promise<void>;
+  /** Drain queued chat asks (single-flight; no-ops offline or without a token). */
+  drainChatNow(): Promise<void>;
 
   dispatch(payloads: EventPayload[], media?: MediaRow[]): Promise<void>;
   capturePhoto(slotInstanceId: string, file: File | Blob, mime?: string): Promise<string>;
@@ -470,6 +494,74 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "SessionReopened", reason: reason.trim() }]);
     await setSessionStatus(sessionId, "active");
     await get().refreshSessions();
+  },
+
+  async sendChatMessage(target, text, mediaIds) {
+    const { sessionId, v2Session } = get();
+    if (!sessionId || !v2Session) throw new Error("no active v2 session");
+    // Continue the target's existing thread, or open one.
+    const existing = [...v2Session.chats.values()].find((t) => t.target.kind === target.kind && t.target.id === target.id);
+    const threadId = existing?.threadId ?? uuidv7();
+    await get().dispatchV2([{ type: "ChatMessageSent", threadId, target, text: text.trim(), mediaIds }]);
+    const jobId = uuidv7();
+    const now = new Date().toISOString();
+    // The ask is recorded (above) whether or not there's a network; the job drives the
+    // reply fetch. "Ask anyway" offline is therefore free — it drains when back online.
+    await db.transaction("rw", [db.chatJobs, db.outbox], async () => {
+      await db.chatJobs.add({ jobId, sessionId, threadId, status: "pending", attempts: 0, nextAttemptAt: now, createdAt: now });
+      await db.outbox.add({ sessionId, refType: "chat", refId: jobId, status: "pending", attempts: 0, createdAt: now });
+    });
+    void get().drainChatNow();
+  },
+
+  async drainChatNow() {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    await rearmFailedChat(sessionId);
+    await drainChat(sessionId, {
+      configHash: () => get().v2Session?.configHash ?? "",
+      getThread: (threadId) => {
+        const s = get().v2Session;
+        const thread = s?.chats.get(threadId);
+        if (!s || !thread) return null;
+        return {
+          scope: buildChatScope(s, thread.target),
+          turns: thread.messages.map((m) => ({ role: m.role, text: m.text, mediaIds: m.mediaIds ?? [] })),
+        };
+      },
+      applyReply: async (job, response: ChatResponse) => {
+        // Idempotent: the job-status guard shares the transaction with the append.
+        await db.transaction("rw", [db.sessions, db.events, db.media, db.outbox, db.chatJobs], async () => {
+          const current = await db.chatJobs.get(job.jobId);
+          if (!current || current.status === "done") return;
+          await appendAnyEvents(
+            job.sessionId,
+            [{ type: "ChatReplyRecorded", threadId: job.threadId, model: response.model, text: response.text, usage: response.usage }],
+            [],
+            { actor: "ai", actorId: response.model, device: "server", appVersion: "0.5.0" },
+          );
+          await db.chatJobs.update(job.jobId, { status: "done" });
+          await db.outbox.where("sessionId").equals(job.sessionId).filter((r) => r.refType === "chat" && r.refId === job.jobId).modify({ status: "synced" });
+        });
+      },
+      recordFailure: async (job, code) => {
+        await appendAnyEvents(
+          job.sessionId,
+          [{ type: "ChatFailed", threadId: job.threadId, jobId: job.jobId, code }],
+          [],
+          { actor: "system", actorId: "app", device: "client", appVersion: "0.5.0" },
+        );
+      },
+    });
+    // Chat events were appended outside dispatchV2 — refold from storage if still active.
+    // Guard on the init event: a session torn down mid-drain reloads to empty, and
+    // foldV2 rightly throws without it — skip rather than crash the drain.
+    if (get().sessionId === sessionId && get().v2Session) {
+      const v2Events = (await loadStoredEvents(sessionId)) as V2SessionEvent[];
+      if (v2Events.some((e) => e.type === "SessionInitialized")) {
+        set({ v2Events, v2Session: foldV2(v2Events) });
+      }
+    }
   },
 
   async dispatch(payloads, media = []) {

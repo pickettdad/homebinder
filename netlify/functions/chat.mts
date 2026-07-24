@@ -17,11 +17,13 @@ import { buildChatSystemPrompt, buildScopeContext, lintReply } from "./lib/chatC
 import type { ChatRequest, ChatResponse, ChatErrorEnvelope } from "../../src/chat/protocol";
 
 const MODEL = process.env.HS_CHAT_MODEL ?? "claude-sonnet-5";
-// Sonnet 5 runs adaptive thinking by default (we omit the thinking param) and rejects
-// budget_tokens / non-default sampling with a 400, so we set neither. The new tokenizer
-// runs ~30% heavier, so max_tokens is generous — a tight cap would truncate a reply that
-// is mostly thinking (verified against the claude-api migration guide, 2026-07-25).
-const MAX_TOKENS = 8192;
+// Sonnet 5 runs adaptive thinking by default, which can push a reply past Netlify's ~10s
+// function limit and leave the field app hanging on "Thinking…". This is a short, one-shot
+// field Q&A — extended thinking buys little here — so we turn it off explicitly (Sonnet 5
+// accepts {type:"disabled"}; it rejects budget_tokens / non-default sampling with a 400).
+// With thinking off, a modest cap is plenty for a field reply and keeps us well inside the
+// timeout. The tokenizer runs ~30% heavier, so 2048 still leaves generous headroom.
+const MAX_TOKENS = 2048;
 const MAX_IMAGES = 12;
 const MAX_BODY_BYTES = 5_500_000;
 
@@ -95,6 +97,7 @@ export default async function handler(req: Request): Promise<Response> {
     const message = await client.messages.create({
       model: MODEL,
       max_tokens: MAX_TOKENS,
+      thinking: { type: "disabled" }, // one-shot field Q&A; keep latency under the function timeout
       system: buildChatSystemPrompt(),
       messages,
     });

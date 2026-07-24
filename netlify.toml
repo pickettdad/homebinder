@@ -7,7 +7,10 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# Same-origin /api/* → the functions. Wildcard so every function (chat, review, and any
+# future one) is reachable without a per-endpoint redirect — the missing /api/chat rule
+# is what made the assistant hang on "Thinking…".
 [[redirects]]
-  from = "/api/review"
-  to = "/.netlify/functions/review"
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
   status = 200

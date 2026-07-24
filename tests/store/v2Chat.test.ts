@@ -14,11 +14,16 @@ const threadFor = (pinId: string) =>
   [...s().v2Session!.chats.values()].find((t) => t.target.id === pinId)!;
 
 async function settleChat() {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 100; i++) {
     await new Promise((r) => setTimeout(r, 0));
-    const jobs = await db.chatJobs.toArray();
-    if (jobs.length > 0 && jobs.every((j) => j.status === "done" || j.status === "failed")) return;
     await s().drainChatNow();
+    const jobs = await db.chatJobs.toArray();
+    if (jobs.length > 0 && jobs.every((j) => j.status === "done" || j.status === "failed")) {
+      // Job terminal ⟹ its event is already committed (apply is atomic; failure records
+      // the event before flipping status). One more drain to refold that event into the store.
+      await s().drainChatNow();
+      return;
+    }
   }
 }
 
@@ -29,7 +34,9 @@ beforeEach(async () => {
     setItem: (k: string, v: string) => void mem.set(k, v),
     removeItem: (k: string) => void mem.delete(k),
   });
-  vi.stubGlobal("navigator", { onLine: true });
+  // Mimic Node's global navigator: present, but WITHOUT `onLine` (undefined) — the CI
+  // condition that must NOT be read as "offline" by the drain's guard.
+  vi.stubGlobal("navigator", { userAgent: "node-test" });
   await Promise.all([
     db.sessions.clear(), db.configSnapshots.clear(), db.events.clear(),
     db.media.clear(), db.outbox.clear(), db.chatJobs.clear(),

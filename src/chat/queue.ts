@@ -56,7 +56,7 @@ let draining = false;
 /** Single-flight drain: process due chat jobs for a session until none remain or offline. */
 export async function drainChat(sessionId: string, callbacks: ChatDrainCallbacks): Promise<void> {
   if (draining) return;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return;
   const token = getAppToken();
   if (!token) return; // assistant not configured — quietly hold the queue
   draining = true;
@@ -69,7 +69,7 @@ export async function drainChat(sessionId: string, callbacks: ChatDrainCallbacks
       const job = due[0];
       if (!job) break;
       await runJob(job, token, callbacks);
-      if (typeof navigator !== "undefined" && !navigator.onLine) break;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) break;
     }
   } finally {
     draining = false;
@@ -167,8 +167,10 @@ async function handleFailure(
 ): Promise<void> {
   const attempts = job.attempts + 1;
   if (!retryable || attempts >= MAX_ATTEMPTS) {
-    await db.chatJobs.update(job.jobId, { status: "failed", attempts, lastErrorCode: code });
+    // Record the ChatFailed event BEFORE flipping the job to failed, so any observer
+    // that sees a failed job is guaranteed the failure is already in the log.
     await callbacks.recordFailure(job, code);
+    await db.chatJobs.update(job.jobId, { status: "failed", attempts, lastErrorCode: code });
     return;
   }
   const backoff = retryAfterMs ?? BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)]!;

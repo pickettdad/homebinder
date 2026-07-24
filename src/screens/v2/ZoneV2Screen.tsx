@@ -14,11 +14,15 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   } = useApp();
   const [closeSheet, setCloseSheet] = useState(false);
   const [closeNote, setCloseNote] = useState("");
+  const [reopenSheet, setReopenSheet] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
   const [busy, setBusy] = useState(false);
 
   const zone = v2Session?.zones.find((z) => z.zoneId === zoneId);
   if (!v2Session || !v2Config || !zone) return null;
-  const ro = !!v2Session.completedAt; // completed inspection → view only until reopened
+  const sessionDone = !!v2Session.completedAt; // whole inspection completed
+  // A closed zone is locked too — no work slips in until it's reopened (and that's logged).
+  const locked = sessionDone || !!zone.closedAt;
 
   const pins = v2Session.pins.filter((p) => p.zoneId === zoneId && !p.retired);
   const canvases = zone.canvases.filter((c) => !c.retired);
@@ -47,10 +51,10 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             {audit.coreUnresolved.length} core open
           </p>
         </div>
-        {ro ? (
+        {sessionDone ? (
           <span className="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">viewing</span>
         ) : zone.closedAt ? (
-          <BigButton variant="secondary" onClick={() => void reopenZoneV2(zoneId)}>Reopen</BigButton>
+          <BigButton variant="secondary" onClick={() => { setReopenReason(""); setReopenSheet(true); }}>Reopen</BigButton>
         ) : (
           <BigButton variant="secondary" onClick={() => { setCloseNote(""); setCloseSheet(true); }}>
             Close
@@ -58,7 +62,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
         )}
       </header>
 
-      {ro && (
+      {sessionDone && (
         <p className="rounded-xl border border-slate-600 bg-slate-800/60 p-3 text-sm text-amber-200/90">
           Viewing a completed inspection. Reopen it from the property overview to make changes.
         </p>
@@ -75,7 +79,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-slate-300">Canvases</h2>
-          {!ro && (
+          {!locked && (
             <PhotoInput onPhoto={(file) => addCanvas(zoneId, file).then(() => showToast("Canvas added"))}>
               Add canvas
             </PhotoInput>
@@ -107,7 +111,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-slate-300">Pins</h2>
-          {!ro && <BigButton variant="secondary" disabled={busy} onClick={newPin}>New pin</BigButton>}
+          {!locked && <BigButton variant="secondary" disabled={busy} onClick={newPin}>New pin</BigButton>}
         </div>
         {pins.map((p) => (
           <PinRow key={p.pinId} pin={p} onClick={() => navigate({ name: "pin", pinId: p.pinId })} />
@@ -121,14 +125,14 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
 
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold text-slate-300">Checklist</h2>
-        <ChecklistPanel items={auditItems} readOnly={ro} />
+        <ChecklistPanel items={auditItems} readOnly={locked} />
       </section>
 
       <section className="flex items-center justify-between rounded-xl bg-slate-800 p-4">
         <p className="text-sm text-slate-300">
           Zone photos: {zone.photos.length} · audio: {zone.voiceNotes.length}
         </p>
-        {!ro && (
+        {!locked && (
           <PhotoInput
             onPhoto={(file) =>
               capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
@@ -173,6 +177,33 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             }}
           >
             Close zone
+          </BigButton>
+        </div>
+      </Sheet>
+
+      <Sheet open={reopenSheet} onClose={() => setReopenSheet(false)} title={`Reopen ${zone.label}`}>
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-slate-300">
+            Reopening unlocks this zone for changes and logs the reason. Close it again when
+            you're done.
+          </p>
+          <textarea
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+            placeholder="Reason (e.g. “forgot to test the GFCI”)"
+            rows={3}
+            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+          />
+          <BigButton
+            disabled={!reopenReason.trim()}
+            onClick={() => {
+              void reopenZoneV2(zoneId, reopenReason).then(() => {
+                setReopenSheet(false);
+                showToast("Zone reopened");
+              });
+            }}
+          >
+            Reopen zone
           </BigButton>
         </div>
       </Sheet>

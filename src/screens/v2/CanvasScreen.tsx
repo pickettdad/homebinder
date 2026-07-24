@@ -36,7 +36,8 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
   const canvas = zone?.canvases.find((c) => c.canvasId === canvasId);
   const url = useMediaUrl(canvas?.media.mediaId);
   if (!v2Session || !v2Config || !zone || !canvas) return null;
-  const ro = !!v2Session.completedAt; // completed inspection → view only until reopened
+  // View-only when the inspection is completed OR this canvas's zone is closed.
+  const ro = !!v2Session.completedAt || !!zone.closedAt;
 
   const placePin = placePinId ? v2Session.pins.find((p) => p.pinId === placePinId) : undefined;
   const anchored = v2Session.pins

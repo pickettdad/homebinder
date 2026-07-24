@@ -161,6 +161,42 @@ describe("v2 walk flow through the store", () => {
     expect([...groups].some((g) => g.includes("water-treatment — softener"))).toBe(true);
   });
 
+  it("a closed zone is locked: no new pins, canvases, or inbox filing until reopened (logged)", async () => {
+    const s = () => useApp.getState();
+    await s().startSessionV2({ propertyFlags: [] });
+    const utl = await s().createZone("utility", "Utility", {});
+    const mediaId = await s().capturePhotoV2({ kind: "inbox" }, jpeg("nameplate"));
+
+    await s().closeZoneV2(utl, "done here");
+    expect(s().v2Session?.zones[0]?.closedAt).toBeDefined();
+
+    // The back doors are all hard-refused at the store, not just hidden in the UI.
+    await expect(s().createPin(utl)).rejects.toThrow(/closed/);
+    await expect(s().createPinAt(utl, "c", 0.1, 0.1)).rejects.toThrow(/closed/);
+    await expect(s().addCanvas(utl, jpeg("wall"))).rejects.toThrow(/closed/);
+    await expect(s().reassignMedia(mediaId, { kind: "zone", id: utl })).rejects.toThrow(/closed/);
+    expect(s().v2Session?.inbox).toHaveLength(1); // capture never left the inbox
+
+    // Reopen with a reason unlocks it, and the reason is on the event log.
+    await s().reopenZoneV2(utl, "forgot the water heater");
+    expect(s().v2Session?.zones[0]?.closedAt).toBeUndefined();
+    const reopen = s().v2Events.find((e) => e.type === "ZoneReopened");
+    expect(reopen && "note" in reopen ? reopen.note : undefined).toBe("forgot the water heater");
+    const pinId = await s().createPin(utl); // works again
+    expect(s().v2Session?.pins.find((p) => p.pinId === pinId)).toBeDefined();
+  });
+
+  it("a completed inspection refuses structural edits until reopened", async () => {
+    const s = () => useApp.getState();
+    await s().startSessionV2({ propertyFlags: [] });
+    const utl = await s().createZone("utility", "Utility", {});
+    await s().completeSessionV2();
+    await expect(s().createPin(utl)).rejects.toThrow(/completed/);
+    await s().reopenSessionV2("more to add");
+    const pinId = await s().createPin(utl);
+    expect(s().v2Session?.pins.find((p) => p.pinId === pinId)).toBeDefined();
+  });
+
   it("egress lands in the sleeping guest room but not the utility room", async () => {
     const s = () => useApp.getState();
     await s().startSessionV2({ propertyFlags: [] });

@@ -285,18 +285,33 @@ inbox · audit{zoneId} · export`.
 verbatim event log + per-media sha256. Top level:
 
 ```
-session · config (checklist snapshot + hash — includes the layers definitions) ·
-zones[]: {zoneId, type, label, attributes, closedAt?, closeNote?,
+session (+ lifecycle[]: {type: completed|reopened, at, reason?} — the full
+         complete/reopen history, so re-work is auditable, owner req 2026-07-24) ·
+config (checklist snapshot + hash — includes the layers definitions) ·
+zones[]: {zoneId, type, label, level?, attributes, closedAt?, closeNote?,
           canvases[], audit: {items: [{itemId, tier, attest, status:
           satisfied|na|unresolved, via?, evidence?, naReason?}]}} ·
-pins[]:  {pinId, number, zoneId?, type?, flag?, anchors[], mediaIds[], noteIds[],
-          chatThreadIds[]} ·
+pins[]:  {pinId, number, zoneId?, type?, label?, flag?, anchors[], mediaIds[],
+          noteIds[], chatThreadIds[]} ·
 sessionAudit · inbox[] (unassigned at export — explicitly listed, never dropped) ·
 notes[] · chats[]: {threadId, target, messages[] with per-message Source} ·
 media[] (paths: `media/<zone-or-_misc>/pin-<number>/<mediaId>.<ext>`; canvas photos
 under `media/<zone>/_canvas/`; zone-targeted media with no pin under
 `media/<zone>/_zone/`) · totals · orphanEvents · events
 ```
+
+**Vocabulary telemetry (owner req 2026-07-24, manifest-only — no UI).** The type field on
+each pin must make two things machine-identifiable so the component library can grow from
+real usage:
+- **Freeform types** are flagged distinctly with their verbatim text (e.g.
+  `type: {kind: "freeform", label: "mystery box"}` — do NOT collapse to a bare string).
+  Aggregated across visits, recurring freeform labels are the signal a new component type
+  is warranted.
+- **Nicknames** (`pin.label`) export as their own field, never merged into the type.
+  Repeated nicknames under one component type are the split signal — three "softener"
+  nicknames under `water-treatment` means `water-softener` wants its own component list.
+  This is the empirical input to the CHECKLIST-MASTER-REVIEW §8 sub-type request; the
+  taxonomy is decided in the content pass, not invented here.
 
 Zip grouping stays per-zone (+ one `_misc`/inbox zip); `exportSession.ts` needs only the
 grouping key and path fn swapped. Layer *views* need no separate manifest section

@@ -6,8 +6,12 @@ import { BigButton } from "../../ui/bits";
 import type { PinFlag, PinTypeRef } from "../../engine/v2/events";
 import type { PinStateV2 } from "../../engine/v2/fold";
 
-/** Storey grouping for the walk list. UI structure, not checklist content. */
-export const ZONE_LEVELS = ["basement", "main", "second", "third", "attic", "exterior"] as const;
+/**
+ * Storey grouping for the walk list. UI structure, not checklist content.
+ * mid-level = split-entry / raised-bungalow half-storeys; outbuilding = a shed or barn
+ * INTERIOR (a zone of its own, distinct from "exterior" which is the house envelope).
+ */
+export const ZONE_LEVELS = ["basement", "mid-level", "main", "second", "third", "attic", "exterior", "outbuilding"] as const;
 
 export function defaultLevelFor(zoneTypeInherits: string[]): string {
   return zoneTypeInherits.includes("exterior-base") ? "exterior" : "main";

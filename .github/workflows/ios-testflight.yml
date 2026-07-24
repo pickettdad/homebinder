@@ -3,13 +3,14 @@
 # Manual trigger ONLY: macOS runner minutes bill ~10x, so this never runs per-push. The
 # existing ubuntu CI (ci.yml) is untouched — this is a separate, opt-in pipeline.
 #
-# First milestone = the "hello shell": the current PWA wrapped, no RoomPlan code, proving
-# enrollment -> signing -> upload -> TestFlight end-to-end before any Swift exists.
+# Hello-shell milestone: COMPLETE (2026-07-24) — signing proven end to end, installed on the
+# owner's iPad. This build now also carries the Stage 0 RoomPlan native plugin.
 #
-# The iOS project is GENERATED on the runner (`cap add ios`) rather than committed — the
-# owner has no Mac to generate/commit one, and the hello shell has no native code, so the
-# scaffold is deterministic. When native code (the RoomPlan plugin) lands in Stage 0's next
-# step, the `ios/` project gets committed and this "generate" step becomes a "sync" step.
+# The iOS project is GENERATED on the runner (`cap add ios`) rather than committed — the owner
+# has no Mac to generate/commit one. The RoomPlan Swift therefore lives in `native/ios/` and is
+# INJECTED into the generated project below (copied in + storyboard repointed at our plugin-
+# registering view controller), instead of the plan's original "commit ios/" step, which a
+# no-Mac setup can't do.
 #
 # Required repo secrets (see docs/STAGE-0-OWNER-SETUP.md):
 #   ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8 (full .p8 contents) · APPLE_TEAM_ID
@@ -70,6 +71,29 @@ jobs:
           # in ios/) because the ios/ project is generated on CI, so it survives every cap sync.
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || true
 
+          # --- Stage 0 RoomPlan native plugin (PLAN-STAGE-0 §4) ---
+          # No committed ios/ (no Mac), so the plugin's Swift lives in native/ios/ and is injected
+          # here. We APPEND the class bodies into the generated AppDelegate.swift — which is always in
+          # the target's compile sources — rather than dropping loose files into the project, which
+          # would NOT be compiled without editing project.pbxproj (or would depend on Xcode-16
+          # synchronized-group behavior we can't verify blind). Imports go to the top; class bodies to
+          # the bottom. Registration is by hand via a CAPBridgeViewController subclass, so we also
+          # repoint the storyboard's root controller at it (fail loudly if the format drifted).
+          APPDELEGATE="ios/App/App/AppDelegate.swift"
+          for imp in Foundation RoomPlan; do
+            if ! grep -qx "import $imp" "$APPDELEGATE"; then
+              printf 'import %s\n' "$imp" | cat - "$APPDELEGATE" > "$APPDELEGATE.tmp"
+              mv "$APPDELEGATE.tmp" "$APPDELEGATE"
+            fi
+          done
+          for f in native/ios/RoomPlanPlugin.swift native/ios/MainViewController.swift; do
+            printf '\n' >> "$APPDELEGATE"
+            grep -v '^import ' "$f" >> "$APPDELEGATE" || true
+          done
+          STORYBOARD="ios/App/App/Base.lproj/Main.storyboard"
+          sed -i '' 's#customClass="CAPBridgeViewController" customModule="Capacitor"#customClass="MainViewController" customModule="App" customModuleProvider="target"#' "$STORYBOARD"
+          grep -q 'customClass="MainViewController"' "$STORYBOARD" || { echo "ERROR: Main.storyboard root-controller patch did not apply — RoomPlan plugin would not register."; exit 1; }
+
       - name: Write the App Store Connect API key
         env:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
@@ -103,10 +127,14 @@ jobs:
           # CI guidance (PLAN-STAGE-0 §7's budgeted signing iteration). If a future runner rejects
           # exporting an unsigned archive, the fallback is to register one device UDID and restore
           # automatic development signing here — but distribution-at-export is the cleaner pattern.
+          # IPHONEOS_DEPLOYMENT_TARGET=17.0: the only device is on iPadOS 26, and RoomPlan needs
+          # iOS 16 (StructureBuilder 17), so target 17 lets the plugin use the API without
+          # per-call availability guards (PLAN-STAGE-0 §2).
           xcodebuild archive \
             "${CONTAINER[@]}" -scheme App -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGNING_ALLOWED=NO
 
           # signingStyle=automatic tells exportArchive to cloud-sign for distribution using the

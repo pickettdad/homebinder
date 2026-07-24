@@ -1,0 +1,104 @@
+# Stage 0 — build the native shell and upload to TestFlight (PLAN-STAGE-0 §5).
+#
+# Manual trigger ONLY: macOS runner minutes bill ~10x, so this never runs per-push. The
+# existing ubuntu CI (ci.yml) is untouched — this is a separate, opt-in pipeline.
+#
+# First milestone = the "hello shell": the current PWA wrapped, no RoomPlan code, proving
+# enrollment -> signing -> upload -> TestFlight end-to-end before any Swift exists.
+#
+# The iOS project is GENERATED on the runner (`cap add ios`) rather than committed — the
+# owner has no Mac to generate/commit one, and the hello shell has no native code, so the
+# scaffold is deterministic. When native code (the RoomPlan plugin) lands in Stage 0's next
+# step, the `ios/` project gets committed and this "generate" step becomes a "sync" step.
+#
+# Required repo secrets (see docs/STAGE-0-OWNER-SETUP.md):
+#   ASC_KEY_ID · ASC_ISSUER_ID · ASC_KEY_P8 (full .p8 contents) · APPLE_TEAM_ID
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps + build the web bundle
+        run: |
+          npm ci
+          npm run build
+
+      - name: Pin Xcode 26 (image default drifts weekly)
+        run: |
+          # Prefer a pinned 26.x; fall back to whatever 26 the image ships.
+          APP="/Applications/Xcode_26.5.app"
+          if [ ! -d "$APP" ]; then APP="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"; fi
+          echo "Using $APP"
+          sudo xcode-select -s "$APP/Contents/Developer"
+          xcodebuild -version
+
+      - name: Generate + sync the iOS project
+        run: |
+          npx cap add ios
+          npx cap sync ios
+          # WKWebView crashes on the PWA's camera/mic use without these usage strings.
+          PLIST="ios/App/App/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Photograph inspection findings, nameplates, and rooms.'" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Record audio evidence and dictate notes.'" "$PLIST" || true
+
+      - name: Write the App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          printf '%s' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Archive + upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          AUTH=(-authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+
+          # Capacitor 8 uses SPM (App.xcodeproj); older/CocoaPods setups produce a workspace.
+          if [ -d ios/App/App.xcworkspace ]; then
+            CONTAINER=(-workspace ios/App/App.xcworkspace)
+          else
+            CONTAINER=(-project ios/App/App.xcodeproj)
+          fi
+
+          xcodebuild archive \
+            "${CONTAINER[@]}" -scheme App -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -allowProvisioningUpdates "${AUTH[@]}" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic
+
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+          </dict></plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates "${AUTH[@]}"

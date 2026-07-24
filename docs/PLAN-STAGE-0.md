@@ -123,6 +123,19 @@ debug, or upload role — the pipeline is 100 % cloud CI.**
   RoomPlan code — proves enrollment, signing, upload, TestFlight install end-to-end
   before any Swift exists. Everything after is incremental.
 
+**Scaffolding status (2026-07-25).** The web-side shell (`capacitor.config.ts`,
+`@capacitor/*` deps, SW native no-op via `src/app/platform.ts`, `VITE_API_BASE`) and the
+`ios-testflight.yml` workflow are committed and the web build stays green. Two deliberate
+deviations from the plan-as-written, both forced by the no-Mac constraint:
+- **The `ios/` project is GENERATED on the runner** (`npx cap add ios`, `ios/` gitignored),
+  not committed — there's no Mac to generate/commit one, and the hello shell has zero
+  native code so the scaffold is deterministic. This flips to a committed `ios/` + a
+  `cap sync` step once the RoomPlan plugin (real Swift) lands.
+- **The workflow is authored but unproven from Linux.** iOS signing/export is inherently
+  un-testable off a Mac; the first `workflow_dispatch` (available only after this merges to
+  the default branch) is the real test, and the archive/export/signing step is exactly the
+  "budget one debugging session" line item in §7 — expect one iteration there.
+
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 
 At the owner's house, on the installed TestFlight build:

@@ -18,6 +18,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
 
   const zone = v2Session?.zones.find((z) => z.zoneId === zoneId);
   if (!v2Session || !v2Config || !zone) return null;
+  const ro = !!v2Session.completedAt; // completed inspection → view only until reopened
 
   const pins = v2Session.pins.filter((p) => p.zoneId === zoneId && !p.retired);
   const canvases = zone.canvases.filter((c) => !c.retired);
@@ -46,7 +47,9 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             {audit.coreUnresolved.length} core open
           </p>
         </div>
-        {zone.closedAt ? (
+        {ro ? (
+          <span className="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">viewing</span>
+        ) : zone.closedAt ? (
           <BigButton variant="secondary" onClick={() => void reopenZoneV2(zoneId)}>Reopen</BigButton>
         ) : (
           <BigButton variant="secondary" onClick={() => { setCloseNote(""); setCloseSheet(true); }}>
@@ -54,6 +57,12 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
           </BigButton>
         )}
       </header>
+
+      {ro && (
+        <p className="rounded-xl border border-slate-600 bg-slate-800/60 p-3 text-sm text-amber-200/90">
+          Viewing a completed inspection. Reopen it from the property overview to make changes.
+        </p>
+      )}
 
       {zone.closedAt && (
         <div className="rounded-xl border border-slate-600 bg-slate-800/60 p-4 text-sm text-slate-300">
@@ -66,9 +75,11 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-slate-300">Canvases</h2>
-          <PhotoInput onPhoto={(file) => addCanvas(zoneId, file).then(() => showToast("Canvas added"))}>
-            Add canvas
-          </PhotoInput>
+          {!ro && (
+            <PhotoInput onPhoto={(file) => addCanvas(zoneId, file).then(() => showToast("Canvas added"))}>
+              Add canvas
+            </PhotoInput>
+          )}
         </div>
         {canvases.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
@@ -96,7 +107,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-slate-300">Pins</h2>
-          <BigButton variant="secondary" disabled={busy} onClick={newPin}>New pin</BigButton>
+          {!ro && <BigButton variant="secondary" disabled={busy} onClick={newPin}>New pin</BigButton>}
         </div>
         {pins.map((p) => (
           <PinRow key={p.pinId} pin={p} onClick={() => navigate({ name: "pin", pinId: p.pinId })} />
@@ -110,20 +121,22 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
 
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold text-slate-300">Checklist</h2>
-        <ChecklistPanel items={auditItems} />
+        <ChecklistPanel items={auditItems} readOnly={ro} />
       </section>
 
       <section className="flex items-center justify-between rounded-xl bg-slate-800 p-4">
         <p className="text-sm text-slate-300">
           Zone photos: {zone.photos.length} · audio: {zone.voiceNotes.length}
         </p>
-        <PhotoInput
-          onPhoto={(file) =>
-            capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
-          }
-        >
-          Add photo
-        </PhotoInput>
+        {!ro && (
+          <PhotoInput
+            onPhoto={(file) =>
+              capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
+            }
+          >
+            Add photo
+          </PhotoInput>
+        )}
       </section>
 
       <Sheet open={closeSheet} onClose={() => setCloseSheet(false)} title={`Close ${zone.label}`}>

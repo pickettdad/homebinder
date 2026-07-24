@@ -107,6 +107,8 @@ export type V2SessionEvent =
   // ---- pins (numbers global, permanent, never reused)
   | (EventBase & { type: "PinCreated"; pinId: string; pinNumber: number; zoneId?: string })
   | (EventBase & { type: "PinTyped"; pinId: string; pinType: PinTypeRef })
+  /** Human sub-label / nickname — additive; the component type tag is unchanged. */
+  | (EventBase & { type: "PinLabeled"; pinId: string; label: string })
   | (EventBase & { type: "PinFlagged"; pinId: string; flag: PinFlag | null })
   | (EventBase & { type: "PinAssigned"; pinId: string; zoneId?: string })
   | (EventBase & { type: "PinRetired"; pinId: string; note?: string })
@@ -147,6 +149,8 @@ export type V2SessionEvent =
   | (EventBase & { type: "ChatFailed"; threadId: string; jobId: string; code: string })
   // ---- lifecycle
   | (EventBase & { type: "SessionCompleted" })
+  /** Un-completes a finished inspection so it can be edited again; reason is logged. */
+  | (EventBase & { type: "SessionReopened"; reason: string })
   | (EventBase & {
       type: "ExportProduced";
       manifestSha256: string;

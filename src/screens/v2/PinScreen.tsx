@@ -9,19 +9,21 @@ import { FlagChip, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
 
 const FLAGS: PinFlag[] = ["fine", "monitor", "issue"];
 
-/** One pin: the identity everything hangs off — type, flag, photos, notes, placement. */
+/** One pin: the identity everything hangs off — type, nickname, flag, photos, notes, placement. */
 export function PinScreen({ pinId }: { pinId: string }) {
   const {
-    v2Session, v2Config, navigate, setPinType, setPinFlag, retirePin,
+    v2Session, v2Config, navigate, setPinType, setPinLabel, setPinFlag, retirePin,
     capturePhotoV2, attachVoiceV2, discardMediaV2, addNote, editNote, showToast,
   } = useApp();
   const [typeSheet, setTypeSheet] = useState(false);
+  const [nick, setNick] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [editingNote, setEditingNote] = useState<{ id: string; text: string } | null>(null);
   const recorder = useVoiceRecorder();
 
   const pin = v2Session?.pins.find((p) => p.pinId === pinId);
   if (!v2Session || !v2Config || !pin) return null;
+  const ro = !!v2Session.completedAt; // completed inspection → view only until reopened
   const zone = v2Session.zones.find((z) => z.zoneId === pin.zoneId);
   const back = () =>
     navigate(pin.zoneId ? { name: "zone2", zoneId: pin.zoneId } : { name: "walk" });
@@ -29,12 +31,15 @@ export function PinScreen({ pinId }: { pinId: string }) {
   const typeChoices = suggestedPinTypes(v2Config, zone?.zoneType ?? "utility");
   const target = { kind: "pin" as const, id: pinId };
   const notes = pin.noteIds.map((id) => v2Session.notes.get(id)).filter((n) => n !== undefined);
+  // Nickname draft: null = not editing (mirror the saved value); a string = in-progress edit.
+  const nickValue = nick ?? pin.label ?? "";
+  const nickDirty = nick !== null && nick.trim() !== (pin.label ?? "");
 
   const stopRecording = async () => {
     const result = await recorder.stop();
     if (result) {
       await attachVoiceV2(target, result.blob, result.mime, result.durationMs);
-      showToast("Voice note attached");
+      showToast("Audio evidence attached");
     }
   };
 
@@ -44,7 +49,12 @@ export function PinScreen({ pinId }: { pinId: string }) {
         <BigButton variant="ghost" onClick={back}>←</BigButton>
         <PinBadge number={pin.number} />
         <div className="min-w-0 flex-1">
-          <button type="button" className="block truncate text-left text-xl font-bold text-teal-300 underline-offset-4 hover:underline" onClick={() => setTypeSheet(true)}>
+          <button
+            type="button"
+            disabled={ro}
+            className="block truncate text-left text-xl font-bold text-teal-300 underline-offset-4 hover:underline disabled:no-underline"
+            onClick={() => setTypeSheet(true)}
+          >
             {pinTypeLabel(pin.pinType)}
           </button>
           <p className="truncate text-sm text-slate-400">{zone?.label ?? "misc"}{pin.retired ? " · retired" : ""}</p>
@@ -52,13 +62,41 @@ export function PinScreen({ pinId }: { pinId: string }) {
         <FlagChip flag={pin.flag} />
       </header>
 
+      {ro && (
+        <p className="rounded-xl border border-slate-600 bg-slate-800/60 p-3 text-sm text-amber-200/90">
+          Viewing a completed inspection. Reopen it from the property overview to make changes.
+        </p>
+      )}
+
+      <section className="flex flex-col gap-1.5">
+        <label className="text-sm font-semibold text-slate-300">Nickname (what it actually is)</label>
+        <div className="flex gap-2">
+          <input
+            value={nickValue}
+            disabled={ro}
+            onChange={(e) => setNick(e.target.value)}
+            placeholder={pin.pinType?.kind === "component" ? `e.g. "chlorine tank" — keeps the ${pin.pinType.componentType} tag` : "e.g. “over the workbench”"}
+            className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500 disabled:opacity-60"
+          />
+          {nickDirty && (
+            <BigButton
+              variant="secondary"
+              onClick={() => void setPinLabel(pinId, nick ?? "").then(() => { setNick(null); showToast("Nickname saved"); })}
+            >
+              Save
+            </BigButton>
+          )}
+        </div>
+      </section>
+
       <section className="flex gap-2">
         {FLAGS.map((f) => (
           <button
             key={f}
             type="button"
+            disabled={ro}
             onClick={() => void setPinFlag(pinId, pin.flag === f ? null : f)}
-            className={`flex-1 rounded-xl px-3 py-3 font-semibold ring-1 ${
+            className={`flex-1 rounded-xl px-3 py-3 font-semibold ring-1 disabled:opacity-60 ${
               pin.flag === f
                 ? f === "issue"
                   ? "bg-rose-700 text-white ring-rose-500"
@@ -76,9 +114,11 @@ export function PinScreen({ pinId }: { pinId: string }) {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-slate-300">Photos ({pin.photos.length})</h2>
-          <PhotoInput onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast("Photo added"))}>
-            Add photo
-          </PhotoInput>
+          {!ro && (
+            <PhotoInput onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast("Photo added"))}>
+              Add photo
+            </PhotoInput>
+          )}
         </div>
         <div className="grid grid-cols-3 gap-2">
           {pin.photos.map((m) => (
@@ -86,7 +126,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
               key={m.mediaId}
               type="button"
               onClick={() => {
-                if (confirm("Discard this photo?")) void discardMediaV2(m.mediaId);
+                if (!ro && confirm("Discard this photo?")) void discardMediaV2(m.mediaId);
               }}
               className="overflow-hidden rounded-xl ring-1 ring-slate-700"
             >
@@ -121,31 +161,37 @@ export function PinScreen({ pinId }: { pinId: string }) {
                 </div>
               </div>
             ) : (
-              <button type="button" className="w-full text-left" onClick={() => setEditingNote({ id: n.noteId, text: n.text })}>
+              <button
+                type="button"
+                className="w-full text-left"
+                onClick={() => !ro && setEditingNote({ id: n.noteId, text: n.text })}
+              >
                 <p className="whitespace-pre-wrap text-slate-100">{n.text}</p>
                 <p className="mt-1 text-xs text-slate-500">{new Date(n.at).toLocaleTimeString()}{n.editedAt ? " · edited" : ""}</p>
               </button>
             )}
           </div>
         ))}
-        <div className="flex gap-2">
-          <textarea
-            value={noteDraft}
-            onChange={(e) => setNoteDraft(e.target.value)}
-            placeholder="Type or dictate a note…"
-            rows={2}
-            className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
-          />
-          <BigButton
-            variant="secondary"
-            disabled={!noteDraft.trim()}
-            onClick={() => {
-              void addNote(target, noteDraft.trim()).then(() => setNoteDraft(""));
-            }}
-          >
-            Add
-          </BigButton>
-        </div>
+        {!ro && (
+          <div className="flex gap-2">
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              placeholder="Type or dictate a note…"
+              rows={2}
+              className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            />
+            <BigButton
+              variant="secondary"
+              disabled={!noteDraft.trim()}
+              onClick={() => {
+                void addNote(target, noteDraft.trim()).then(() => setNoteDraft(""));
+              }}
+            >
+              Add
+            </BigButton>
+          </div>
+        )}
       </section>
 
       <section className="flex items-center justify-between gap-3 rounded-xl bg-slate-800 p-4">
@@ -155,7 +201,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
           </p>
           <p className="text-xs text-slate-500">For sounds — a rattling fan, a banging pipe. Notes are better typed or dictated above.</p>
         </div>
-        {recorder.state === "recording" ? (
+        {!ro && (recorder.state === "recording" ? (
           <BigButton variant="danger" onClick={() => void stopRecording()}>
             Stop {formatDuration(recorder.elapsedMs)}
           </BigButton>
@@ -167,7 +213,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
           >
             Record
           </BigButton>
-        )}
+        ))}
       </section>
 
       <section className="flex flex-col gap-2">
@@ -178,12 +224,12 @@ export function PinScreen({ pinId }: { pinId: string }) {
               <button
                 key={c.canvasId}
                 type="button"
-                onClick={() => navigate({ name: "canvas", canvasId: c.canvasId, zoneId: zone.zoneId, placePinId: pinId })}
+                onClick={() => navigate({ name: "canvas", canvasId: c.canvasId, zoneId: zone.zoneId, placePinId: ro ? undefined : pinId })}
                 className="relative shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-600"
               >
                 <Thumb mediaId={c.media.mediaId} className="h-24 w-36" />
                 <span className="absolute inset-x-0 bottom-0 bg-slate-950/70 py-0.5 text-center text-xs text-teal-300">
-                  {pin.anchors.some((a) => a.canvasId === c.canvasId) ? "placed — tap to add another" : "tap to place here"}
+                  {pin.anchors.some((a) => a.canvasId === c.canvasId) ? "placed" : ro ? "view" : "tap to place here"}
                 </span>
               </button>
             ))}
@@ -195,15 +241,17 @@ export function PinScreen({ pinId }: { pinId: string }) {
         )}
       </section>
 
-      <BigButton
-        variant="ghost"
-        onClick={() => {
-          if (confirm(`Retire pin #${pin.number}? Its number is never reused; the record stays.`))
-            void retirePin(pinId).then(back);
-        }}
-      >
-        Retire pin
-      </BigButton>
+      {!ro && (
+        <BigButton
+          variant="ghost"
+          onClick={() => {
+            if (confirm(`Retire pin #${pin.number}? Its number is never reused; the record stays.`))
+              void retirePin(pinId).then(back);
+          }}
+        >
+          Retire pin
+        </BigButton>
+      )}
 
       <Sheet open={typeSheet} onClose={() => setTypeSheet(false)} title={`Type for pin #${pin.number}`}>
         <TypePicker

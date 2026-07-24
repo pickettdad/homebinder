@@ -11,6 +11,23 @@ on your actual iPad.
 
 ---
 
+## ✅ STATUS (2026-07-24): the "hello shell" is DONE — it's on your iPad
+
+The whole pipeline is proven end-to-end: code → GitHub-rented Apple cloud Mac → signed build
+→ TestFlight → installed on the iPad. What it took, for the record:
+
+- The API key had to be **Admin** role, not App Manager (see Step 3 — corrected below).
+- Two one-time App Store Connect clicks to actually install: **add yourself to an Internal
+  Testing group**, and **answer the export-compliance question once** ("None of the above" —
+  the app uses only standard HTTPS). That second one is now **automated** going forward (the
+  build declares it), so you won't be asked again on future builds.
+
+The steps below are kept as the reference/how-it-was-set-up record. The one open item on the
+native app is a bug being fixed now: the **AI assistant** doesn't answer inside the installed
+app (it worked in the browser) — that's a wiring fix, not a signing problem.
+
+---
+
 ## First: "Doesn't the developer account come with Xcode Cloud? Is that what we're using?"
 
 Good question, and the short answer is **no — we're using GitHub, not Xcode Cloud, on
@@ -77,7 +94,11 @@ anywhere. You create it once.
 2. Click **Users and Access** (top menu).
 3. Click the **Integrations** tab, then **App Store Connect API** in the sidebar.
 4. Under **Team Keys**, click the **+** (Generate API Key).
-5. Name it something like `HouseSteady CI`. For **Access**, choose **App Manager**.
+5. Name it something like `HouseSteady CI`. For **Access**, choose **Admin**. ⚠️ **This must
+   be Admin, not App Manager.** App Manager can create a *Development* certificate but **not**
+   the *iOS Distribution* certificate that TestFlight/App Store signing needs — the build will
+   fail at export with "No signing certificate 'iOS Distribution' found." (Learned the hard way,
+   2026-07-24: an App Manager key got the build all the way to export before failing there.)
 6. Click **Generate**.
 7. You'll now see the key in a list. **Download the key file** (a file ending in `.p8`) by
    clicking **Download** next to it. ⚠️ **Apple lets you download it only once** — save it

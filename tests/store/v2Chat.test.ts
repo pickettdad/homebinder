@@ -118,4 +118,22 @@ describe("v2 chat through the store", () => {
     expect(threadFor(pin).lastFailure?.code).toBe("auth");
     expect((await db.chatJobs.toArray())[0]?.status).toBe("failed");
   });
+
+  it("a 2xx non-JSON response (wrong origin / SPA fallback) fails fast as 'misrouted', not forever", async () => {
+    setAppToken("tok");
+    await s().startSessionV2({ propertyFlags: [] });
+    const utl = await s().createZone("utility", "Utility", {});
+    const pin = await s().createPin(utl);
+
+    // The native-shell bug shape: API_BASE points at the wrong origin, so the request lands on
+    // the SPA/index.html (200, not our JSON) instead of the function. Must surface immediately
+    // (non-retryable) rather than back off into an endless "Thinking…".
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => null })));
+
+    await s().sendChatMessage({ kind: "pin", id: pin }, "hello?", []);
+    await settleChat();
+
+    expect(threadFor(pin).lastFailure?.code).toBe("misrouted");
+    expect((await db.chatJobs.toArray())[0]?.status).toBe("failed");
+  });
 });

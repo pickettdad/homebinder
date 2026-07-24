@@ -50,6 +50,16 @@ model as a side effect of unrelated work. (Sonnet 5 note: omit `budget_tokens`/s
 400; `thinking:{type:"disabled"}` is accepted and is how the proxy keeps replies under Netlify's
 function timeout.)
 
+**Stage 0 native shell — hard-won invariants.** (1) The CI **App Store Connect API key must
+have the Admin role** — App Manager can create a Development cert but *not* the iOS Distribution
+cert that TestFlight signing needs (the build fails at export otherwise). (2) The native build
+**must set `VITE_API_BASE`** to the Netlify origin (`ios-testflight.yml`, from `vars.HS_API_BASE`)
+— its own origin is `capacitor://localhost`, which has no functions, so a same-origin `/api`
+falls back to the local bundle and the assistant silently never reaches the server. (3) Because
+the shell calls Netlify cross-origin, `netlify/functions/*` carry **CORS headers + an `OPTIONS`
+preflight**. (4) `ITSAppUsesNonExemptEncryption=false` is injected into `Info.plist` in CI (HTTPS
+only) so export compliance auto-answers. The hello-shell milestone is **complete** (2026-07-24).
+
 ## Commands
 
 `npm test` · `npm run typecheck` · `npm run validate:config` ·

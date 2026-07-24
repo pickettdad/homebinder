@@ -35,7 +35,15 @@ jobs:
           cache: npm
 
       - name: Install deps + build the web bundle
+        env:
+          # The native shell's own web origin is capacitor://localhost, which has no serverless
+          # functions. The bundle must therefore call the Netlify origin directly. Without this,
+          # API_BASE falls back to same-origin "/api" → capacitor://localhost/api/chat → the AI
+          # assistant silently never reaches the function (it just sits on "Thinking…"). Override
+          # via the repo Actions VARIABLE `HS_API_BASE` if the site URL differs from the default.
+          VITE_API_BASE: ${{ vars.HS_API_BASE || 'https://housesteady.netlify.app/api' }}
         run: |
+          echo "Building native bundle against API base: ${VITE_API_BASE}"
           npm ci
           npm run build
 
@@ -56,6 +64,11 @@ jobs:
           PLIST="ios/App/App/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Photograph inspection findings, nameplates, and rooms.'" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Record audio evidence and dictate notes.'" "$PLIST" || true
+          # The app uses only OS-standard HTTPS (no custom/proprietary encryption), so declare
+          # it exempt. This auto-answers App Store Connect's export-compliance prompt on every
+          # build — no manual "None of the above" click per upload. Injected here (not committed
+          # in ios/) because the ios/ project is generated on CI, so it survives every cap sync.
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || true
 
       - name: Write the App Store Connect API key
         env:

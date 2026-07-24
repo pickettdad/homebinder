@@ -151,6 +151,36 @@ development signing); distribution-at-export needs no device at all. Fallback if
 rejects exporting an unsigned archive: register one device and restore automatic dev signing at
 archive. This supersedes §5's original `xcodebuild archive (automatic signing …)` sketch.
 
+**✅ HELLO-SHELL MILESTONE COMPLETE (2026-07-24).** Signing solved, pipeline proven end to end,
+build installed on the owner's iPad. It took **two** fixes, both real and sequential:
+1. **Code (workflow):** the unsigned-archive + distribution-at-export change above got the build
+   past the archive/dev-profile block (run #1 on the original workflow failed there).
+2. **Account (ASC key role):** with the new workflow, export then failed with "No signing
+   certificate 'iOS Distribution' found" (run #2) — the App Store Connect API key had the **App
+   Manager** role, which can create a Development certificate but **not** an iOS Distribution
+   certificate. Regenerating the key with the **Admin** role (new `.p8`, updated `ASC_KEY_ID` +
+   `ASC_KEY_P8`, issuer unchanged) fixed it; the same workflow then **succeeded** (run #3) and
+   uploaded to TestFlight. **Standing requirement: the CI ASC key MUST be Admin role.**
+3. **Two manual App Store Connect steps** to install: add self to an Internal Testing group;
+   answer export compliance once ("None of the above" — HTTPS only). The latter is now
+   **automated** via `ITSAppUsesNonExemptEncryption = false`, injected into `Info.plist` in the
+   CI plist step (survives every `cap sync`), so future builds don't prompt.
+
+**Native-shell assistant bug + fix (2026-07-24).** On the installed build, everything local
+(camera, pins) worked but the **AI assistant hung on "Thinking…"** forever. Diagnosis (against
+the real request path, not assumed): the native web origin is `capacitor://localhost`, which has
+no functions; the iOS build had **never set `VITE_API_BASE`**, so `API_BASE` fell back to
+same-origin `/api` → `capacitor://localhost/api/chat` → the local bundle's SPA fallback, never
+Netlify. (Not a missing token — the token was present, which is why the UI showed "Thinking…"
+and not "set the token".) Fix, three parts: (a) the workflow build step now sets `VITE_API_BASE`
+to the Netlify origin (`vars.HS_API_BASE`, default `https://housesteady.netlify.app/api`); (b)
+the chat + review functions now send **CORS** headers and answer the `OPTIONS` preflight, since
+the request from `capacitor://localhost` is cross-origin; (c) the chat drain now **fast-fails**
+on a 2xx-non-JSON response (the SPA-fallback signature) with a non-retryable `misrouted` error,
+so a wrong-origin misconfig surfaces immediately instead of backing off into an apparent hang.
+Fallback if WKWebView still blocks the cross-origin call despite CORS: enable Capacitor's native
+HTTP (`CapacitorHttp`) to route `fetch` through the native layer (bypasses WKWebView CORS).
+
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 
 At the owner's house, on the installed TestFlight build:

@@ -24,10 +24,20 @@ const MAX_BODY_BYTES = 5_500_000;
 let dayKey = "";
 let dayCount = 0;
 
+// The native shell's web origin is `capacitor://localhost`; its requests are cross-origin,
+// so the function must send CORS headers (mirrors chat.mts). No cookies, custom token header
+// only, so "*" is safe. Browser/PWA is same-origin and unaffected.
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-HS-Token, Idempotency-Key",
+  "Access-Control-Max-Age": "86400",
+};
+
 function errorResponse(status: number, envelope: ReviewErrorEnvelope): Response {
   return new Response(JSON.stringify(envelope), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
 }
 
@@ -39,6 +49,9 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 export default async function handler(req: Request): Promise<Response> {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   if (req.method !== "POST") {
     return errorResponse(405, { error: { code: "invalid-request", retryable: false, message: "POST only" } });
   }
@@ -123,7 +136,7 @@ export default async function handler(req: Request): Promise<Response> {
     };
     return new Response(JSON.stringify(response), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   } catch (err) {
     const anyErr = err as { status?: number };

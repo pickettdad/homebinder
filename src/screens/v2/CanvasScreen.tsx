@@ -3,6 +3,7 @@ import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet } from "../../ui/bits";
 import { useMediaUrl } from "../../ui/useMediaUrl";
 import { suggestedPinTypes } from "../../engine/v2/checklist";
+import { pinMatchesLayer, relevantLayers } from "../../engine/v2/layers";
 import type { PinTypeRef } from "../../engine/v2/events";
 import { TypePicker, pinTypeLabel } from "./shared";
 
@@ -25,6 +26,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
   const [stampType, setStampType] = useState<PinTypeRef | null>(null);
   const [stampSheet, setStampSheet] = useState(false);
   const [anchorSheet, setAnchorSheet] = useState<{ anchorId: string; pinId: string; number: number } | null>(null);
+  const [layerId, setLayerId] = useState<string | null>(null); // null = All
   const view = useRef({ scale: 1, tx: 0, ty: 0 });
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<{ dist: number; scale: number; mid: { x: number; y: number }; tx: number; ty: number } | null>(null);
@@ -43,6 +45,10 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
   const anchored = v2Session.pins
     .filter((p) => !p.retired)
     .flatMap((p) => p.anchors.filter((a) => a.canvasId === canvasId).map((a) => ({ pin: p, anchor: a })));
+  // Layer chips: only offer layers that actually match a pin on THIS canvas (no empty filters).
+  const chips = relevantLayers(v2Config.layers, anchored.map(({ pin }) => pin));
+  const activeLayer = layerId ? v2Config.layers.find((l) => l.id === layerId) : undefined;
+  const shown = activeLayer ? anchored.filter(({ pin }) => pinMatchesLayer(pin, activeLayer)) : anchored;
 
   const apply = () => {
     const el = innerRef.current;
@@ -154,6 +160,36 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
             <BigButton variant="secondary" onClick={() => setStampSheet(true)}>Stamp</BigButton>
           ))}
       </header>
+
+      {chips.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto px-4 pb-2">
+          <button
+            type="button"
+            onClick={() => setLayerId(null)}
+            className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ring-1 ${
+              layerId === null ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+            }`}
+          >
+            All ({anchored.length})
+          </button>
+          {chips.map((l) => {
+            const n = anchored.filter(({ pin }) => pinMatchesLayer(pin, l)).length;
+            return (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setLayerId(l.id)}
+                className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ring-1 ${
+                  layerId === l.id ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+                }`}
+              >
+                {l.label} ({n})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div
         className="relative flex-1 overflow-hidden"
         style={{ touchAction: "none" }}
@@ -167,7 +203,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
           {url && (
             <div className="relative">
               <img ref={imgRef} src={url} alt="" className="w-full select-none" draggable={false} />
-              {anchored.map(({ pin, anchor }) => (
+              {shown.map(({ pin, anchor }) => (
                 <button
                   key={anchor.anchorId}
                   type="button"

@@ -344,7 +344,10 @@ map / issues index from those two, and the schema comment says so.
    feedback batch: zone storey levels, canvas stamp mode + anchor removal, searchable
    type picker, inbox delete/caption, wake-lock gesture retry, voice reframed as audio
    evidence. Video evidence noted as a future capture kind (owner request, not yet built).
-5. Layers (selectors + canvas chips)
+5. ✅ Layers (selectors + canvas chips) — config-driven layer predicates
+   (`engine/v2/layers.ts`); canvas chip row filters anchor dots by flag/component
+   type, only offering layers that match a pin on that canvas. Export layer views
+   reuse the same predicate (per §7).
 6. Chat: protocol, function, queue, pin/zone UI, offline path (§6)
 7. Manifest v3 + export rework; delete slot machinery + SecondLook + review function (§1)
 8. Deploy, smoke, field test 4

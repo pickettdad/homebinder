@@ -19,8 +19,11 @@ import {
 
 const TOKEN_STORAGE_KEY = "hs-second-look-token"; // one shared app token gates the proxy
 const RAW_BYTE_BUDGET = 3_500_000;
-const BACKOFF_MS = [1_000, 5_000, 30_000, 120_000, 600_000];
-const MAX_ATTEMPTS = 8;
+// A live chat waits on-screen, so a genuine failure must SURFACE, not hide in a long backoff.
+// Three quick tries (~30s total) then show the error with a Retry button — the opposite of the
+// review queue, which can afford a patient overnight-scale ladder because nobody is watching it.
+const BACKOFF_MS = [2_000, 8_000, 20_000];
+const MAX_ATTEMPTS = 3;
 const FETCH_TIMEOUT_MS = 40_000; // sonnet-5 with adaptive thinking can be slower than review
 
 export function getAppToken(): string | null {

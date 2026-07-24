@@ -24,6 +24,11 @@ export function pinTypeLabel(pinType?: PinTypeRef): string {
   return pinType.kind === "component" ? pinType.componentType : `“${pinType.label}”`;
 }
 
+/** Component type plus optional nickname: "receptacle — over workbench". */
+export function pinFullLabel(pin: Pick<PinStateV2, "pinType" | "label">): string {
+  return pin.label ? `${pinTypeLabel(pin.pinType)} — ${pin.label}` : pinTypeLabel(pin.pinType);
+}
+
 const FLAG_STYLES: Record<PinFlag, string> = {
   fine: "bg-emerald-900/60 text-emerald-300 ring-emerald-700",
   monitor: "bg-amber-900/60 text-amber-300 ring-amber-700",
@@ -119,7 +124,7 @@ export function PinRow({ pin, onClick, trailing }: { pin: PinStateV2; onClick?: 
       <PinBadge number={pin.number} />
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium text-slate-100">
-          {pinTypeLabel(pin.pinType)}
+          {pinFullLabel(pin)}
           {pin.retired && <span className="ml-2 text-xs text-slate-500">retired</span>}
         </p>
         <p className="truncate text-sm text-slate-400">

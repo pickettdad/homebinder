@@ -102,9 +102,9 @@ export function App() {
       {screen.name === "setup2" && <SetupV2Screen />}
       {screen.name === "walk" && <WalkScreen />}
       {screen.name === "zone2" && <ZoneV2Screen zoneId={screen.zoneId} />}
-      {screen.name === "pin" && <PinScreen pinId={screen.pinId} />}
+      {screen.name === "pin" && <PinScreen key={screen.pinId} pinId={screen.pinId} />}
       {screen.name === "canvas" && (
-        <CanvasScreen canvasId={screen.canvasId} zoneId={screen.zoneId} placePinId={screen.placePinId} />
+        <CanvasScreen key={screen.canvasId} canvasId={screen.canvasId} zoneId={screen.zoneId} placePinId={screen.placePinId} />
       )}
       {screen.name === "inbox" && <InboxScreen />}
       <GlobalCamera />

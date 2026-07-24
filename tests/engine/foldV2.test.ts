@@ -197,6 +197,54 @@ describe("foldV2 core", () => {
     expect(state.completedAt).toBeDefined();
   });
 
+  it("reopen un-completes and logs the reason; re-complete re-stamps — full lifecycle in order", () => {
+    const state = foldV2(
+      mkEvents([
+        init,
+        { type: "SessionCompleted" },
+        { type: "SessionReopened", reason: "forgot the bathroom GFCI" },
+        { type: "SessionCompleted" },
+      ]),
+    );
+    expect(state.completedAt).toBeDefined(); // re-completed → set again
+    expect(state.lifecycle.map((l) => l.type)).toEqual(["completed", "reopened", "completed"]);
+    expect(state.lifecycle[1]!.reason).toBe("forgot the bathroom GFCI");
+
+    // While reopened (before the second completion) the visit is live again.
+    const reopened = foldV2(
+      mkEvents([init, { type: "SessionCompleted" }, { type: "SessionReopened", reason: "x" }]),
+    );
+    expect(reopened.completedAt).toBeUndefined();
+  });
+
+  it("PinLabeled sets a nickname additively; empty clears; ghost pin orphans", () => {
+    const state = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+        { type: "PinTyped", pinId: "p1", pinType: { kind: "component", componentType: "water-treatment" } },
+        { type: "PinLabeled", pinId: "p1", label: "chlorine tank" },
+        { type: "PinLabeled", pinId: "ghost", label: "x" },
+      ]),
+    );
+    expect(state.pins[0]!.label).toBe("chlorine tank");
+    // Type is untouched by the nickname.
+    expect(state.pins[0]!.pinType).toEqual({ kind: "component", componentType: "water-treatment" });
+    expect(state.orphanEvents).toHaveLength(1);
+
+    const cleared = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+        { type: "PinLabeled", pinId: "p1", label: "temp" },
+        { type: "PinLabeled", pinId: "p1", label: "" },
+      ]),
+    );
+    expect(cleared.pins[0]!.label).toBeUndefined();
+  });
+
   it("orphans events with unknown references instead of dropping or throwing", () => {
     const state = foldV2(
       mkEvents([
@@ -342,6 +390,23 @@ describe("checklist derivation (real config)", () => {
       expect(g.key).toBeTruthy();
       expect(g.items.length).toBeGreaterThan(0);
     }
+  });
+
+  it("pin nicknames disambiguate same-typed component groups in the audit", () => {
+    const state = foldV2(
+      mkEvents([
+        ...baseEvents,
+        { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "utl" },
+        { type: "PinTyped", pinId: "p1", pinType: { kind: "component", componentType: "water-heater" } },
+        { type: "PinLabeled", pinId: "p1", label: "main tank" },
+        { type: "PinCreated", pinId: "p2", pinNumber: 2, zoneId: "utl" },
+        { type: "PinTyped", pinId: "p2", pinType: { kind: "component", componentType: "water-heater" } },
+      ]),
+    );
+    const groups = new Set(deriveComponentItems(config, state, "utl").map((d) => d.group));
+    // Nicknamed pin carries its label; the un-nicknamed one still reads by number+type.
+    expect(groups).toContain("#1 water-heater — main tank");
+    expect(groups).toContain("#2 water-heater");
   });
 
   it("proposes evidence pin items from a matching typed pin, NEVER action items", () => {

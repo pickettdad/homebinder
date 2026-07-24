@@ -124,6 +124,43 @@ describe("v2 walk flow through the store", () => {
     expect(s().v2Session?.completedAt).toBeDefined();
   });
 
+  it("complete → reopen (with reason) → re-complete cycles the session and logs it", async () => {
+    const s = () => useApp.getState();
+    await s().startSessionV2({ propertyFlags: [], propertyLabel: "9 Elm" });
+    await s().createZone("utility", "Utility", {});
+    const sessionId = s().sessionId!;
+
+    await s().completeSessionV2();
+    expect(s().v2Session?.completedAt).toBeDefined();
+    expect((await db.sessions.get(sessionId))?.status).toBe("completed");
+
+    await s().reopenSessionV2("forgot to measure the water heater");
+    expect(s().v2Session?.completedAt).toBeUndefined(); // live again — camera + editing return
+    expect((await db.sessions.get(sessionId))?.status).toBe("active");
+    const log = s().v2Session!.lifecycle;
+    expect(log.map((l) => l.type)).toEqual(["completed", "reopened"]);
+    expect(log[1]?.reason).toBe("forgot to measure the water heater");
+
+    await s().completeSessionV2();
+    expect(s().v2Session?.completedAt).toBeDefined();
+    expect(s().v2Session!.lifecycle).toHaveLength(3);
+    expect((await db.sessions.get(sessionId))?.status).toBe("completed");
+  });
+
+  it("pin nicknames persist and ride into the checklist group heading", async () => {
+    const s = () => useApp.getState();
+    await s().startSessionV2({ propertyFlags: [] });
+    const utl = await s().createZone("utility", "Utility", {});
+    const pin = await s().createPin(utl);
+    await s().setPinType(pin, { kind: "component", componentType: "water-treatment" });
+    await s().setPinLabel(pin, "softener");
+    expect(s().v2Session?.pins.find((p) => p.pinId === pin)?.label).toBe("softener");
+
+    const { deriveComponentItems } = await import("../../src/engine/v2/checklist");
+    const groups = new Set(deriveComponentItems(s().v2Config!, s().v2Session!, utl).map((d) => d.group));
+    expect([...groups].some((g) => g.includes("water-treatment — softener"))).toBe(true);
+  });
+
   it("egress lands in the sleeping guest room but not the utility room", async () => {
     const s = () => useApp.getState();
     await s().startSessionV2({ propertyFlags: [] });

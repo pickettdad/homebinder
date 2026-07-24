@@ -139,13 +139,11 @@ export function deriveComponentItems(
     const list = config.componentLists.find((c) => c.types.includes(type));
     if (!list || list.stub) continue;
     const scope: ItemScope = { kind: "pin", pinId: p.pinId };
+    // The pin's nickname rides in the group heading so the audit reads
+    // "#2 water-treatment — chlorine tank", not three indistinguishable "#N water-treatment".
+    const group = `#${p.number} ${type}${p.label ? ` — ${p.label}` : ""}`;
     for (const item of list.items)
-      out.push({
-        item,
-        scope,
-        group: `#${p.number} ${type}`,
-        status: statusOf(state, scope, item, allPins),
-      });
+      out.push({ item, scope, group, status: statusOf(state, scope, item, allPins) });
   }
   return out;
 }

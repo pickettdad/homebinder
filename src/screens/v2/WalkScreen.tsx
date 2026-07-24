@@ -9,11 +9,13 @@ import { PinRow, ZONE_LEVELS, defaultLevelFor } from "./shared";
 export function WalkScreen() {
   const {
     v2Session, v2Config, checklists, navigate, createZone, leaveSession,
-    completeSessionV2, showToast,
+    completeSessionV2, reopenSessionV2, showToast,
   } = useApp();
   const config = v2Config ?? checklists;
   const [sheet, setSheet] = useState(false);
   const [finishSheet, setFinishSheet] = useState(false);
+  const [reopenSheet, setReopenSheet] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
   const [typeId, setTypeId] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [level, setLevel] = useState<string>("main");
@@ -21,6 +23,8 @@ export function WalkScreen() {
   const [creating, setCreating] = useState(false);
 
   if (!v2Session || !config) return null;
+  const ro = !!v2Session.completedAt; // completed → view only until reopened
+  const wasCompletedBefore = v2Session.lifecycle.some((l) => l.type === "completed");
 
   const inboxCount = v2Session.inbox.length + v2Session.inboxNoteIds.length;
   const miscPins = v2Session.pins.filter((p) => !p.zoneId && !p.retired);
@@ -73,8 +77,8 @@ export function WalkScreen() {
       </header>
 
       <div className="flex gap-3">
-        <BigButton className="flex-1" onClick={openSheet}>New zone</BigButton>
-        <BigButton variant="secondary" onClick={() => navigate({ name: "inbox" })}>
+        {!ro && <BigButton className="flex-1" onClick={openSheet}>New zone</BigButton>}
+        <BigButton variant="secondary" className={ro ? "flex-1" : ""} onClick={() => navigate({ name: "inbox" })}>
           Inbox{inboxCount > 0 ? ` (${inboxCount})` : ""}
         </BigButton>
       </div>
@@ -124,15 +128,32 @@ export function WalkScreen() {
         </section>
       )}
 
-      {v2Session.zones.length > 0 && !v2Session.completedAt && (
+      {v2Session.zones.length > 0 && !ro && (
         <BigButton variant="secondary" onClick={() => setFinishSheet(true)}>
-          Finish visit — house-level checks
+          {wasCompletedBefore ? "Re-complete inspection" : "Finish visit — house-level checks"}
         </BigButton>
       )}
-      {v2Session.completedAt && (
-        <p className="rounded-xl bg-emerald-950/50 p-4 text-center text-emerald-300">
-          Visit completed {new Date(v2Session.completedAt).toLocaleString()}
-        </p>
+
+      {(ro || v2Session.lifecycle.length > 0) && (
+        <section className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-900/50 p-4">
+          <h2 className="text-sm font-semibold text-slate-300">Inspection log</h2>
+          <ol className="flex flex-col gap-1.5 text-sm">
+            {v2Session.lifecycle.map((l, i) => (
+              <li key={i} className="flex gap-2">
+                <span className={l.type === "completed" ? "text-emerald-400" : "text-amber-400"}>
+                  {l.type === "completed" ? "✓ Completed" : "↻ Reopened"}
+                </span>
+                <span className="text-slate-400">{new Date(l.at).toLocaleString()}</span>
+                {l.reason && <span className="text-slate-300">— “{l.reason}”</span>}
+              </li>
+            ))}
+          </ol>
+          {ro && (
+            <BigButton variant="secondary" onClick={() => { setReopenReason(""); setReopenSheet(true); }}>
+              Reopen inspection to make changes
+            </BigButton>
+          )}
+        </section>
       )}
 
       <Sheet open={sheet} onClose={() => setSheet(false)} title="New zone">
@@ -225,15 +246,42 @@ export function WalkScreen() {
             onClick={() => {
               void completeSessionV2().then(() => {
                 setFinishSheet(false);
-                showToast("Visit completed — data stays on this device");
+                showToast(wasCompletedBefore ? "Inspection re-completed" : "Visit completed — data stays on this device");
               });
             }}
           >
-            Complete visit
+            {wasCompletedBefore ? "Re-complete inspection" : "Complete visit"}
           </BigButton>
           <p className="text-xs text-slate-500">
             Completing never blocks on unresolved items — they're recorded, same as a zone close.
           </p>
+        </div>
+      </Sheet>
+
+      <Sheet open={reopenSheet} onClose={() => setReopenSheet(false)} title="Reopen inspection">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-slate-300">
+            Reopening logs the date, time, and your reason, then unlocks the visit for
+            changes. Re-complete it when you're done — that's logged too.
+          </p>
+          <textarea
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+            placeholder="Reason (e.g. “noticed something in the bathroom to log”)"
+            rows={3}
+            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+          />
+          <BigButton
+            disabled={!reopenReason.trim()}
+            onClick={() => {
+              void reopenSessionV2(reopenReason).then(() => {
+                setReopenSheet(false);
+                showToast("Reopened — make your changes, then re-complete");
+              });
+            }}
+          >
+            Reopen
+          </BigButton>
         </div>
       </Sheet>
     </div>

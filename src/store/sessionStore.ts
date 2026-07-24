@@ -90,6 +90,8 @@ interface AppStore {
   /** Create + type + anchor a pin in ONE transaction — the canvas tap and stamp-mode path. */
   createPinAt(zoneId: string, canvasId: string, x: number, y: number, pinType?: PinTypeRef): Promise<string>;
   setPinType(pinId: string, pinType: PinTypeRef): Promise<void>;
+  /** Set/clear a human nickname on a pin (additive to its component type). */
+  setPinLabel(pinId: string, label: string): Promise<void>;
   setPinFlag(pinId: string, flag: PinFlag | null): Promise<void>;
   assignPin(pinId: string, zoneId?: string): Promise<void>;
   retirePin(pinId: string, note?: string): Promise<void>;
@@ -109,6 +111,8 @@ interface AppStore {
   closeZoneV2(zoneId: string, note?: string): Promise<void>;
   reopenZoneV2(zoneId: string): Promise<void>;
   completeSessionV2(): Promise<void>;
+  /** Un-complete a finished visit so it can be edited again; the reason is logged. */
+  reopenSessionV2(reason: string): Promise<void>;
 
   dispatch(payloads: EventPayload[], media?: MediaRow[]): Promise<void>;
   capturePhoto(slotInstanceId: string, file: File | Blob, mime?: string): Promise<string>;
@@ -300,6 +304,10 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "PinTyped", pinId, pinType }]);
   },
 
+  async setPinLabel(pinId, label) {
+    await get().dispatchV2([{ type: "PinLabeled", pinId, label: label.trim() }]);
+  },
+
   async setPinFlag(pinId, flag) {
     await get().dispatchV2([{ type: "PinFlagged", pinId, flag }]);
   },
@@ -424,6 +432,14 @@ export const useApp = create<AppStore>((set, get) => ({
     if (!sessionId) return;
     await get().dispatchV2([{ type: "SessionCompleted" }]);
     await setSessionStatus(sessionId, "completed");
+    await get().refreshSessions();
+  },
+
+  async reopenSessionV2(reason) {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    await get().dispatchV2([{ type: "SessionReopened", reason: reason.trim() }]);
+    await setSessionStatus(sessionId, "active");
     await get().refreshSessions();
   },
 

@@ -63,7 +63,7 @@ export function HomeScreen() {
               </div>
               {(s.status === "active" || s.status === "completed") && (
                 <BigButton variant="secondary" disabled={resuming} onClick={() => tryResume(s.id)}>
-                  {s.status === "active" ? "Resume" : "Open"}
+                  {s.status === "active" ? "Resume" : "View"}
                 </BigButton>
               )}
               {s.status === "active" && (

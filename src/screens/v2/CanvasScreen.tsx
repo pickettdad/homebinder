@@ -36,6 +36,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
   const canvas = zone?.canvases.find((c) => c.canvasId === canvasId);
   const url = useMediaUrl(canvas?.media.mediaId);
   if (!v2Session || !v2Config || !zone || !canvas) return null;
+  const ro = !!v2Session.completedAt; // completed inspection → view only until reopened
 
   const placePin = placePinId ? v2Session.pins.find((p) => p.pinId === placePinId) : undefined;
   const anchored = v2Session.pins
@@ -99,7 +100,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
   };
 
   const onTap = (e: React.MouseEvent) => {
-    if (moved.current || busy) return;
+    if (moved.current || busy || ro) return;
     const img = imgRef.current;
     if (!img) return;
     const rect = img.getBoundingClientRect();
@@ -137,13 +138,15 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
       <header className="flex items-center gap-3 p-4">
         <BigButton variant="ghost" onClick={() => navigate({ name: "zone2", zoneId })}>←</BigButton>
         <p className="flex-1 text-sm text-slate-300">
-          {placePin
-            ? `Tap where pin #${placePin.number} lives`
-            : stampType
-              ? `Stamping ${pinTypeLabel(stampType)} — every tap is a NEW numbered pin`
-              : "Tap to drop a new pin · pinch to zoom"}
+          {ro
+            ? "Viewing — pinch to zoom. Reopen the inspection to edit."
+            : placePin
+              ? `Tap where pin #${placePin.number} lives`
+              : stampType
+                ? `Stamping ${pinTypeLabel(stampType)} — every tap is a NEW numbered pin`
+                : "Tap to drop a new pin · pinch to zoom"}
         </p>
-        {!placePinId &&
+        {!ro && !placePinId &&
           (stampType ? (
             <BigButton variant="danger" onClick={() => setStampType(null)}>Stop</BigButton>
           ) : (
@@ -210,23 +213,27 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
             <BigButton onClick={() => navigate({ name: "pin", pinId: anchorSheet.pinId })}>
               Open pin #{anchorSheet.number}
             </BigButton>
-            <BigButton
-              variant="danger"
-              onClick={() => {
-                void removeAnchor(anchorSheet.anchorId)
-                  .then(() => {
-                    setAnchorSheet(null);
-                    showToast("Marker removed — the pin and its number remain");
-                  })
-                  .catch((err) => showToast(err instanceof Error ? err.message : "Could not remove"));
-              }}
-            >
-              Remove this marker
-            </BigButton>
-            <p className="text-xs text-slate-500">
-              Removing a marker only takes it off this photo — the pin keeps its number,
-              record, and any other placements. To drop the whole pin, open it and retire.
-            </p>
+            {!ro && (
+              <>
+                <BigButton
+                  variant="danger"
+                  onClick={() => {
+                    void removeAnchor(anchorSheet.anchorId)
+                      .then(() => {
+                        setAnchorSheet(null);
+                        showToast("Marker removed — the pin and its number remain");
+                      })
+                      .catch((err) => showToast(err instanceof Error ? err.message : "Could not remove"));
+                  }}
+                >
+                  Remove this marker
+                </BigButton>
+                <p className="text-xs text-slate-500">
+                  Removing a marker only takes it off this photo — the pin keeps its number,
+                  record, and any other placements. To drop the whole pin, open it and retire.
+                </p>
+              </>
+            )}
           </div>
         )}
       </Sheet>

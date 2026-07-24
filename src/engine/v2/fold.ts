@@ -70,6 +70,8 @@ export interface PinStateV2 {
   /** Absent = session misc bucket. */
   zoneId?: string;
   pinType?: PinTypeRef;
+  /** Human nickname ("water softener") layered on top of the component type — never replaces it. */
+  label?: string;
   flag: PinFlag | null;
   retired?: { at: string; note?: string };
   anchors: AnchorState[];
@@ -112,6 +114,13 @@ export interface ResolutionState {
   source: Source;
 }
 
+/** One entry in the visit's completion history — completed, then reopened (with why), then re-completed. */
+export interface LifecycleEntry {
+  type: "completed" | "reopened";
+  at: string;
+  reason?: string;
+}
+
 export interface SessionStateV2 {
   sessionId: string;
   configId: string;
@@ -130,7 +139,10 @@ export interface SessionStateV2 {
   /** Recorded checklist resolutions, keyed `${itemScopeKey(scope)}/${itemId}`. */
   resolutions: Map<string, ResolutionState>;
   startedAt?: string;
+  /** Set while the visit is complete; CLEARED on reopen. The camera + editing gate on this. */
   completedAt?: string;
+  /** Full complete/reopen history in order — the audit trail the owner asked to see. */
+  lifecycle: LifecycleEntry[];
   lastEventSeq: number;
   lastPinNumber: number;
   lastActiveZoneId?: string;
@@ -167,6 +179,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
     chats: new Map(),
     resolutions: new Map(),
     startedAt: init.at,
+    lifecycle: [],
     lastEventSeq: 0,
     lastPinNumber: 0,
     orphanEvents: [],
@@ -338,6 +351,12 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
         const p = pin(e.pinId);
         if (!p) orphan(e);
         else p.pinType = e.pinType;
+        break;
+      }
+      case "PinLabeled": {
+        const p = pin(e.pinId);
+        if (!p) orphan(e);
+        else p.label = e.label || undefined;
         break;
       }
       case "PinFlagged": {
@@ -525,6 +544,13 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
 
       case "SessionCompleted":
         state.completedAt = e.at;
+        state.lifecycle.push({ type: "completed", at: e.at });
+        break;
+      case "SessionReopened":
+        // Un-complete: the visit is live again (camera + editing return), and the
+        // reopen — with its reason — joins the history so nothing is silent.
+        state.completedAt = undefined;
+        state.lifecycle.push({ type: "reopened", at: e.at, reason: e.reason });
         break;
       case "ExportProduced":
         break; // recorded in the log; no state to derive

@@ -36,12 +36,18 @@ debug, or upload role — the pipeline is 100 % cloud CI.**
 |---|---|---|
 | Wrapper | **Capacitor 8** (current major, Dec 2025; `@capacitor/ios` 8.4.x) | Requires Xcode 26+ — exactly what Apple's upload floor demands anyway; SPM by default (no CocoaPods on CI) |
 | iOS deployment target | **17.0** | Capacitor 8 minimum is 15; RoomPlan needs 16, its StructureBuilder 17; the only device is on iPadOS 26 — no reason to reach lower |
+| CI service | **GitHub Actions**, not Xcode Cloud | Xcode Cloud is included with the membership but is configured *from Xcode*, which needs a capable Mac the owner doesn't have (the 2015 Air can't run Xcode 26). GitHub Actions is set up entirely from a browser/iPad — a YAML file + four secrets — so it's the only option that fits the no-Mac constraint. Revisit Xcode Cloud only if an M-series Mac is acquired. |
 | CI runner | **`macos-26` pinned** (never `macos-latest`) | Ships Xcode 26.0.1–26.6 (26.5 default as of the 2026-07-15 image); pin the Xcode via `xcode-select` in the workflow, not the image default (it drifts weekly) |
 | Upload path | **`xcodebuild -exportArchive` → destination `upload` with App Store Connect API key** (`-authenticationKeyPath/-authenticationKeyID/-authenticationKeyIssuerID`) | Apple's first-party CLI path. Deliberately **no fastlane**: fastlane's transporter is `altool`, which has active breakage churn under Xcode 26 and reportedly rejects Individual-account API keys — the owner's account type. Fastlane stays the documented fallback only |
 | Signing | **Automatic ("cloud") signing on CI**: `-allowProvisioningUpdates` + the same API key (App Manager role) | No cert/profile juggling, no match repo. Fallback if flaky: manual distribution cert + profile as GH secrets |
 | Distribution | **TestFlight, internal tester = the owner** (Account Holder) | Internal builds need **no Beta App Review** — available minutes after processing. 90-day build expiry is irrelevant at spike cadence |
 
 ## 3. Owner actions (human-gated; start these first)
+
+> **Layman walkthrough:** `docs/STAGE-0-OWNER-SETUP.md` expands every item below into
+> click-by-click steps written for a non-programmer (incl. the "why not Xcode Cloud"
+> answer). This section is the terse engineering reference; that doc is what the owner
+> follows.
 
 1. **Enroll in the Apple Developer Program** (individual, $99 USD/yr): Apple Account
    with 2FA, legal name/address, government photo-ID verification via the Apple

@@ -199,6 +199,14 @@ can't compile off a Mac, so the next `workflow_dispatch` is the real test; expec
 iteration. **Still pending: the browser projection/harness** — deferred by design until the first
 real scan JSON pins the (Apple-undocumented) `CapturedRoom` schema (§6.3–4).
 
+**Build-3 black-screen fix (the budgeted native iteration).** TestFlight build 3 compiled and
+installed but launched to a **black screen** — a classic UIKit symptom: an unresolvable storyboard
+`customClass` makes UIKit fall back to a plain black `UIViewController`. Cause: the CI patch set
+`customModule="App"`, and that module-qualified lookup didn't resolve `MainViewController`. Fix:
+mark the class `@objc(MainViewController)` (a flat Obj-C runtime name) and drop `customModule` from
+the storyboard so UIKit resolves it via `NSClassFromString` — module-name-independent and reliable.
+(Also added `super.capacitorDidLoad()`.) Signing/upload were unaffected throughout.
+
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 
 At the owner's house, on the installed TestFlight build:

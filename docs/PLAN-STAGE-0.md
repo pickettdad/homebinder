@@ -181,6 +181,24 @@ so a wrong-origin misconfig surfaces immediately instead of backing off into an 
 Fallback if WKWebView still blocks the cross-origin call despite CORS: enable Capacitor's native
 HTTP (`CapacitorHttp`) to route `fetch` through the native layer (bypasses WKWebView CORS).
 
+**RoomPlan plugin landed (2026-07-24).** The scan-capture half of the spike. Native surface kept
+minimal (§7): **`native/ios/RoomPlanPlugin.swift`** exposes `isSupported()` and `scan()` — `scan()`
+presents Apple's `RoomCaptureView`, and on finish encodes the `CapturedRoom` via `Codable` and
+returns `{roomJson}`. (Dropped `exportScan()`'s native share sheet from the §4 three-method sketch:
+the web layer shares the returned JSON via the existing share/download path, so the corpus still
+gets off the device with less blind Swift.) Registered by hand in a `CAPBridgeViewController`
+subclass (`native/ios/MainViewController.swift` → `capacitorDidLoad`). **Deviation from §4's
+"commit `ios/`":** no Mac to generate a project, so the Swift stays in `native/ios/` and CI injects
+it by **appending the class bodies into the generated `AppDelegate.swift`** (always in the compile
+sources — avoids blind `project.pbxproj`/synchronized-group surgery) + repointing `Main.storyboard`'s
+root controller at the subclass (fails loudly if the storyboard format drifts). Deployment target
+17.0 set via an `xcodebuild` override. Web side: `src/native/
+roomPlan.ts` (bridge via `window.Capacitor.Plugins`, no `@capacitor/core` in the web bundle) +
+`Stage0ScanCard` on Home, shown only on a native LiDAR device. **CI-verified only** — the Swift
+can't compile off a Mac, so the next `workflow_dispatch` is the real test; expect possibly one
+iteration. **Still pending: the browser projection/harness** — deferred by design until the first
+real scan JSON pins the (Apple-undocumented) `CapturedRoom` schema (§6.3–4).
+
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 
 At the owner's house, on the installed TestFlight build:

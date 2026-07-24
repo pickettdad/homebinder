@@ -149,6 +149,20 @@ async function postChat(request: ChatRequest, token: string): Promise<ChatRespon
     const body = (await res.json().catch(() => null)) as ChatResponse | ChatErrorEnvelope | null;
     if (res.ok && body && "text" in body) return body;
     if (body && "error" in body) return body;
+    // A 2xx that is NOT our chat JSON means we reached something other than the function —
+    // almost always an SPA/index.html fallback because API_BASE points at the wrong origin
+    // (classic: the native shell hitting capacitor://localhost instead of Netlify). Retrying
+    // can't fix a routing/origin problem, so fail fast and visibly rather than backing off
+    // into an apparent "Thinking…" hang.
+    if (res.ok) {
+      return {
+        error: {
+          code: "misrouted",
+          retryable: false,
+          message: "The assistant endpoint didn't answer with a reply — the app may be pointed at the wrong URL.",
+        },
+      };
+    }
     return {
       error: {
         code: res.status === 413 ? "payload-too-large" : res.status === 401 ? "auth" : "upstream-unavailable",

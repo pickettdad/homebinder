@@ -38,8 +38,22 @@ const MAX_BODY_BYTES = 5_500_000;
 let dayKey = "";
 let dayCount = 0;
 
+// The native shell's web origin is `capacitor://localhost`, not the Netlify origin, so its
+// requests are cross-origin and WKWebView enforces CORS. Allow them: the request carries a
+// custom X-HS-Token header (which forces a preflight) and no cookies, so "*" is safe (no
+// credentials to leak). The browser/PWA is same-origin and unaffected.
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-HS-Token, Idempotency-Key",
+  "Access-Control-Max-Age": "86400",
+};
+
 function errorResponse(status: number, envelope: ChatErrorEnvelope): Response {
-  return new Response(JSON.stringify(envelope), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(envelope), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
@@ -50,6 +64,10 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 export default async function handler(req: Request): Promise<Response> {
+  // CORS preflight for the native shell — answer before any auth/method checks.
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
   if (req.method !== "POST") {
     return errorResponse(405, { error: { code: "invalid-request", retryable: false, message: "POST only" } });
   }
@@ -128,7 +146,10 @@ export default async function handler(req: Request): Promise<Response> {
       text,
       usage: { inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens },
     };
-    return new Response(JSON.stringify(response), { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
   } catch (err) {
     const anyErr = err as { status?: number };
     if (anyErr.status === 429) {

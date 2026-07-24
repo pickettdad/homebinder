@@ -71,6 +71,10 @@ export type ChatErrorCode =
   | "timeout"
   | "model-refused"
   | "invalid-request"
+  // Client-synthesized: the request reached something that isn't the chat function (a 2xx
+  // that isn't our JSON — usually an SPA/index.html fallback because the API base points at
+  // the wrong origin, e.g. the native shell hitting capacitor://localhost). Non-retryable.
+  | "misrouted"
   | "auth";
 
 export interface ChatErrorEnvelope {

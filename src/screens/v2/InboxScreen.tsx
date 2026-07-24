@@ -15,6 +15,10 @@ export function InboxScreen() {
   const notes = v2Session.inboxNoteIds.map((id) => v2Session.notes.get(id)).filter((n) => n !== undefined);
   // Re-derive from fresh state so a saved caption shows without reopening the sheet.
   const assigning = assigningId ? v2Session.inbox.find((m) => m.mediaId === assigningId) ?? null : null;
+  const sessionDone = !!v2Session.completedAt; // completed inspection → no filing
+  const zoneById = new Map(v2Session.zones.map((z) => [z.zoneId, z]));
+  // Filing into a closed zone (or a pin inside one) is the back door — surface it as locked.
+  const pinLocked = (zoneId?: string) => sessionDone || (!!zoneId && !!zoneById.get(zoneId)?.closedAt);
 
   const open = (m: MediaRef) => {
     setCaption(m.caption ?? "");
@@ -46,6 +50,7 @@ export function InboxScreen() {
         showToast("Filed");
         setAssigningId(null);
       })
+      .catch((err) => showToast(err instanceof Error ? err.message : "Could not file"))
       .finally(() => setBusy(false));
   };
 
@@ -58,6 +63,7 @@ export function InboxScreen() {
         setAssigningId(null);
         navigate({ name: "pin", pinId });
       })
+      .catch((err) => showToast(err instanceof Error ? err.message : "Could not file"))
       .finally(() => setBusy(false));
   };
 
@@ -126,37 +132,58 @@ export function InboxScreen() {
               />
               <BigButton
                 variant="secondary"
-                disabled={busy || caption.trim() === (assigning.caption ?? "")}
+                disabled={busy || sessionDone || caption.trim() === (assigning.caption ?? "")}
                 onClick={saveCaption}
               >
                 Save
               </BigButton>
             </div>
+            {sessionDone && (
+              <p className="rounded-xl border border-slate-600 bg-slate-800/60 p-3 text-sm text-amber-200/90">
+                This inspection is completed — reopen it to file or delete captures.
+              </p>
+            )}
             <section className="flex flex-col gap-2">
               <h3 className="text-sm font-semibold text-slate-400">To an existing pin</h3>
-              {v2Session.pins.filter((p) => !p.retired).map((p) => (
-                <PinRow key={p.pinId} pin={p} onClick={() => !busy && assignTo({ kind: "pin", id: p.pinId })} />
-              ))}
+              {v2Session.pins.filter((p) => !p.retired).map((p) => {
+                const lock = pinLocked(p.zoneId);
+                return (
+                  <PinRow
+                    key={p.pinId}
+                    pin={p}
+                    trailing={lock ? <span className="text-xs text-slate-500">zone closed</span> : undefined}
+                    onClick={() =>
+                      lock
+                        ? showToast("That zone is closed — reopen it to file here")
+                        : !busy && assignTo({ kind: "pin", id: p.pinId })
+                    }
+                  />
+                );
+              })}
             </section>
             <section className="flex flex-col gap-2">
               <h3 className="text-sm font-semibold text-slate-400">To a zone (or a new pin in it)</h3>
-              {v2Session.zones.map((z) => (
-                <div key={z.zoneId} className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => assignTo({ kind: "zone", id: z.zoneId })}
-                    className="flex-1 rounded-xl bg-slate-800 p-3 text-left font-medium text-slate-100 active:bg-slate-700"
-                  >
-                    {z.label}
-                  </button>
-                  <BigButton variant="secondary" disabled={busy} onClick={() => assignToNewPin(z.zoneId)}>
-                    New pin
-                  </BigButton>
-                </div>
-              ))}
+              {v2Session.zones.map((z) => {
+                const lock = sessionDone || !!z.closedAt;
+                return (
+                  <div key={z.zoneId} className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busy || lock}
+                      onClick={() => assignTo({ kind: "zone", id: z.zoneId })}
+                      className="flex-1 rounded-xl bg-slate-800 p-3 text-left font-medium text-slate-100 active:bg-slate-700 disabled:opacity-50"
+                    >
+                      {z.label}
+                      {z.closedAt && <span className="ml-2 text-xs text-slate-500">closed</span>}
+                    </button>
+                    <BigButton variant="secondary" disabled={busy || lock} onClick={() => assignToNewPin(z.zoneId)}>
+                      New pin
+                    </BigButton>
+                  </div>
+                );
+              })}
             </section>
-            <BigButton variant="danger" disabled={busy} onClick={remove}>
+            <BigButton variant="danger" disabled={busy || sessionDone} onClick={remove}>
               Delete this capture
             </BigButton>
           </div>

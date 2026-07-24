@@ -314,3 +314,42 @@ downspout↔grading deferred to the guidance pass.
   `exterior_wall` declared but unused.
 - `tr.species` (dropped v1 fragment, unmentioned) and the v1 "apartment/condo —
   parked" marker, which now exists nowhere in the master.
+
+---
+
+## 8. Field-test-2 change-requests (2026-07-24)
+
+Owner-originated; recorded here for the post-field-test content pass. Not acted on
+unilaterally — the master is owner-edited and the component vocabulary is master content.
+
+### 8.1 Component sub-type taxonomy — split broad types into specific ones (owner)
+
+Standard home equipment should carry **specific, consistent component sub-types** rather
+than one broad bucket, each opening its own checklist items:
+
+- `water-treatment` → `water-softener`, `sediment-filter`, (RO unit, UV, etc.)
+- `appliance` → `refrigerator`, `dishwasher`, `range`, `washer`, `dryer`, …
+
+Rationale (owner):
+1. **Consistency + right checks.** A softener wants salt-bridge / resin / regeneration
+   items; a sediment filter wants cartridge/date items — different lists, same today's
+   flat `water-treatment` can't express. Same for appliances.
+2. **Field legibility.** Six pins reading `#N appliance` are indistinguishable in the
+   audit (the immediate pain that prompted the nickname feature — nicknames are the
+   stopgap; typed sub-types are the real fix).
+3. **Regional fleet analytics (future HouseSteady play).** Specific types + captured
+   ages let the business look across a region — "100 water softeners, ~15 of them ~15
+   years old" — and broker a bulk-supplier deal that saves clients money. This only works
+   if the type is specific and structured, not a freeform nickname.
+
+**Process (config discipline):** the taxonomy is **not invented here**. It lands in the
+master as a component **vocabulary table** during the content pass, with ids that are
+never renamed/reused (same rule as every component id). The empirical input is the
+**vocabulary telemetry** now specified in `PLAN-STAGE-1.md` §7: recurring **nicknames**
+under one type are the concrete split signal, and recurring **freeform** types are the
+"new type wanted" signal. So the sequence is: ship telemetry (Stage 1 step 7) → field use
+accumulates real labels → content pass promotes the frequent ones into typed sub-types
+with their own item lists.
+
+**Cross-refs:** nickname/freeform manifest fields (`PLAN-STAGE-1.md` §7); the
+type-scoped plan-anchor rule that will also read off these types (`PLAN-STAGE-2-NOTES.md`).

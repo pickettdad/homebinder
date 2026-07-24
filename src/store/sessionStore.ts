@@ -31,6 +31,26 @@ import { db, type MediaRow, type ReviewJobRow, type SessionRow } from "../storag
 import { drainReviews, enqueueZoneReview, pendingJobs, rearmFailedJobs } from "../review/queue";
 import type { ZoneSummaryResponse } from "../review/protocol";
 
+/**
+ * Structural edits (new pins, canvases, anchors, filing captures) are refused when the
+ * inspection is completed or the target zone is closed — the real lock behind the UI
+ * gating, so no back door (e.g. filing an inbox capture as a new pin) can slip work into
+ * a closed zone. Reopen (logged) is the only way back in.
+ */
+function assertEditable(session: SessionStateV2 | null, zoneId?: string): void {
+  if (!session) return;
+  if (session.completedAt) throw new Error("This inspection is completed — reopen it to make changes.");
+  if (zoneId && session.zones.find((z) => z.zoneId === zoneId)?.closedAt)
+    throw new Error("This zone is closed — reopen it to make changes.");
+}
+
+/** Resolve the zone a media-file target lands in (undefined = inbox / misc, always editable). */
+function targetZoneId(session: SessionStateV2 | null, target: CaptureTarget): string | undefined {
+  if (target.kind === "zone") return target.id;
+  if (target.kind === "pin") return session?.pins.find((p) => p.pinId === target.id)?.zoneId;
+  return undefined;
+}
+
 export type Screen =
   | { name: "home" }
   | { name: "setup" }
@@ -109,7 +129,7 @@ interface AppStore {
   reopenItem(scope: ItemScope, itemId: string): Promise<void>;
   /** Advisory close — records the audit snapshot and a note; NEVER blocks. */
   closeZoneV2(zoneId: string, note?: string): Promise<void>;
-  reopenZoneV2(zoneId: string): Promise<void>;
+  reopenZoneV2(zoneId: string, note?: string): Promise<void>;
   completeSessionV2(): Promise<void>;
   /** Un-complete a finished visit so it can be edited again; the reason is logged. */
   reopenSessionV2(reason: string): Promise<void>;
@@ -283,6 +303,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async createPin(zoneId) {
+    assertEditable(get().v2Session, zoneId);
     const pinId = uuidv7();
     // pinNumber 0 is a placeholder — appendEvents stamps the real permanent number
     // inside the transaction; the refold picks it up from the stored event.
@@ -291,6 +312,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async createPinAt(zoneId, canvasId, x, y, pinType) {
+    assertEditable(get().v2Session, zoneId);
     const pinId = uuidv7();
     await get().dispatchV2([
       { type: "PinCreated", pinId, pinNumber: 0, zoneId },
@@ -313,6 +335,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async assignPin(pinId, zoneId) {
+    assertEditable(get().v2Session, zoneId);
     await get().dispatchV2([{ type: "PinAssigned", pinId, zoneId }]);
   },
 
@@ -323,6 +346,7 @@ export const useApp = create<AppStore>((set, get) => ({
   async addCanvas(zoneId, file, mimeOverride) {
     const { sessionId } = get();
     if (!sessionId) throw new Error("no active session");
+    assertEditable(get().v2Session, zoneId);
     const canvasId = uuidv7();
     const mediaId = uuidv7();
     const mime = mimeOverride ?? ((file instanceof File ? file.type : "") || "image/jpeg");
@@ -339,6 +363,7 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async placeAnchor(pinId, canvasId, x, y) {
+    assertEditable(get().v2Session, get().v2Session?.pins.find((p) => p.pinId === pinId)?.zoneId);
     await get().dispatchV2([{ type: "AnchorPlaced", anchorId: uuidv7(), pinId, canvasId, x, y }]);
   },
 
@@ -349,6 +374,7 @@ export const useApp = create<AppStore>((set, get) => ({
   async capturePhotoV2(target, file, mimeOverride) {
     const { sessionId } = get();
     if (!sessionId) throw new Error("no active session");
+    assertEditable(get().v2Session, targetZoneId(get().v2Session, target));
     const mediaId = uuidv7();
     const mime = mimeOverride ?? ((file instanceof File ? file.type : "") || "image/jpeg");
     const sha256 = await sha256Hex(file);
@@ -386,6 +412,9 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async reassignMedia(mediaId, target) {
+    // Filing INTO a closed zone / completed inspection is the back door — refuse it.
+    // Un-filing back to the inbox (target inbox) is always allowed.
+    assertEditable(get().v2Session, targetZoneId(get().v2Session, target));
     await get().dispatchV2([{ type: "MediaReassigned", mediaId, target }]);
     await db.media.update(mediaId, {
       targetKind: target.kind,
@@ -423,8 +452,8 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "ZoneClosed", zoneId, note: note?.trim() || undefined, audit }]);
   },
 
-  async reopenZoneV2(zoneId) {
-    await get().dispatchV2([{ type: "ZoneReopened", zoneId }]);
+  async reopenZoneV2(zoneId, note) {
+    await get().dispatchV2([{ type: "ZoneReopened", zoneId, note: note?.trim() || undefined }]);
   },
 
   async completeSessionV2() {

@@ -23,8 +23,9 @@ export function PinScreen({ pinId }: { pinId: string }) {
 
   const pin = v2Session?.pins.find((p) => p.pinId === pinId);
   if (!v2Session || !v2Config || !pin) return null;
-  const ro = !!v2Session.completedAt; // completed inspection → view only until reopened
   const zone = v2Session.zones.find((z) => z.zoneId === pin.zoneId);
+  // View-only when the inspection is completed OR this pin's zone is closed.
+  const ro = !!v2Session.completedAt || !!zone?.closedAt;
   const back = () =>
     navigate(pin.zoneId ? { name: "zone2", zoneId: pin.zoneId } : { name: "walk" });
 

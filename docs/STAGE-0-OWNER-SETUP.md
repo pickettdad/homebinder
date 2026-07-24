@@ -42,7 +42,7 @@ choose to (which is how it's set up).
 and I have no access to either:
 
 1. ✅ Enroll in the Apple Developer Program — **done.**
-2. Decide the app's name and its permanent "bundle ID."
+2. ✅ App name + bundle ID — **settled: HouseSteady Field / `ca.housesteady.field`.**
 3. Create an Apple "API key" and download its file.
 4. Paste four values into GitHub as saved secrets.
 5. Register the app in App Store Connect and turn on TestFlight for yourself.
@@ -56,17 +56,14 @@ Do them in order. Steps 2–5 are ~30–45 minutes total, one time, mostly click
 
 ---
 
-## Step 2 — Pick the app's name and bundle ID (2 minutes, just decide and tell me)
+## Step 2 — App name and bundle ID ✅ SETTLED
 
-- **App name:** what shows under the icon in TestFlight, e.g. *HouseSteady Field*. Can be
-  changed later.
-- **Bundle ID:** a permanent, computer-style address for the app, written like a backwards
-  web address. **This never changes once chosen, so pick once.** Suggested:
-  **`ca.housesteady.field`**. (If you own a domain, we can mirror it, but this suggestion
-  is perfectly fine.)
+Decided 2026-07-24, so there's nothing to do here — just use these exact values in the
+steps below:
 
-👉 **Your action:** reply with the app name you want and a yes/no on `ca.housesteady.field`.
-That's all for this step.
+- **App name:** **HouseSteady Field** (what shows under the icon in TestFlight)
+- **Bundle ID:** **`ca.housesteady.field`** (the app's permanent computer-style address —
+  never changes)
 
 ---
 

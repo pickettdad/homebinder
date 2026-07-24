@@ -35,6 +35,21 @@ if one already exists; otherwise open a fresh one.
 turn*. A defect found in testing and deferred becomes an issue; planned build steps never
 do. Close an issue the same turn its fix ships.
 
+**Chat model — pinned, upgraded deliberately.** The in-product assistant's model is **not**
+hard-coded in a way that can drift. It reads from the Netlify env var `HS_CHAT_MODEL`; the
+source only carries a `DEFAULT_CHAT_MODEL` fallback (`netlify/functions/chat.mts`), currently
+`claude-sonnet-5`. Claude model ids are **pinned release snapshots by design** — the dateless
+form (`claude-sonnet-5`) is a *fixed* release, not an evergreen "-latest" pointer, and a newer
+model ships under a *new* id. Pinning is also required for us: the export manifest stamps the
+model id on every recorded reply, so a silent model swap would corrupt the provenance record.
+**Upgrade procedure (config change + deliberate test, never automatic):** (1) set
+`HS_CHAT_MODEL` to the new id in Netlify → redeploy; (2) run one live chat and confirm the
+reply's stamped model id is the new one and the answer quality holds; (3) update the
+`DEFAULT_CHAT_MODEL` constant + this line to match, so source and config agree. Never bump the
+model as a side effect of unrelated work. (Sonnet 5 note: omit `budget_tokens`/sampling — both
+400; `thinking:{type:"disabled"}` is accepted and is how the proxy keeps replies under Netlify's
+function timeout.)
+
 ## Commands
 
 `npm test` · `npm run typecheck` · `npm run validate:config` ·

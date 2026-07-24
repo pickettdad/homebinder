@@ -34,6 +34,30 @@ renders windows and doors itself.
   This note exists so Stage 2 cannot accidentally build the universal nag; it must read the
   requirement off the type, and only locator-class types carry it.
 
+## AI suggestion → checklist / gap item, one tap (owner, 2026-07-24)
+
+**Design record, not a Stage-1 build.** The assistant's field replies are frequently
+*follow-up items* — "ask the owner about the panel age", "photograph the water-heater data
+plate too". Those are exactly the content the **visit-two gap list** and the **session plan**
+(`PLAN-STAGE-1.md` §7a) consume. So the shape must stay open for it: an AI suggestion should be
+**convertible into a checklist or gap item with one tap**, without retyping.
+
+Constraints for whoever builds it (Stage 2, once the session-plan round-trip exists):
+- **Provenance tag is `ai-suggested-human-accepted`** — a distinct, first-class provenance,
+  not a bare `human` or `ai` `Source`. The item exists because the AI proposed it *and* a human
+  accepted it; both facts are load-bearing (the AI didn't unilaterally create work; the human
+  didn't type it from scratch). Mirrors the `attest: evidence` "software proposes, human
+  confirms" doctrine — the tap is the human act that makes it real.
+- **One tap, in place.** The affordance lives on the assistant message (a "＋ Add as follow-up"
+  action), pre-filling the item text from the suggestion; the human confirms or edits, never
+  retypes. No new free-text flow.
+- **It becomes session data, never config.** A converted item is a session-scoped gap /
+  follow-up (feeds the visit-two gap list and, via §7a, next visit's session plan) — it must
+  never touch the generated checklist config or its hash. Same rule as the session plan itself.
+- **Do not design this out.** Nothing in Stage 1 needs to build it, but the chat event model,
+  the gap-list shape, and the `Source` provenance vocabulary must all leave room for it so
+  Stage 2 can add it without a migration.
+
 ## Related
 
 - Component sub-type taxonomy request + regional analytics rationale:

@@ -82,6 +82,15 @@ describe("v2 chat through the store", () => {
     expect(reply.text).toContain("water heater");
     expect(reply.model).toBe("claude-sonnet-5");
     expect(reply.source.actor).toBe("ai"); // provenance is the model, not the human
+
+    // Full provenance chain — these are exactly the fields the export manifest's chats[]
+    // section (PLAN-STAGE-1 §7) serializes per message: question + answer, each with its own
+    // Source, and the model id stamped on the reply. Verified end-to-end from a live-ish
+    // session (start → pin → ask → drained reply), not asserted against the spec.
+    const question = msgs[0]!;
+    expect(question).toMatchObject({ role: "user", text: "what is this?" });
+    expect(question.source.actor).toBe("human"); // the ask is the inspector's
+    expect(reply.source.actorId).toBe("claude-sonnet-5"); // actorId IS the model id (join key for provenance)
     // The scope snapshot reached the server.
     expect(seenScope).toMatchObject({ kind: "pin", pinNumber: 1, pinType: "water-heater" });
 

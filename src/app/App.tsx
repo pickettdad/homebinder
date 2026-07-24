@@ -51,7 +51,7 @@ function GlobalCamera() {
 }
 
 export function App() {
-  const { ready, screen, sessionId, toast, init, drainNow, refreshReviewStatus } = useApp();
+  const { ready, screen, sessionId, toast, init, drainNow, drainChatNow, refreshReviewStatus } = useApp();
 
   useEffect(() => { void init(); }, [init]);
 
@@ -60,7 +60,7 @@ export function App() {
   // offline or when unconfigured.
   useEffect(() => {
     if (!sessionId) return;
-    const kick = () => { void drainNow(); };
+    const kick = () => { void drainNow(); void drainChatNow(); };
     const onVisible = () => { if (document.visibilityState === "visible") kick(); };
     window.addEventListener("online", kick);
     document.addEventListener("visibilitychange", onVisible);
@@ -71,7 +71,7 @@ export function App() {
       document.removeEventListener("visibilitychange", onVisible);
       clearInterval(timer);
     };
-  }, [sessionId, drainNow, refreshReviewStatus]);
+  }, [sessionId, drainNow, drainChatNow, refreshReviewStatus]);
   // Hold the screen awake for the whole visit; re-acquired after camera round-trips
   // and system releases. Status surfaces below so a failure is visible, not silent.
   const wakeLock = useWakeLock(sessionId !== null);

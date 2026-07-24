@@ -24,6 +24,17 @@ on drift. The master itself is edited by the owner's side, never unilaterally he
 defects become change-requests in `docs/CHECKLIST-MASTER-REVIEW.md`. Same rule as
 `route.baseline.ts`: config is data, ids are never renamed or reused.
 
+**Pull requests — one per run, always.** Every run ends with an open PR into the
+default branch for that run's commits (owner decision 2026-07-25: "work I can't see is
+work I can't test" — the owner merges, which triggers the Netlify deploy to the test
+device). Never leave commits stranded on the branch with no PR. Reuse the run's open PR
+if one already exists; otherwise open a fresh one.
+
+**Issue hygiene.** Docs (`REDESIGN-v2`, `PLAN-STAGE-*`, `CHECKLIST-MASTER-REVIEW`) carry
+*planned* work; the GitHub Issues tab carries *field defects that aren't fixed the same
+turn*. A defect found in testing and deferred becomes an issue; planned build steps never
+do. Close an issue the same turn its fix ships.
+
 ## Commands
 
 `npm test` · `npm run typecheck` · `npm run validate:config` ·

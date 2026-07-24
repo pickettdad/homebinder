@@ -1,0 +1,132 @@
+/**
+ * POST /api/chat — the in-product AI assistant proxy. Holds the Anthropic key
+ * server-side; the PWA (same origin) authenticates with the shared app token.
+ *
+ * Stateless: the client sends the whole thread each turn. One request → one recorded
+ * reply (no streaming). This is the money feature — `claude-sonnet-5` is the deliberate
+ * choice (identification quality), env-overridable.
+ *
+ * Netlify env vars:
+ *   ANTHROPIC_API_KEY  — from console.anthropic.com (mark as secret)
+ *   HS_APP_TOKEN       — shared token; the same value is set in the app
+ *   HS_CHAT_MODEL      — optional model override (default claude-sonnet-5)
+ *   HS_CHAT_DAILY_CAP  — optional, max requests/day (default 300) — cost backstop
+ */
+import Anthropic from "@anthropic-ai/sdk";
+import { buildChatSystemPrompt, buildScopeContext, lintReply } from "./lib/chatCore";
+import type { ChatRequest, ChatResponse, ChatErrorEnvelope } from "../../src/chat/protocol";
+
+const MODEL = process.env.HS_CHAT_MODEL ?? "claude-sonnet-5";
+// Sonnet 5 runs adaptive thinking by default (we omit the thinking param) and rejects
+// budget_tokens / non-default sampling with a 400, so we set neither. The new tokenizer
+// runs ~30% heavier, so max_tokens is generous — a tight cap would truncate a reply that
+// is mostly thinking (verified against the claude-api migration guide, 2026-07-25).
+const MAX_TOKENS = 8192;
+const MAX_IMAGES = 12;
+const MAX_BODY_BYTES = 5_500_000;
+
+let dayKey = "";
+let dayCount = 0;
+
+function errorResponse(status: number, envelope: ChatErrorEnvelope): Response {
+  return new Response(JSON.stringify(envelope), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+export default async function handler(req: Request): Promise<Response> {
+  if (req.method !== "POST") {
+    return errorResponse(405, { error: { code: "invalid-request", retryable: false, message: "POST only" } });
+  }
+
+  const expectedToken = process.env.HS_APP_TOKEN;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!expectedToken || !apiKey) {
+    return errorResponse(401, { error: { code: "auth", retryable: false, message: "server not configured" } });
+  }
+  if (!constantTimeEqual(req.headers.get("x-hs-token") ?? "", expectedToken)) {
+    return errorResponse(401, { error: { code: "auth", retryable: false, message: "bad token" } });
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (dayKey !== today) { dayKey = today; dayCount = 0; }
+  const dailyCap = Number(process.env.HS_CHAT_DAILY_CAP ?? 300);
+  if (++dayCount > dailyCap) {
+    return errorResponse(429, {
+      error: { code: "rate-limited", retryable: true, retryAfterMs: 3_600_000, message: "daily cap reached" },
+    });
+  }
+
+  const bodyText = await req.text();
+  if (bodyText.length > MAX_BODY_BYTES) {
+    return errorResponse(413, { error: { code: "payload-too-large", retryable: false, message: "body too large" } });
+  }
+  let request: ChatRequest;
+  try {
+    request = JSON.parse(bodyText) as ChatRequest;
+  } catch {
+    return errorResponse(422, { error: { code: "invalid-request", retryable: false, message: "bad JSON" } });
+  }
+  if (request.kind !== "chat" || !Array.isArray(request.thread) || request.thread.length === 0 || !request.scope) {
+    return errorResponse(422, { error: { code: "invalid-request", retryable: false, message: "bad request shape" } });
+  }
+  const imageCount = request.thread.reduce((n, t) => n + (t.images?.length ?? 0), 0);
+  if (imageCount > MAX_IMAGES) {
+    return errorResponse(413, { error: { code: "payload-too-large", retryable: false, message: "too many images" } });
+  }
+
+  const client = new Anthropic({ apiKey });
+  try {
+    const messages: Anthropic.MessageParam[] = request.thread.map((turn, i) => {
+      const content: Anthropic.ContentBlockParam[] = [];
+      // Prepend the scope context to the first user turn so the model is oriented.
+      const text = i === 0 && turn.role === "user" ? `${buildScopeContext(request.scope)}\n\n${turn.text}` : turn.text;
+      if (text) content.push({ type: "text", text });
+      for (const im of turn.images ?? [])
+        content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: im.dataBase64 } });
+      return { role: turn.role, content };
+    });
+
+    const message = await client.messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system: buildChatSystemPrompt(),
+      messages,
+    });
+
+    if (message.stop_reason === "refusal") {
+      return errorResponse(422, { error: { code: "model-refused", retryable: false, message: "model declined" } });
+    }
+    const raw = message.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+    const { text } = lintReply(raw || "I couldn't read enough from that to help — try another angle or photo.");
+
+    const response: ChatResponse = {
+      apiVersion: request.apiVersion,
+      kind: "chat",
+      jobId: request.job.jobId,
+      model: message.model,
+      text,
+      usage: { inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens },
+    };
+    return new Response(JSON.stringify(response), { status: 200, headers: { "Content-Type": "application/json" } });
+  } catch (err) {
+    const anyErr = err as { status?: number };
+    if (anyErr.status === 429) {
+      return errorResponse(429, {
+        error: { code: "rate-limited", retryable: true, retryAfterMs: 30_000, message: "upstream rate limit" },
+      });
+    }
+    return errorResponse(502, {
+      error: { code: "upstream-unavailable", retryable: true, message: err instanceof Error ? err.message : "unknown" },
+    });
+  }
+}

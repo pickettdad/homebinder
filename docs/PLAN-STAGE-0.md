@@ -136,6 +136,21 @@ deviations from the plan-as-written, both forced by the no-Mac constraint:
   the default branch) is the real test, and the archive/export/signing step is exactly the
   "budget one debugging session" line item in §7 — expect one iteration there.
 
+**Signing iteration (2026-07-24).** The first `workflow_dispatch` consumed the §7 budgeted
+debugging session. Everything up to signing succeeded (npm ci, web build, Xcode 26.5,
+`cap add ios`, SPM resolve, plist edits); the **archive** step failed asking for an *iOS App
+Development* provisioning profile. Root cause: automatic signing signs the archive with an
+Apple Development identity, and a development profile requires ≥1 registered device on the
+team — this account has none. TestFlight wants *distribution* signing anyway, so registering a
+device would have been a detour. Fix (in `ios-testflight.yml`): archive **unsigned**
+(`CODE_SIGNING_ALLOWED=NO`, no profile needed → no device needed), then do distribution signing
+at **export** via `signingStyle=automatic` + the ASC API key — an App Store distribution profile
+carries no device list, so cloud-signing generates one on demand for a device-less team. This is
+the cleaner of the two candidate paths (the other was: register a device UDID and keep automatic
+development signing); distribution-at-export needs no device at all. Fallback if a runner ever
+rejects exporting an unsigned archive: register one device and restore automatic dev signing at
+archive. This supersedes §5's original `xcodebuild archive (automatic signing …)` sketch.
+
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 
 At the owner's house, on the installed TestFlight build:

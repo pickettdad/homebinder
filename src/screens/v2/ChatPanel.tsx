@@ -9,11 +9,32 @@ import { useApp } from "../../store/sessionStore";
 import { BigButton } from "../../ui/bits";
 import { getAppToken } from "../../chat/queue";
 
+// Collapse is per-pin UI state, not inspection data — it lives in localStorage, never in the
+// event log. Persisted so a thread the inspector deliberately folded away stays folded when
+// they leave the pin and come back.
+const collapseKey = (pinId: string) => `hs-chat-collapsed:${pinId}`;
+function readCollapsed(pinId: string): boolean {
+  try {
+    return localStorage.getItem(collapseKey(pinId)) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeCollapsed(pinId: string, collapsed: boolean): void {
+  try {
+    if (collapsed) localStorage.setItem(collapseKey(pinId), "1");
+    else localStorage.removeItem(collapseKey(pinId));
+  } catch {
+    /* private mode — collapse just won't persist */
+  }
+}
+
 export function ChatPanel({ pinId, readOnly = false }: { pinId: string; readOnly?: boolean }) {
   const { v2Session, sendChatMessage, drainChatNow, showToast } = useApp();
   const [draft, setDraft] = useState("");
   const [withPhotos, setWithPhotos] = useState(true);
   const [sending, setSending] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(pinId));
 
   const pin = v2Session?.pins.find((p) => p.pinId === pinId);
   if (!v2Session || !pin) return null;
@@ -22,6 +43,50 @@ export function ChatPanel({ pinId, readOnly = false }: { pinId: string; readOnly
   const last = msgs[msgs.length - 1];
   const awaiting = !!last && last.role === "user" && !thread?.lastFailure;
   const tokenSet = !!getAppToken();
+  const hasThread = msgs.length > 0;
+
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    writeCollapsed(pinId, next);
+  };
+
+  // Header with an optional fold toggle (only once there's a conversation to fold).
+  const header = (
+    <div className="flex items-center justify-between gap-2">
+      <h2 className="font-semibold text-slate-300">Ask the assistant</h2>
+      {hasThread && (
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+          aria-expanded={!collapsed}
+        >
+          {msgs.length} message{msgs.length === 1 ? "" : "s"}
+          {awaiting && " · thinking…"}
+          {thread?.lastFailure && " · needs a retry"}
+          <span aria-hidden>{collapsed ? "▸" : "▾"}</span>
+        </button>
+      )}
+    </div>
+  );
+
+  // Folded away: keep only the header + one-line status. The thread stays fully recorded in
+  // the log; nothing is lost, it's just off-screen so it stops eating the pin's real estate.
+  if (hasThread && collapsed) {
+    return (
+      <section className="flex flex-col gap-2">
+        {header}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className="rounded-xl border border-dashed border-slate-700 px-3 py-2 text-left text-sm text-slate-400 hover:border-slate-600"
+        >
+          Conversation collapsed — tap to reopen.
+        </button>
+      </section>
+    );
+  }
 
   const send = () => {
     const text = draft.trim();
@@ -36,7 +101,7 @@ export function ChatPanel({ pinId, readOnly = false }: { pinId: string; readOnly
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="font-semibold text-slate-300">Ask the assistant</h2>
+      {header}
 
       {msgs.length === 0 && (
         <p className="rounded-xl border border-dashed border-slate-700 p-3 text-sm text-slate-400">

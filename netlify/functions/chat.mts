@@ -16,7 +16,15 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildChatSystemPrompt, buildScopeContext, lintReply } from "./lib/chatCore";
 import type { ChatRequest, ChatResponse, ChatErrorEnvelope } from "../../src/chat/protocol";
 
-const MODEL = process.env.HS_CHAT_MODEL ?? "claude-sonnet-5";
+// The chat model is a PINNED release id, chosen deliberately — never an evergreen "-latest"
+// alias. Claude model ids in the 5 family are fixed releases (the dateless string IS the
+// complete id); a newer model ships under a NEW id, so nothing swaps under us silently. That
+// matters because the manifest stamps the model id on every recorded reply — a silent swap
+// would corrupt the provenance record. The env var HS_CHAT_MODEL is the single control point;
+// the constant below is only the safety default when it's unset. To upgrade, see CLAUDE.md
+// → "Chat model upgrades" (config change in Netlify + a deliberate test, never automatic).
+const DEFAULT_CHAT_MODEL = "claude-sonnet-5";
+const MODEL = process.env.HS_CHAT_MODEL ?? DEFAULT_CHAT_MODEL;
 // Sonnet 5 runs adaptive thinking by default, which can push a reply past Netlify's ~10s
 // function limit and leave the field app hanging on "Thinking…". This is a short, one-shot
 // field Q&A — extended thinking buys little here — so we turn it off explicitly (Sonnet 5

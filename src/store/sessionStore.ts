@@ -85,7 +85,8 @@ export type Screen =
   | { name: "zone2"; zoneId: string }
   | { name: "pin"; pinId: string }
   | { name: "canvas"; canvasId: string; zoneId: string; placePinId?: string }
-  | { name: "inbox" };
+  | { name: "inbox" }
+  | { name: "export2" };
 
 interface AppStore {
   ready: boolean;
@@ -151,6 +152,8 @@ interface AppStore {
   closeZoneV2(zoneId: string, note?: string): Promise<void>;
   reopenZoneV2(zoneId: string, note?: string): Promise<void>;
   completeSessionV2(): Promise<void>;
+  /** Record a produced export (manifest + files) in the log; marks a completed visit exported. */
+  recordExportV2(manifestSha256: string, files: { name: string; bytes: number }[]): Promise<void>;
   /** Un-complete a finished visit so it can be edited again; the reason is logged. */
   reopenSessionV2(reason: string): Promise<void>;
   /** Ask the in-product assistant about a pin/zone; records the ask, queues the reply. */
@@ -485,6 +488,16 @@ export const useApp = create<AppStore>((set, get) => ({
     if (!sessionId) return;
     await get().dispatchV2([{ type: "SessionCompleted" }]);
     await setSessionStatus(sessionId, "completed");
+    await get().refreshSessions();
+  },
+
+  async recordExportV2(manifestSha256, files) {
+    const { sessionId, v2Session } = get();
+    if (!sessionId) return;
+    await get().dispatchV2([{ type: "ExportProduced", manifestSha256, files }]);
+    // Only a COMPLETED visit becomes "exported"; a mid-inspection emergency backup leaves the
+    // session active (it's a safety copy, not the end of the visit).
+    if (v2Session?.completedAt) await setSessionStatus(sessionId, "exported");
     await get().refreshSessions();
   },
 

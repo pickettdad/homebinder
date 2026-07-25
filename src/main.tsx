@@ -8,6 +8,9 @@ import "./app/theme.css";
 declare global {
   interface Window {
     __hsBootError?: (title: string, detail?: string) => void;
+    // Set true by App after the first successful React commit. The watchdog reads it to stop
+    // being destructive post-boot — a runtime error mid-inspection must not wipe the app.
+    __hsBooted?: boolean;
   }
 }
 

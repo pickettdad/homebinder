@@ -17,6 +17,8 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   const [reopenSheet, setReopenSheet] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
   const [busy, setBusy] = useState(false);
+  /** Zone capture opened full-size. */
+  const [viewerId, setViewerId] = useState<string | null>(null);
 
   const zone = v2Session?.zones.find((z) => z.zoneId === zoneId);
   if (!v2Session || !v2Config || !zone) return null;
@@ -128,20 +130,56 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
         <ChecklistPanel items={auditItems} readOnly={locked} />
       </section>
 
-      <section className="flex items-center justify-between rounded-xl bg-slate-800 p-4">
-        <p className="text-sm text-slate-300">
-          Zone photos: {zone.photos.length} · audio: {zone.voiceNotes.length}
-        </p>
-        {!locked && (
-          <PhotoInput
-            onPhoto={(file) =>
-              capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
-            }
-          >
-            Add photo
-          </PhotoInput>
+      {/* Zone captures. These were previously COUNTED but never shown — the walkabout sweep
+          (global camera while inside a zone) files here, so 3/4 of a visit's photos were
+          invisible. Field report 2026-07-25. */}
+      <section className="flex flex-col gap-3 rounded-xl bg-slate-800 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-300">
+            Zone captures: {zone.photos.length} photo{zone.photos.length === 1 ? "" : "s"} · audio:{" "}
+            {zone.voiceNotes.length}
+          </p>
+          {!locked && (
+            <PhotoInput
+              onPhoto={(file) =>
+                capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
+              }
+            >
+              Add photo
+            </PhotoInput>
+          )}
+        </div>
+
+        {zone.photos.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-700 p-3 text-sm text-slate-400">
+            Photos taken with the camera button while you're in this zone land here.
+          </p>
+        ) : (
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+            {zone.photos.map((p) => (
+              <button
+                key={p.mediaId}
+                type="button"
+                onClick={() => setViewerId(p.mediaId)}
+                className="overflow-hidden rounded-lg ring-1 ring-slate-700 active:ring-teal-500"
+              >
+                <Thumb mediaId={p.mediaId} className="h-20 w-full" />
+              </button>
+            ))}
+          </div>
         )}
       </section>
+
+      <Sheet open={viewerId !== null} onClose={() => setViewerId(null)} title="Zone capture">
+        {viewerId && (
+          <div className="flex flex-col gap-3">
+            <Thumb mediaId={viewerId} className="max-h-[60dvh] w-full rounded-xl object-contain" />
+            <p className="text-xs text-slate-500">
+              Captured in this zone. Filing captures onto a pin from here is coming next.
+            </p>
+          </div>
+        )}
+      </Sheet>
 
       <Sheet open={closeSheet} onClose={() => setCloseSheet(false)} title={`Close ${zone.label}`}>
         <div className="flex flex-col gap-3">

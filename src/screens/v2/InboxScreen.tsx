@@ -10,11 +10,21 @@ export function InboxScreen() {
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState(false);
+  /** "unfiled" = the classic inbox; otherwise a zoneId. ONE inbox, filtered — not two inboxes
+      (field report 2026-07-25: the walkabout sweep files into the zone, and those captures were
+      unreachable from here). Two inboxes would mean two mental models and two places to forget. */
+  const [filter, setFilter] = useState<string>("unfiled");
 
   if (!v2Session) return null;
   const notes = v2Session.inboxNoteIds.map((id) => v2Session.notes.get(id)).filter((n) => n !== undefined);
-  // Re-derive from fresh state so a saved caption shows without reopening the sheet.
-  const assigning = assigningId ? v2Session.inbox.find((m) => m.mediaId === assigningId) ?? null : null;
+  const zoneMediaOf = (z: (typeof v2Session.zones)[number]) => [...z.photos, ...z.voiceNotes];
+  const allMedia = [...v2Session.inbox, ...v2Session.zones.flatMap(zoneMediaOf)];
+  const activeZone = v2Session.zones.find((z) => z.zoneId === filter);
+  const items: MediaRef[] = filter === "unfiled" ? v2Session.inbox : activeZone ? zoneMediaOf(activeZone) : [];
+  // Re-derive from fresh state so a saved caption shows without reopening the sheet. Searches
+  // ALL media (not just unfiled) so a zone capture stays open while it is being filed onto a pin.
+  const assigning = assigningId ? allMedia.find((m) => m.mediaId === assigningId) ?? null : null;
+  const assigningIsFiled = assigning ? !v2Session.inbox.some((m) => m.mediaId === assigning.mediaId) : false;
   const sessionDone = !!v2Session.completedAt; // completed inspection → no filing
   const zoneById = new Map(v2Session.zones.map((z) => [z.zoneId, z]));
   // Filing into a closed zone (or a pin inside one) is the back door — surface it as locked.
@@ -32,7 +42,15 @@ export function InboxScreen() {
 
   const remove = () => {
     if (!assigning) return;
-    if (!confirm("Delete this capture? It's gone for good — it was never filed anywhere.")) return;
+    const filed = !v2Session.inbox.some((m) => m.mediaId === assigning.mediaId);
+    if (
+      !confirm(
+        filed
+          ? "Delete this capture? It's gone for good — it is currently filed to a zone."
+          : "Delete this capture? It's gone for good — it was never filed anywhere.",
+      )
+    )
+      return;
     setBusy(true);
     void discardMediaV2(assigning.mediaId)
       .then(() => {
@@ -72,21 +90,42 @@ export function InboxScreen() {
       <header className="flex items-center gap-3">
         <BigButton variant="ghost" onClick={() => navigate({ name: "walk" })}>←</BigButton>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-slate-100">Inbox</h1>
+          <h1 className="text-2xl font-bold text-slate-100">Captures</h1>
           <p className="text-sm text-slate-400">
-            {v2Session.inbox.length} capture{v2Session.inbox.length === 1 ? "" : "s"} to file
+            {v2Session.inbox.length} unfiled · {allMedia.length} total this visit
           </p>
         </div>
       </header>
 
-      {v2Session.inbox.length === 0 && notes.length === 0 && (
+      {/* Filter, not a second inbox: everything captured this visit is reachable from here. */}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        {[
+          { key: "unfiled", label: "Unfiled", n: v2Session.inbox.length },
+          ...v2Session.zones.map((z) => ({ key: z.zoneId, label: z.label, n: zoneMediaOf(z).length })),
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setFilter(tab.key)}
+            className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium ${
+              filter === tab.key ? "bg-teal-600 text-slate-950" : "bg-slate-800 text-slate-300"
+            }`}
+          >
+            {tab.label} ({tab.n})
+          </button>
+        ))}
+      </div>
+
+      {items.length === 0 && (filter !== "unfiled" || notes.length === 0) && (
         <p className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-slate-400">
-          Empty — the global camera drops captures here when you're between zones.
+          {filter === "unfiled"
+            ? "Nothing unfiled — the global camera drops captures here when you're between zones."
+            : `No captures in ${activeZone?.label ?? "this zone"} yet. Photos taken with the camera while you're in a zone land under that zone.`}
         </p>
       )}
 
       <div className="grid grid-cols-3 gap-2">
-        {v2Session.inbox.map((m) => (
+        {items.map((m) => (
           <button
             key={m.mediaId}
             type="button"
@@ -118,7 +157,11 @@ export function InboxScreen() {
         </section>
       )}
 
-      <Sheet open={assigning !== null} onClose={() => setAssigningId(null)} title="File this capture">
+      <Sheet
+        open={assigning !== null}
+        onClose={() => setAssigningId(null)}
+        title={assigningIsFiled ? "Re-file this capture" : "File this capture"}
+      >
         {assigning && (
           <div className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto">
             {assigning.mime.startsWith("image") && <Thumb mediaId={assigning.mediaId} className="h-40 w-full rounded-xl" />}

@@ -1,32 +1,46 @@
-# HouseSteady Field Assistant — Checklist Master (v1.2.1)
+# HouseSteady Field Assistant — Checklist Master (v1.3)
 
-**Version:** v1.2.1 · **Date:** 2026-07-23 · **Supersedes:** v1.2 (2026-07-22)
+**Version:** v1.3 · **Date:** 2026-07-25 · **Supersedes:** v1.2.1 (2026-07-23)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
-**Changelog v1.2 → v1.2.1** (owner-dictated edits, transcribed verbatim):
-- `attest` flipped action → evidence on `sit.shoreline`, `fc.comparison`, `wh.anode`, `hp.snow` — the Documentation/Tests split is user-facing and none of these is a test; `rgh.comparison` is the precedent. Principle recorded in §2 for future rows.
-- `bsm.finished-behind` moved from the `basement` list into `rough-base` with trigger `zone.finished`, reworded ("Concealed areas behind finished surfaces recorded as not inspected") — the trigger now carries the "if finished" condition, and the item fires in any finished rough zone (basement, garage, attic, …). Id retained; prefix goes historical, same as `liv.egress`.
-- `tr.species` restored to the `tree` component (note · standard · evidence).
-- §8: apartment/condo parked marker restored.
-- Table B: `has_plumbing` and `exterior_wall` annotated **reserved** — declared, not yet consumed, deliberately. (A freeze-protection item triggered on `zone.has_plumbing` in unheated zones is a candidate for the post-field-test content pass.)
+**Why this revision exists:** field test (2026-07-25, 2 zones, TestFlight) produced a proof case. `alm.power` — "how is this smoke alarm powered" — was satisfied via a free-text **note** reading "Direct power". That is a fixed, enumerable answer being captured as prose. It can't be validated, can't be queried, and won't aggregate. The same defect exists across roughly a dozen items. v1.3 adds a `choice` satisfy type and converts them.
 
-**Changelog v1.1 → v1.2** (adjudicates the v1.2 change-request list, CHECKLIST-MASTER-REVIEW §6):
-- **Accepted — egress gap:** `liv.egress` moved from the `living-space` list into `interior-base` (its `zone.sleeping` trigger comes with it), so *any* interior zone marked as sleeping — including a basement rec room — carries the core egress item. Id retained per id-stability rule; the `liv.` prefix is now historical, which is fine (ids are opaque).
-- **Accepted with a different remedy — `elv.hose-bibs`:** diagnosis correct (an `evidence` item whose text claimed a test). Remedy adjusted: the pressure test already exists as `utl.pressure` (action); the elv text was a stale echo, now deleted. A per-pin `hb.pressure` is deliberately **not** added — component items attach to every pin of the type, which would demand the test at every bib when it is performed once per house. `utl.pressure` text now names where the gauge goes.
-- **Accepted — stale test verbs:** `utl.sump`, `gar.door-reverse`, `elv.deck` reworded to pin-only language; their tests live where they belong, as action items on the component (`sp.bucket`, `gd.beam`/`gd.pressure`, `dk.rails`/`dk.ledger`).
-- **Accepted — internal defects:** "table E" references corrected to table C; §2 group-key formula now includes authored sub-headings; §0 now declares the trigger-cell `a|b` shorthand. **Both generator readings implemented pending ratification are hereby ratified as authored** (sub-headings as group keys; `a|b` = anyOf with prefix inheritance).
-- **Accepted — restore:** `fp.chimney` (fireplace ↔ chimney linkage) restored as a standard evidence item.
-- **Rejected as intentional drops:** `alm.location` and the receptacle location fragment (the pin's anchor and zone assignment *are* the location record — a text field would duplicate the canvas); `cir.smoke-placement` (absorbed by `ses.alarm-coverage` per review verdict 6 — restoring it per-zone recreates the wallpaper that verdict removed). Downspout↔grading linkage deferred to the guidance content pass.
+**Changelog v1.2 → v1.3**
 
-**Changelog v1 → v1.1** (retained for the record): all nine review errata fixed; `attest` authored on every item with the Documentation/Tests two-list rule; session items added; tier cap restated per rendered group; §7 normalized to generator-parseable tables; vocabulary tables A–D added.
+*Schema:*
+- **New satisfy type `choice`** — single-select from authored options. Options ride inline in the satisfy cell, mirroring the existing `measure (unit)` convention: `` choice (hardwired|battery|plug-in) ``. Satisfied by selecting exactly one option; the selected value is recorded as structured data, not prose.
+- **`attest` semantics for `choice`:** `evidence` where the choice records a *property of the thing* (valve type, panel type, pipe material) — software may propose from a photo/pin but a human confirms. `action` where the choice records *what the inspector did or how far they looked* (attic access extent). Default `evidence`.
+- **No compound satisfy type.** Where an item needs both photographic evidence *and* a queryable value (pipe material, drain material, dryer duct), it is **split into two items** — a `photo` item and a `choice` item. Rationale: keeps one-satisfaction-per-item, needs no new machinery, and lets each half resolve independently. Three splits below.
+
+*Converted to `choice` (13):* `alm.power` · `alm.type` · `wm.type` · `pnl.type` · `pnl.service` · `wh.ownership` · `att.access-honesty` · `crw.access-honesty` · `fp.type` · `hb.type` · `fc.orientation` · `ch.liner` · `gen.fuel`
+
+*Split into photo + choice (3):* `utl.pipe-material` → + `utl.pipe-material-id` · `utl.drain-material` → + `utl.drain-material-id` · `dd.material` → + `dd.material-id`
+
+*New `ft.type`* (fuel tank configuration) split out of `ft.age` — underground tanks are a material insurance and environmental flag and must be structured, not buried in prose.
+
+*Converted to `measure` (2) — equipment-registry backbone:* `wh.age` and `ft.age` become `measure (year)`. **Scope note, flagged deliberately:** this goes beyond the `choice` brief. Reason: the regional fleet query ("100 water softeners in the region, 15 are ~15 years old, negotiate a bulk supplier deal") requires install year as a *number*. Captured as prose it is unqueryable, and age is the single most valuable field the registry needs. Converting now costs nothing; retrofitting after a year of inspections costs the year.
+
+*Field-test defects addressed elsewhere (not master content):* the deleted-anchor ghost pin, untyped ghost pins, and the missing zone-media viewer are app defects, tracked with Code. The component-item dialog missing "create/link pin" is likewise a UI gap — the data model already supports pin-linked resolution (`{"via":"pin","evidence":{"pinId":…}}`, observed in the field-test manifest).
+
+*Reconciliation with v1.2.1 (added at intake, 2026-07-25).* v1.3 was authored against v1.2 and did not see v1.2.1, so three ratified v1.2.1 decisions arrived reverted. They are **carried forward**, not re-litigated:
+- `fc.comparison` attest restored to **evidence** (v1.2.1 flipped it from action; establishing a comparison position is documentation, not a test — `rgh.comparison` is the precedent).
+- `wh.anode` attest restored to **evidence** (same v1.2.1 rule: a note recording a property of the thing is evidence; only notes attesting to what the inspector *did* are action).
+- §8 apartment/condo parked marker restored.
+- Table B `askAtCreation` for `has_plumbing` / `exterior_wall` restored to the v1.2.1 `no (…)` form. v1.3 dropped the leading `no`, which the §0 dialect requires — the generator failed closed on it. Same meaning, parseable form.
+The other two v1.2.1 flips (`sit.shoreline`, `hp.snow`) survived v1.3 unchanged. Everything else in v1.3 is taken as authored. If any of these three reverts was deliberate, say so and it flips back in one line.
+
+*Carried forward, still open (unchanged from v1.2.1):* guidance text is an authored field with almost no content · monthly-scope subset has never been checked for standalone coherence · stub components remain stubs · component sub-type taxonomy (§8) still awaits telemetry.
 
 ---
 
-## 0. Table dialect (for the generator — v1.2)
+## 0. Table dialect (for the generator — v1.3)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
-- Satisfy cell sub-parses: pin types inline (`` pin `water-main` ``, alternatives `` pin `furnace|boiler|heat-pump` ``), measure units in parens (`measure (psi)`).
+- Satisfy cell sub-parses:
+  - pin types inline — `` pin `water-main` ``, alternatives `` pin `furnace|boiler|heat-pump` ``
+  - measure units in parens — `measure (psi)`, `measure (year)`
+  - **choice options in parens, pipe-separated — `choice (ball|gate|other|unknown)`**
 - **Trigger cells:** `|` means anyOf; ids after the first inherit the prefix of the first (`property.gas|propane` ⇒ `property.gas` OR `property.propane`).
 - Vocabulary tables (A–D at end): columns as declared per table.
 - Malformed rows fail closed.
@@ -53,17 +67,25 @@ exterior-base ──┬── elevation
 
 **Tiers & rendering:** `core` surfaces loudly at the audit; `standard` lists quietly. Cap: ≤ ~8 core **per rendered group**. Every zone audit renders grouped; group keys are the inheritance source, the zone's own list (split by authored sub-headings where present), and each pin's component list. Satisfied groups collapse. Close is never blocked; unresolved state is recorded with the close note.
 
-**Attest (always wins over satisfy kind):**
-- `evidence` — the item is satisfied by something existing (nameplate photo, typed pin, entered value). Matching evidence surfaces the item as *proposed* — one confirming human tap records it. Retiring the evidence reopens it.
-- `action` — a **test**: satisfiable only by a deliberate human tap recording `pass | fail` + optional note. No software path may ever mark it — not pin creation, not tagging, not AI. A *fail* prompts an issue-flagged pin so the finding lands on the canvas.
+**Satisfy types:**
+| type | satisfied by | records |
+|---|---|---|
+| `pin` | linking a pin of the named type(s) — new or existing | pinId |
+| `check` | a plain confirmation | boolean + timestamp |
+| `note` | free text | prose |
+| `measure` | a numeric value with the declared unit | number + unit |
+| `photo` | an image on the pin, or a zone-level image tagged to the item | mediaId |
+| **`choice`** | **selecting exactly one authored option** | **the option value** |
 
-**Attest for `note` items (v1.2.1 principle):** a `note` item is `action` only when it
-attests to what the inspector *did* or how thoroughly they looked (`att.access-honesty`,
-`rgh.wiring-legacy`); notes recording a property of the thing observed are `evidence`.
+**Choice discipline:** options must be exhaustive for the realistic field cases and always include an escape (`unknown`, `other`, or both) — an inspector who cannot determine the answer must be able to record *that*, not be forced into a wrong value. Where `other` is selected, the UI should accept an accompanying note; where `unknown` is selected, it is a legitimate resolution and exports as such.
+
+**Attest (always wins over satisfy kind):**
+- `evidence` — the item is satisfied by something existing (nameplate photo, typed pin, entered value, an observable property). Matching evidence surfaces the item as *proposed* — one confirming human tap records it. Retiring the evidence reopens it.
+- `action` — a **test** or an attestation of *what the inspector did*: satisfiable only by a deliberate human tap recording `pass | fail` (or the selected extent) + optional note. No software path may ever mark it. A *fail* prompts an issue-flagged pin so the finding lands on the canvas.
 
 **Rendering rule (owner decision):** Documentation (`evidence`) and Tests (`action`) are separate sections in the zone panel and the close audit — never mixed. Tests are text-documented, not media-documented.
 
-**States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table C, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` and `no-access` N/A land on the visit-two gap list automatically.
+**States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table C, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` and `no-access` N/A land on the visit-two gap list.
 
 **Suggestions:** deterministic zone-type priors and (Stage 2) RoomPlan candidates may propose pin types; on-demand AI may suggest when asked. Proposals touch `evidence` items only, and only as proposals. Never automatic per-photo classification.
 
@@ -163,10 +185,14 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `utl.main-shutoff` | Main water shutoff pinned, photographed wide, tagged | pin `water-main` | core | evidence |
-| `utl.pipe-material` | Supply pipe material identified with close-up (copper/PEX/poly-B/Kitec/galv) | photo | core | evidence |
-| `utl.drain-material` | Drain/vent material identified (ABS/cast iron/clay evidence) | photo | core | evidence |
+| `utl.pipe-material` | Supply pipe material photographed close-up | photo | core | evidence |
+| `utl.pipe-material-id` | Supply pipe material identified | choice (copper\|PEX\|poly-B\|Kitec\|galvanized\|CPVC\|mixed\|unknown) | core | evidence |
+| `utl.drain-material` | Drain/vent material photographed | photo | core | evidence |
+| `utl.drain-material-id` | Drain/vent material identified | choice (ABS\|PVC\|cast iron\|clay\|Orangeburg\|copper\|mixed\|unknown) | core | evidence |
 | `utl.pressure` | Static water pressure measured (gauge threads onto any hose bib) | measure (psi) | core | action |
 | `utl.water-heater` | Water heater pinned | pin `water-heater` | core | evidence |
+
+*Note: `poly-B`, `Kitec`, and `galvanized` are insurer and resale flags; `Orangeburg` and `clay` are sewer-camera triggers. The choice values are what make those flags queryable — the photo alone is not.*
 
 **Drainage**
 | id | text | satisfy | tier | attest |
@@ -187,7 +213,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 |---|---|---|---|---|---|
 | `utl.gas-shutoff` | Gas shutoff located and pinned | pin `gas-shutoff` | core | evidence | `property.gas` |
 | `utl.sniffer` | Sniffer pass at accessible fittings completed | check | core | action | `property.gas\|propane` |
-| `utl.fuel-tank` | Oil/propane tank pinned; age and condition | pin `fuel-tank` | core | evidence | `property.oil\|propane` |
+| `utl.fuel-tank` | Oil/propane tank pinned | pin `fuel-tank` | core | evidence | `property.oil\|propane` |
 
 **Close-out**
 | id | text | satisfy | tier | attest |
@@ -203,6 +229,8 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `bsm.windows-wells` | Basement windows and wells: drainage, security; egress if sleeping zone | check | standard | action |
 | `bsm.humidity` | Humidity reading recorded | measure (%RH) | standard | action |
 | `bsm.stairs` | Stair treads, rail, headroom, lighting | check | standard | action |
+
+*(`bsm.finished-behind` moved to `rough-base` in v1.2 — fires in any finished rough zone.)*
 
 ### `kitchen`
 
@@ -228,7 +256,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `lnd.hoses` | Washer hoses: type (rubber vs braided) and age documented | photo | core | evidence |
-| `lnd.dryer-duct` | Dryer duct pinned — material, route, length; foil flex flagged | pin `dryer-duct` | core | evidence |
+| `lnd.dryer-duct` | Dryer duct pinned | pin `dryer-duct` | core | evidence |
 | `lnd.drain-standpipe` | Standpipe height and trap; laundry tub condition | check | standard | action |
 | `lnd.floor-drain-pan` | Pan or floor drain present if above living space | check | standard | action |
 
@@ -258,7 +286,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `att.access-honesty` | Access method recorded — *inspected from hatch* vs. traversed | note | core | action |
+| `att.access-honesty` | Extent of attic access achieved | choice (from hatch only\|partial traverse\|full traverse\|no access) | core | action |
 | `att.vermiculite` | Vermiculite check — if present: STOP, photograph from hatch, disturb nothing, flag suspect ACM | check | core | action |
 | `att.sheathing` | Sheathing condition captured: staining, frost, daylight | photo | core | evidence |
 | `att.insulation-depth` | Insulation depth measured with ruler in frame | measure (in) | core | action |
@@ -266,11 +294,13 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `att.ventilation` | Soffit/ridge/gable ventilation present and unblocked | check | standard | action |
 | `att.pests` | Nesting, droppings, entry | check | standard | action |
 
+*`att.access-honesty` is `action`, not `evidence`: it attests to how far the inspector actually went. Software must never infer it, and it is what the binder's "not inspected / not accessible" honesty label renders from.*
+
 ### `crawlspace`
 
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `crw.access-honesty` | Access method and extent recorded | note | core | action |
+| `crw.access-honesty` | Extent of crawlspace access achieved | choice (from access point only\|partial entry\|full entry\|no access) | core | action |
 | `crw.ground-cover` | Vapour barrier present and condition | check | core | action |
 | `crw.standing-water` | Standing water, damp soil, drainage | check | core | action |
 | `crw.ventilation` | Vents open/closed appropriately for season and type | check | standard | action |
@@ -319,12 +349,12 @@ Dialect: `id | text | satisfy | tier | attest`.
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `wh.nameplate` | Nameplate photographed legibly | photo | core | evidence |
-| `wh.age` | Age decoded from serial and recorded | note | core | evidence |
+| `wh.age` | Install/manufacture year decoded from serial | measure (year) | core | evidence |
 | `wh.tpr` | TPR valve present; discharge piped toward floor | check | core | action |
 | `wh.fittings` | Fittings and base dry; no rust trails | check | core | action |
 | `wh.venting` | Venting condition and connection | check | core | action |
 | `wh.pan` | Drain pan / location risk assessed | check | standard | action |
-| `wh.ownership` | Owned vs. rented recorded | note | standard | evidence |
+| `wh.ownership` | Ownership status | choice (owned\|rented\|unknown) | standard | evidence |
 | `wh.anode` | Anode access noted | note | standard | evidence |
 
 ### `furnace`
@@ -343,7 +373,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `blr.nameplate` | Nameplate photographed | photo | core | evidence |
-| `blr.pressure` | Operating pressure/temp reading recorded | measure (psi) | core | action |
+| `blr.pressure` | Operating pressure reading recorded | measure (psi) | core | action |
 | `blr.relief` | Relief valve piped | check | core | action |
 | `blr.venting` | Venting condition | check | core | action |
 | `blr.expansion` | Expansion tank condition | check | standard | action |
@@ -375,8 +405,8 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `pnl.wide` | Location photographed wide | photo | core | evidence |
 | `pnl.directory` | Directory photographed | photo | core | evidence |
 | `pnl.brand` | Make/model recorded; known-issue brands flagged | note | core | evidence |
-| `pnl.service` | Service size recorded | note | core | evidence |
-| `pnl.type` | Breaker vs. fuse recorded | note | core | evidence |
+| `pnl.service` | Service size | choice (60A\|100A\|125A\|150A\|200A\|400A\|other\|unknown) | core | evidence |
+| `pnl.type` | Overcurrent protection type | choice (breaker\|fuse\|mixed) | core | evidence |
 | `pnl.exterior` | Dead-front on (policy: never removed); exterior condition — no heat, odour, corrosion | check | core | action |
 | `pnl.clearance` | Working clearance in front | check | standard | action |
 | `pnl.subs` | Subpanels noted | note | standard | evidence |
@@ -385,7 +415,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `wm.wide` | Photographed wide enough to locate | photo | core | evidence |
-| `wm.type` | Valve type recorded (ball vs. gate) | note | core | evidence |
+| `wm.type` | Valve type | choice (ball\|gate\|other\|unknown) | core | evidence |
 | `wm.tag` | Valve tag installed | check | core | action |
 | `wm.operate` | Operated if safe (ball, good condition); flagged if not | check | core | action |
 | `wm.curbstop` | Curb-stop location noted if known | note | standard | evidence |
@@ -419,13 +449,15 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `wt.errors` | Error codes noted | note | standard | evidence |
 | `wt.bypass` | Bypass located | check | standard | action |
 
+*`wt.train` stays a note pending the §8 sub-type split — once `water-softener` / `sediment-filter` / `uv` / `ro` are real component types, the "type" half becomes the pin type and only "position in train" remains.*
+
 ### `smoke-alarm` / `co-alarm` (shared items)
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `alm.date` | Manufacture date photographed from back | photo | core | evidence |
-| `alm.power` | Power source recorded | note | core | evidence |
+| `alm.power` | Power source | choice (hardwired\|hardwired + battery backup\|battery only\|plug-in\|unknown) | core | evidence |
 | `alm.test` | Test button — sounds | check | core | action |
-| `alm.type` | Type recorded | note | standard | evidence |
+| `alm.type` | Detector type | choice (smoke — ionization\|smoke — photoelectric\|smoke — dual sensor\|CO only\|combination smoke/CO\|heat\|unknown) | standard | evidence |
 | `alm.interconnect` | Interconnection noted | note | standard | evidence |
 
 ### `gas-shutoff`
@@ -438,15 +470,18 @@ Dialect: `id | text | satisfy | tier | attest`.
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `ft.wide` | Tank photographed wide | photo | core | evidence |
-| `ft.age` | Age/type recorded | note | core | evidence |
+| `ft.type` | Tank configuration | choice (above-ground indoor\|above-ground outdoor\|underground\|propane cylinder\|unknown) | core | evidence |
+| `ft.age` | Manufacture year from data plate | measure (year) | core | evidence |
 | `ft.lines` | Lines and regulator condition | check | core | action |
 | `ft.base` | Base/support condition | check | standard | action |
 | `ft.fill` | Fill/vent configuration noted | note | standard | evidence |
 
+*`ft.type = underground` is a material insurance and environmental flag and a soil-investigation trigger (Master Spec §13). It must be structured, never prose.*
+
 ### `fireplace`
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `fp.type` | Type recorded (wood/gas/pellet) | note | core | evidence |
+| `fp.type` | Appliance type | choice (wood fireplace\|woodstove\|pellet stove\|gas fireplace\|gas insert\|electric\|decorative — non-functional) | core | evidence |
 | `fp.clearances` | Clearances to combustibles | check | core | action |
 | `fp.wett` | Wood: WETT-class inspection flag recorded — never cleared by us | check | core | action |
 | `fp.gas-valve` | Gas: valve located | check | core | action |
@@ -456,10 +491,13 @@ Dialect: `id | text | satisfy | tier | attest`.
 ### `dryer-duct`
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `dd.material` | Material photographed — foil flex = finding | photo | core | evidence |
+| `dd.material` | Duct material photographed | photo | core | evidence |
+| `dd.material-id` | Duct material identified | choice (rigid metal\|semi-rigid metal\|foil flex\|plastic\|unknown) | core | evidence |
 | `dd.route` | Route and approximate length recorded | note | core | evidence |
 | `dd.flap` | Termination flap operates | check | core | action |
 | `dd.lint` | Lint condition | check | standard | action |
+
+*`foil flex` and `plastic` are fire-hazard findings and should auto-prompt an issue flag.*
 
 ### `garage-door`
 | id | text | satisfy | tier | attest |
@@ -475,7 +513,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 |---|---|---|---|---|
 | `gen.nameplate` | Nameplate photographed | photo | core | evidence |
 | `gen.transfer` | Transfer switch located | check | core | action |
-| `gen.fuel` | Fuel source and supply recorded | note | core | evidence |
+| `gen.fuel` | Fuel source | choice (natural gas\|propane\|diesel\|gasoline\|dual-fuel) | core | evidence |
 | `gen.exhaust` | Exhaust clearance from openings | check | core | action |
 | `gen.log` | Exercise log noted | note | standard | evidence |
 
@@ -484,10 +522,12 @@ Dialect: `id | text | satisfy | tier | attest`.
 |---|---|---|---|---|
 | `fc.photo` | Photographed with scale in frame | photo | core | evidence |
 | `fc.width` | Maximum width measured | measure (mm) | core | action |
-| `fc.orientation` | Orientation recorded (horiz/vert/diag/stepped) | note | core | evidence |
+| `fc.orientation` | Crack orientation | choice (horizontal\|vertical\|diagonal\|stepped\|map/random) | core | evidence |
 | `fc.activity` | Active vs. historical indicators assessed | check | core | action |
 | `fc.moisture` | Damp/efflorescence at crack | check | core | action |
 | `fc.comparison` | Comparison position established | pin `comparison-position` | core | evidence |
+
+*Orientation is diagnostic, not cosmetic: horizontal cracks in a foundation wall indicate lateral pressure and are a different severity class from vertical shrinkage cracks. Structured value = the binder can sort by it.*
 
 ### `comparison-position`
 | id | text | satisfy | tier | attest |
@@ -526,7 +566,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `hb.shutoff` | Interior shutoff located | check | core | action |
-| `hb.type` | Frost-free or standard recorded | note | standard | evidence |
+| `hb.type` | Bib type | choice (frost-free\|standard\|unknown) | standard | evidence |
 | `hb.leak` | Leak/drip check | check | standard | action |
 
 ### `receptacle-gfci`
@@ -563,15 +603,15 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `ch.crown` | Crown condition | check | core | action |
 | `ch.flashing` | Flashing condition | check | core | action |
 | `ch.masonry` | Masonry/mortar | check | standard | action |
-| `ch.liner` | Liner type if known | note | standard | evidence |
+| `ch.liner` | Liner type | choice (clay tile\|metal\|cast-in-place\|unlined\|unknown) | standard | evidence |
 
 ### `tree`
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `tr.proximity` | Proximity to structures recorded | note | core | evidence |
 | `tr.deadwood` | Deadwood/limbs over roof assessed | check | core | action |
-| `tr.lean` | Lean or root heave | check | standard | action |
 | `tr.species` | Species recorded if known | note | standard | evidence |
+| `tr.lean` | Lean or root heave | check | standard | action |
 
 ### `floor-drain`
 | id | text | satisfy | tier | attest |
@@ -608,6 +648,8 @@ Dialect: `id | text | satisfy | tier | attest`.
 | `app.nameplate` | Nameplate photographed | photo | core | evidence |
 | `app.type` | Type/subtype recorded | note | core | evidence |
 | `app.function` | Condition/function observation | check | standard | action |
+
+*`app.type` stays a note pending the §8 sub-type split — appliance subtypes (refrigerator, dishwasher, range…) are the clearest telemetry candidate from the field test.*
 
 ### `retaining-wall`
 | id | text | satisfy | tier | attest |
@@ -674,6 +716,20 @@ Dialect: `id | text | satisfy | tier | attest`.
 
 ## 8. Deferred content passes
 
-Monthly-subset coherence · seasonal mapping · stub components · guidance text (schema field exists; downspout↔grading linkage and similar cross-references land here) · binder traceability marks · apartment/condo zone types — parked (per Scope v4).
+- **Guidance text** — the `guidance` field is authored in the schema and almost entirely empty. This is the layer that teaches a backup operator *why* an item matters and *how* to check it. Biggest remaining content task.
+- **Monthly-scope coherence** — `scope: monthly` tags are seeded but the monthly list has never been reviewed as a standalone visit. Needed before the monthly visit can run on this engine.
+- **Seasonal mapping** — Master Spec §15 seasonal lists not yet converted to items.
+- **Component sub-type taxonomy** (§8 change-request) — driven by nickname/freeform telemetry, not invented. `appliance` and `water-treatment` are the leading candidates; both have interim `note` items above that collapse once the split lands.
+- **Stub components** — eleven types reserved with no items.
+- **Binder traceability** — no item currently carries its Master Spec section reference.
+- **Apartment/condo** — parked: a unit-in-a-building inspection has a different envelope/common-element model and is not addressed by this master.
 
-**Status:** v1.2.1 — v1.2 adjudications plus the six owner-dictated edits above. Regeneration expected diffs: four attest flips; `bsm.finished-behind` relocated to rough-base (triggered on `zone.finished`); `tr.species` added; 266 items.
+## 9. Open decisions
+
+1. **Choice escape values** — every choice includes `unknown` and/or `other`. Confirm the UI accepts a free-text note alongside `other`, and that `unknown` exports as a legitimate resolution rather than an unresolved item.
+2. **Auto-flagging on choice values** — `dd.material-id = foil flex|plastic`, `utl.pipe-material-id = poly-B|Kitec|galvanized`, `ft.type = underground`, `fc.orientation = horizontal`. Should selecting these auto-prompt an issue-flagged pin, or merely record? Recommend prompt-not-force: offer, don't impose.
+3. **Choice vs. multi-select** — everything here is single-select. No current item needs multi. If one appears, it's a new type, not a widened `choice`.
+
+---
+
+**Status:** v1.3 — adds `choice`, converts 13 items, splits 3, structures 2 ages for the equipment registry. Generator note: dialect gains `choice (a|b|c)` parsing in the satisfy cell, mirroring `measure (unit)`. Expected item count change: +4 (three splits, one `ft.type`).

@@ -57,7 +57,9 @@ export function itemScopeKey(scope: ItemScope): string {
 export type ItemResolution =
   | {
       kind: "satisfied";
-      via: "pin" | "check" | "note" | "measure" | "photo";
+      // "choice" (master v1.3) records the selected option in evidence.value — the same
+      // slot `measure` uses, so the binder reads one structured field for both.
+      via: "pin" | "check" | "note" | "measure" | "photo" | "choice";
       /** For attest:action items (tests): the outcome, recorded verbatim. */
       result?: "pass" | "fail";
       evidence?: {

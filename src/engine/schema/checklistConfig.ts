@@ -17,7 +17,7 @@
  */
 import { z } from "zod";
 
-export const SATISFY_KINDS = ["pin", "check", "note", "measure", "photo"] as const;
+export const SATISFY_KINDS = ["pin", "check", "note", "measure", "photo", "choice"] as const;
 export type SatisfyKind = (typeof SATISFY_KINDS)[number];
 
 export const TIERS = ["core", "standard"] as const;
@@ -65,6 +65,13 @@ const itemSchema = z.object({
   pinTypes: z.array(idSchema).optional(),
   /** For satisfy: measure — unit hint, e.g. "psi", "%RH", "in", "mm". */
   unit: z.string().min(1).optional(),
+  /**
+   * For satisfy: choice — the authored single-select options, in authored order.
+   * Master v1.3 §2 "choice discipline": options should be exhaustive for realistic field
+   * cases and carry an escape (`unknown` and/or `other`), so an inspector who cannot
+   * determine the answer records *that* rather than being forced into a wrong value.
+   */
+  options: z.array(z.string().min(1)).min(2).optional(),
   trigger: whenSchema.optional(),
   /** Rendered sub-group within a dense zone list (utility's bold sub-headings). */
   group: z.string().min(1).optional(),
@@ -201,6 +208,17 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
     }
     if (item.unit && item.satisfy !== "measure")
       issue(`${where}: ${item.id} carries a unit but satisfy is ${item.satisfy}`);
+    if (item.satisfy === "choice") {
+      const opts = item.options ?? [];
+      if (opts.length < 2) issue(`${where}: ${item.id} is satisfy:choice but names fewer than 2 options`);
+      if (new Set(opts).size !== opts.length) issue(`${where}: ${item.id} has duplicate choice options`);
+      // NOT enforced here: master v1.3 §2 says every choice must carry an `unknown`/`other`
+      // escape, but six authored items don't (pnl.type, fp.type, fc.orientation, gen.fuel,
+      // and both access-honesty items). Either the rule or those rows must give — that is an
+      // owner content decision, so it is a change-request (REVIEW §8), not a build failure.
+    } else if (item.options) {
+      issue(`${where}: ${item.id} carries options but satisfy is ${item.satisfy}`);
+    }
     if (item.trigger) {
       const refs = [...(item.trigger.allOf ?? []), ...(item.trigger.anyOf ?? []), ...(item.trigger.not ?? [])];
       for (const ref of refs) {

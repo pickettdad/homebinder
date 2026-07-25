@@ -200,3 +200,78 @@ describe("content invariants (master v1.1 discipline)", () => {
       for (const inh of zt.inherits) expect(baseIds.has(inh), `${zt.id} inherits ${inh}`).toBe(true);
   });
 });
+
+/**
+ * `choice` satisfy type (master v1.3). The dialect carries options inline in the satisfy
+ * cell — `choice (a|b|c)` — mirroring `measure (unit)`. Inside a markdown table those
+ * pipes must be backslash-escaped, so the parser has to split on unescaped pipes only;
+ * getting that wrong silently produces one giant option instead of many.
+ */
+describe("choice dialect (master v1.3)", () => {
+  const allItems = () => {
+    const out: { id: string; satisfy: string; options?: string[]; attest: string }[] = [];
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const rec = o as Record<string, unknown>;
+        if (typeof rec.id === "string" && typeof rec.satisfy === "string")
+          out.push(rec as unknown as (typeof out)[number]);
+        Object.values(rec).forEach(walk);
+      }
+    };
+    walk(checklistsBaseline);
+    return out;
+  };
+
+  it("parses every authored choice item with 2+ options", () => {
+    const choices = allItems().filter((i) => i.satisfy === "choice");
+    expect(choices.length).toBeGreaterThan(0);
+    for (const c of choices) {
+      expect(c.options, `${c.id} has no options`).toBeDefined();
+      expect(c.options!.length, `${c.id} has <2 options`).toBeGreaterThanOrEqual(2);
+      expect(new Set(c.options!).size, `${c.id} has duplicate options`).toBe(c.options!.length);
+    }
+  });
+
+  it("splits on escaped pipes rather than swallowing them into one option", () => {
+    // utl.pipe-material-id is authored with 8 escaped-pipe alternatives.
+    const pipe = allItems().find((i) => i.id === "utl.pipe-material-id");
+    expect(pipe?.options).toEqual([
+      "copper", "PEX", "poly-B", "Kitec", "galvanized", "CPVC", "mixed", "unknown",
+    ]);
+    // No option may still carry a stray backslash from the markdown escaping.
+    for (const c of allItems().filter((i) => i.satisfy === "choice"))
+      for (const o of c.options!) expect(o, `${c.id} option kept an escape`).not.toContain("\\");
+  });
+
+  it("carries options ONLY on choice items", () => {
+    for (const i of allItems())
+      if (i.satisfy !== "choice") expect(i.options, `${i.id} is ${i.satisfy} but has options`).toBeUndefined();
+  });
+
+  it("rejects malformed choice cells (fail closed)", () => {
+    // Swap ONE real row in the real master rather than hand-rolling a fixture: a synthetic
+    // master fails on the version header first, which would make every assertion here pass
+    // for the wrong reason (verified — the first draft of this test was vacuous).
+    const ROW = "| `hb.type` | Bib type | choice (frost-free\\|standard\\|unknown) | standard | evidence |";
+    expect(masterText).toContain(ROW); // guard: if the row is reworded, fail loudly, not silently
+    const withCell = (cell: string) =>
+      masterText.replace(ROW, `| \`hb.type\` | Bib type | ${cell} | standard | evidence |`);
+
+    // Control: a well-formed replacement must still parse, or the negatives prove nothing.
+    expect(() => parseMaster(withCell("choice (a\\|b\\|unknown)"))).not.toThrow();
+
+    expect(() => parseMaster(withCell("choice (only-one)"))).toThrow(/2\+ options/);
+    expect(() => parseMaster(withCell("choice (a\\|a)"))).toThrow(/duplicate choice option/);
+    expect(() => parseMaster(withCell("choice (a\\|)"))).toThrow(/empty choice option/);
+    expect(() => parseMaster(withCell("choice ()"))).toThrow(/unparseable satisfy cell/);
+  });
+
+  it("keeps the two access-honesty items as attest:action — software must never infer extent", () => {
+    for (const id of ["att.access-honesty", "crw.access-honesty"]) {
+      const item = allItems().find((i) => i.id === id);
+      expect(item?.satisfy).toBe("choice");
+      expect(item?.attest).toBe("action");
+    }
+  });
+});

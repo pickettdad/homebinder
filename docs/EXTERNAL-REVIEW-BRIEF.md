@@ -59,10 +59,14 @@ possibly asleep and no signal.
 
 ## 3. Where the project is right now (verify against the repo)
 
-- **Stage 1 (web pin model): built.** Walk / zone / pin / canvas / inbox flow, checklist,
-  camera, session lifecycle, export manifest, an offline AI chat/review queue. Event-sourced
-  core with a fold, persisted in Dexie/IndexedDB. ~105 tests; CI gates on typecheck, tests,
-  build, and checklist-config drift.
+- **Stage 1 (web pin model): mostly built.** Walk / zone / pin / canvas / inbox flow, checklist,
+  camera, session lifecycle, an offline AI chat/review queue. Event-sourced core with a fold,
+  persisted in Dexie/IndexedDB. ~105 tests; CI gates on typecheck, tests, build, and
+  checklist-config drift. **NOT yet built: the pin-model (manifest v3) export.** The current
+  exporter (`src/engine/export/manifest.ts`, `src/screens/ExportScreen.tsx`) is the legacy
+  slot-model v2 exporter and cannot export a pin-model session; the v3 contract is specified in
+  `docs/PLAN-STAGE-1.md` §7 but not implemented. This is the top functional gap — a pin-model
+  inspection currently has no structured off-device export.
 - **Stage 0 (native shell): working end-to-end on-device.** Capacitor 8 → GitHub Actions →
   TestFlight. Owner-confirmed on "build 5": the native app launches and the AI assistant works.
 - **RoomPlan: parked.** A native plugin-injection approach black-screened the app on device

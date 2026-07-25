@@ -91,11 +91,12 @@ export function HomeScreen() {
             {storage.persisted
               ? "persistent"
               : isNativePlatform()
-                ? // In the native shell, data lives in the app's own container and survives
-                  // across launches — it is NOT subject to browser storage eviction. WKWebView
-                  // reports navigator.storage.persist() === false anyway, so guard the message:
-                  // "install to home screen" is meaningless (it is already an installed app).
-                  "persistent (app storage)"
+                ? // Native shell: data lives in the app's own container (survives launches, not
+                  // subject to browser eviction), but there is NO off-device backup yet, and the
+                  // ratified Stage-2 durability gate (docs/PLAN-STAGE-2-NOTES.md) says the native
+                  // shell isn't the daily driver until a filesystem/SQLite mirror exists. So do
+                  // not oversell it — "install to home screen" is also meaningless here.
+                  "stored on this iPad only"
                 : "NOT persistent — install to home screen"}
           </p>
         )}

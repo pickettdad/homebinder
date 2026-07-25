@@ -41,7 +41,11 @@ function GlobalCamera() {
   return (
     <div className="fixed bottom-6 right-6 z-40">
       <PhotoInput
-        onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast(`Photo → ${where}`))}
+        onPhoto={(file) =>
+          capturePhotoV2(target, file)
+            .then(() => showToast(`Photo → ${where}`))
+            .catch(() => showToast("Photo not saved — storage may be full"))
+        }
         className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-600 text-3xl shadow-lg active:bg-teal-500"
       >
         📷
@@ -54,6 +58,10 @@ export function App() {
   const { ready, screen, sessionId, toast, init, drainNow, drainChatNow, refreshReviewStatus } = useApp();
 
   useEffect(() => { void init(); }, [init]);
+
+  // Boot complete after the first commit: tell the index.html watchdog to stop being
+  // destructive. Past this point a stray runtime error must never wipe the live app.
+  useEffect(() => { window.__hsBooted = true; }, []);
 
   // Second-look drain triggers: connectivity regained, app foregrounded, and a slow
   // heartbeat while a session is active. The drain itself is single-flight and no-ops

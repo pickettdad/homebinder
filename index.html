@@ -30,6 +30,14 @@
         }
         function show(title, detail) {
           if (shown) return;
+          // Post-boot safety: once React has mounted (App sets window.__hsBooted), NEVER replace
+          // the live app. A stray runtime rejection mid-inspection must not wipe the screen and
+          // destroy an inspector's work — log it and let the app's own catch handlers surface a
+          // user-facing message. The destructive overlay is strictly a BOOT-failure tool.
+          if (window.__hsBooted) {
+            if (window.console && console.error) console.error("[hs] post-boot error:", title, detail || "");
+            return;
+          }
           shown = true;
           var host = document.getElementById("root") || document.body;
           if (!host) return;

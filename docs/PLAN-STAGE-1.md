@@ -326,6 +326,29 @@ because the manifest carries both the ingredients (pins with type/flag/anchors) 
 definitions (the config snapshot's `layers`) — the binder builder derives the shutoffs
 map / issues index from those two, and the schema comment says so.
 
+**Owner decisions folded into step 7 (2026-07-25):**
+- **A completed inspection is not "done" until it has been exported cleanly OUT of the app**
+  (owner, refined 2026-07-25). Explicitly **not** "off device": saving the manifest + media into
+  the iPad's Files counts. The point is that nothing can be lost *with the app* — getting the
+  files onward to cloud/USB is the **next stage of the process**, not this gate. Verification =
+  the pre-export integrity sweep passes **and** every produced file is confirmed handed off (the
+  per-file `shared|downloaded` confirmation). A completed-but-unexported visit is surfaced loudly
+  as "not yet exported"; the same export runs mid-visit as an **emergency backup**.
+- **Provenance stays integrity-only** (owner, 2026-07-25) — and the *reasoning* is recorded so it
+  isn't re-litigated: the threat model is **not** "someone altered the report," it is **"did you
+  actually perform the inspection you billed for."** Timestamped events plus photos already answer
+  that the way any ordinary business record does. Cryptographic signing matters only if
+  HouseSteady is ever *accused of falsifying* a record — real but remote. So: per-media sha256 +
+  config hash for corruption detection; a signed chain-of-custody is **deferred, not planned**.
+  Revisit only if an actual dispute happens; do not build it on spec.
+- **Pin moved to a different zone drops its anchors** (owner: "if a pin is legitimately moving
+  zones, they'd need to be removed" — rare case). Anchors belong to a zone's canvases, so a
+  cross-zone move clears the pin's `anchors[]`. This is a **fold rule** (`foldV2`), independent
+  of export; add it where the pin-move/re-target event is handled, with a test.
+- **RoomPlan is a launch requirement but parked** pending a *borrowed* Mac for local native
+  debugging (owner: "yes … we'll park roomplan while I borrow"). Tracked in issue #36; not a
+  step-7 concern.
+
 ### 7a. The manifest is a ROUND TRIP, not a one-way export (owner, 2026-07-25)
 
 Field → binder builder is the manifest above. **Binder builder → field is a *session

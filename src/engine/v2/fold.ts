@@ -121,6 +121,15 @@ export interface LifecycleEntry {
   reason?: string;
 }
 
+/** A recorded export — the visit's data written out of the app (manifest + media files). */
+export interface ExportRecord {
+  at: string;
+  manifestSha256: string;
+  files: { name: string; bytes: number; sha256?: string }[];
+  /** Log position, so "has anything changed since the last export?" is answerable. */
+  seq: number;
+}
+
 export interface SessionStateV2 {
   sessionId: string;
   configId: string;
@@ -143,6 +152,8 @@ export interface SessionStateV2 {
   completedAt?: string;
   /** Full complete/reopen history in order — the audit trail the owner asked to see. */
   lifecycle: LifecycleEntry[];
+  /** Every export recorded for this visit, oldest first. */
+  exports: ExportRecord[];
   lastEventSeq: number;
   lastPinNumber: number;
   lastActiveZoneId?: string;
@@ -151,6 +162,19 @@ export interface SessionStateV2 {
 
 export const resolutionKey = (scope: ItemScope, itemId: string): string =>
   `${itemScopeKey(scope)}/${itemId}`;
+
+/**
+ * Has this visit been exported out of the app, with nothing recorded since?
+ *
+ * The owner's durability rule (2026-07-25): an inspection isn't finished until its data has been
+ * written cleanly OUT of the app (iPad Files / share sheet — it need not leave the device yet;
+ * cloud or USB is the next stage). Any event after the last export means the export is stale, so
+ * this is deliberately strict: the last recorded export must be the newest thing in the log.
+ */
+export function exportIsCurrent(state: SessionStateV2): boolean {
+  const last = state.exports[state.exports.length - 1];
+  return !!last && last.seq === state.lastEventSeq;
+}
 
 const mediaRef = (
   media: { mediaId: string; sha256: string; mime: string; bytes: number },
@@ -180,6 +204,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
     resolutions: new Map(),
     startedAt: init.at,
     lifecycle: [],
+    exports: [],
     lastEventSeq: 0,
     lastPinNumber: 0,
     orphanEvents: [],
@@ -371,6 +396,11 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
           orphan(e);
           break;
         }
+        // A pin moving to a DIFFERENT zone drops its anchors: anchors point at canvases that
+        // belong to the old zone, so keeping them would place the pin on a floor plan of a room
+        // it is no longer in (owner ruling 2026-07-25 — "if a pin is legitimately moving, they
+        // need to be removed"; rare case). Re-assignment within the same zone keeps them.
+        if (p.zoneId !== e.zoneId) p.anchors = [];
         p.zoneId = e.zoneId;
         if (e.zoneId) state.lastActiveZoneId = e.zoneId;
         break;
@@ -553,7 +583,11 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
         state.lifecycle.push({ type: "reopened", at: e.at, reason: e.reason });
         break;
       case "ExportProduced":
-        break; // recorded in the log; no state to derive
+        // Tracked so the app can tell the inspector whether the visit's data has been written
+        // out of the app yet (owner rule: an inspection isn't finished until it's exported
+        // cleanly — see exportIsCurrent below).
+        state.exports.push({ at: e.at, manifestSha256: e.manifestSha256, files: e.files, seq: e.seq });
+        break;
       default:
         // Unknown event type (newer app version wrote it) — ignore, never throw.
         break;

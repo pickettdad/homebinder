@@ -9,6 +9,11 @@ criteria / design constraints; nothing here is built in Stage 1.
 - **WKWebView storage durability** is a Stage 2 *gate*, not a note: the native shell does
   not become the daily driver until a durability mitigation (filesystem export or SQLite
   mirror via plugin) exists and is verified on-device.
+  - **Status (2026-07-25):** the *filesystem export* half now exists — Stage 1 §7's pin-model
+    export writes the manifest + media out of the app via the share sheet (iPad Files), with a
+    pre-export integrity sweep. **The gate is not yet cleared:** it still requires
+    *verified on-device* — i.e. run the export on the iPad, confirm the files land in Files, and
+    confirm they re-open/verify. Until that on-device run happens, treat this as built-but-unproven.
 
 ## Canvas roles — two layers, not a hierarchy (owner, 2026-07-24)
 

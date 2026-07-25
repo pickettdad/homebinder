@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import type { Source } from "../../src/engine/schema/events";
 import type { V2EventPayload, V2SessionEvent } from "../../src/engine/v2/events";
-import { foldV2, resolutionKey } from "../../src/engine/v2/fold";
+import { exportIsCurrent, foldV2, resolutionKey } from "../../src/engine/v2/fold";
 import {
   activeRefs,
   auditSnapshot,
@@ -496,5 +496,66 @@ describe("checklist derivation (real config)", () => {
     expect(snap.coreUnresolved).not.toContain("wet.fan");
     expect(snap.coreUnresolved).toContain("int.canvas");
     expect(snap.standardUnresolved).toBeGreaterThan(0);
+  });
+});
+
+describe("pin move across zones drops anchors (owner ruling 2026-07-25)", () => {
+  const base: V2EventPayload[] = [
+    init,
+    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
+    { type: "ZoneCreated", zoneId: "z2", zoneType: "utility", label: "Garage", attributes: {} },
+    { type: "CanvasAdded", canvasId: "c1", zoneId: "z1", kind: "photo", media: media(1) },
+    { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+    { type: "AnchorPlaced", anchorId: "a1", pinId: "p1", canvasId: "c1", x: 0.2, y: 0.3 },
+  ];
+
+  it("clears anchors when the pin moves to a different zone", () => {
+    const state = foldV2(mkEvents([...base, { type: "PinAssigned", pinId: "p1", zoneId: "z2" }]));
+    const pin = state.pins.find((p) => p.pinId === "p1")!;
+    expect(pin.zoneId).toBe("z2");
+    expect(pin.anchors).toEqual([]);
+  });
+
+  it("keeps anchors when re-assigned to the SAME zone", () => {
+    const state = foldV2(mkEvents([...base, { type: "PinAssigned", pinId: "p1", zoneId: "z1" }]));
+    expect(state.pins.find((p) => p.pinId === "p1")!.anchors).toHaveLength(1);
+  });
+
+  it("clears anchors when the pin moves to the misc bucket (no zone)", () => {
+    const state = foldV2(mkEvents([...base, { type: "PinAssigned", pinId: "p1", zoneId: undefined }]));
+    const pin = state.pins.find((p) => p.pinId === "p1")!;
+    expect(pin.zoneId).toBeUndefined();
+    expect(pin.anchors).toEqual([]);
+  });
+});
+
+describe("export tracking / exportIsCurrent", () => {
+  const base: V2EventPayload[] = [
+    init,
+    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
+  ];
+
+  it("is false before any export", () => {
+    expect(exportIsCurrent(foldV2(mkEvents(base)))).toBe(false);
+  });
+
+  it("is true immediately after an export is recorded", () => {
+    const state = foldV2(
+      mkEvents([...base, { type: "ExportProduced", manifestSha256: "abc", files: [{ name: "m.json", bytes: 10 }] }]),
+    );
+    expect(state.exports).toHaveLength(1);
+    expect(state.exports[0]!.manifestSha256).toBe("abc");
+    expect(exportIsCurrent(state)).toBe(true);
+  });
+
+  it("goes stale as soon as anything else is recorded", () => {
+    const state = foldV2(
+      mkEvents([
+        ...base,
+        { type: "ExportProduced", manifestSha256: "abc", files: [] },
+        { type: "PinCreated", pinId: "p9", pinNumber: 9, zoneId: "z1" },
+      ]),
+    );
+    expect(exportIsCurrent(state)).toBe(false);
   });
 });

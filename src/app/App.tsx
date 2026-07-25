@@ -15,6 +15,7 @@ import { ZoneV2Screen } from "../screens/v2/ZoneV2Screen";
 import { PinScreen } from "../screens/v2/PinScreen";
 import { CanvasScreen } from "../screens/v2/CanvasScreen";
 import { InboxScreen } from "../screens/v2/InboxScreen";
+import { ExportV2Screen } from "../screens/v2/ExportV2Screen";
 import { PhotoInput } from "../capture/PhotoInput";
 import type { CaptureTarget } from "../engine/v2/events";
 
@@ -115,6 +116,7 @@ export function App() {
         <CanvasScreen key={screen.canvasId} canvasId={screen.canvasId} zoneId={screen.zoneId} placePinId={screen.placePinId} />
       )}
       {screen.name === "inbox" && <InboxScreen />}
+      {screen.name === "export2" && <ExportV2Screen />}
       <GlobalCamera />
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center">

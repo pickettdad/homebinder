@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet } from "../../ui/bits";
 import { deriveSessionItems } from "../../engine/v2/checklist";
+import { exportIsCurrent } from "../../engine/v2/fold";
 import { ChecklistPanel } from "./ChecklistPanel";
 import { PinRow, ZONE_LEVELS, defaultLevelFor } from "./shared";
 
@@ -25,6 +26,7 @@ export function WalkScreen() {
   if (!v2Session || !config) return null;
   const ro = !!v2Session.completedAt; // completed → view only until reopened
   const wasCompletedBefore = v2Session.lifecycle.some((l) => l.type === "completed");
+  const backedUp = exportIsCurrent(v2Session);
 
   const inboxCount = v2Session.inbox.length + v2Session.inboxNoteIds.length;
   const miscPins = v2Session.pins.filter((p) => !p.zoneId && !p.retired);
@@ -133,6 +135,31 @@ export function WalkScreen() {
           {wasCompletedBefore ? "Re-complete inspection" : "Finish visit — house-level checks"}
         </BigButton>
       )}
+
+      {/* Backup state. A completed-but-unexported visit is NOT finished (owner rule): the export
+          is the loud next step. Mid-visit it stays available as a quieter emergency backup. */}
+      {v2Session.zones.length > 0 &&
+        (ro && !backedUp ? (
+          <section className="flex flex-col gap-3 rounded-xl border border-amber-500/60 bg-amber-950/30 p-4">
+            <p className="text-amber-200">
+              Completed, but <span className="font-semibold">not yet exported</span> — the visit
+              still exists only inside the app.
+            </p>
+            <BigButton onClick={() => navigate({ name: "export2" })}>Export / back up now</BigButton>
+          </section>
+        ) : backedUp ? (
+          <button
+            type="button"
+            onClick={() => navigate({ name: "export2" })}
+            className="rounded-xl bg-emerald-950/40 p-3 text-left text-sm text-emerald-300 ring-1 ring-emerald-600/50"
+          >
+            ✓ Backed up — exported out of the app. Tap to export again.
+          </button>
+        ) : (
+          <BigButton variant="ghost" onClick={() => navigate({ name: "export2" })}>
+            Export / back up now
+          </BigButton>
+        ))}
 
       {(ro || v2Session.lifecycle.length > 0) && (
         <section className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-900/50 p-4">
@@ -246,7 +273,7 @@ export function WalkScreen() {
             onClick={() => {
               void completeSessionV2().then(() => {
                 setFinishSheet(false);
-                showToast(wasCompletedBefore ? "Inspection re-completed" : "Visit completed — data stays on this device");
+                showToast(wasCompletedBefore ? "Inspection re-completed — export again" : "Visit completed — now export to back it up");
               });
             }}
           >

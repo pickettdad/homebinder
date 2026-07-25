@@ -224,6 +224,30 @@ card"); (b) a **used Mac mini** for local build/run, turning days of blind guess
 complete without it. Note the hello-shell milestone (enrollment → signing → upload → install)
 remains proven and complete.
 
+**Black screen RE-DIAGNOSED — it was NEVER RoomPlan (2026-07-25).** The owner ran Safari Web
+Inspector against the iPad: a plain Safari tab was inspectable (the Mac↔iPad link works), but the
+app showed **"no inspectable applications"** — and, critically, **build 2 (pre-RoomPlan) black-screens
+identically**. So the fault is a **pre-existing shell boot failure**, present since the first native
+build — not the plugin wiring. The earlier "hello-shell complete" claim was premature: enrollment →
+signing → upload → install were proven, but the **web view actually rendering was never confirmed
+on-device**. RoomPlan stays parked on its own merits, but it was a red herring for this bug.
+**Confound found:** "no inspectable applications" does **not** prove the bundle failed to load —
+Capacitor sets `WKWebView.isInspectable = isWebDebuggable`, which defaults to **true in DEBUG, false
+in production** (vendored `CAPInstanceDescriptor.swift`: `ios.webContentsDebuggingEnabled` → else
+`#if DEBUG`). Our TestFlight build archives `-configuration Release`, so its web view is
+non-inspectable regardless of whether it loaded. The inspector test could not distinguish "bundle
+never loaded" from "bundle loaded fine but Release isn't inspectable."
+**Instrumentation shipped (make the build self-diagnosing, no Mac required):** (1)
+`ios.webContentsDebuggingEnabled: true` in `capacitor.config.ts` → the Release/TestFlight build is
+now Safari-inspectable, so the owner's Mac↔iPad setup works on the real build. (2) An inline,
+**non-module** boot watchdog in `index.html` (survives even a bundle 404 / non-execution) that
+paints any load failure, thrown error, or unhandled rejection as **readable on-device text** instead
+of a black rectangle, plus an 8s "nothing mounted, nothing threw" catch. (3) A `main.tsx` try/catch
+that reports a synchronous mount crash through the same overlay. **Next step:** merge → re-run the
+iOS build → the shipped app either launches, or shows the exact failure on its own screen *and* is
+inspectable from the Mac. Either way the next build returns real evidence instead of a black
+rectangle — then the true root cause gets a one-shot fix. Tracked as a GitHub issue until closed.
+
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 
 At the owner's house, on the installed TestFlight build:

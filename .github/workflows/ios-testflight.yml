@@ -71,32 +71,12 @@ jobs:
           # in ios/) because the ios/ project is generated on CI, so it survives every cap sync.
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || true
 
-          # --- Stage 0 RoomPlan native plugin (PLAN-STAGE-0 §4) ---
-          # No committed ios/ (no Mac), so the plugin's Swift lives in native/ios/ and is injected
-          # here. We APPEND the class bodies into the generated AppDelegate.swift — which is always in
-          # the target's compile sources — rather than dropping loose files into the project, which
-          # would NOT be compiled without editing project.pbxproj (or would depend on Xcode-16
-          # synchronized-group behavior we can't verify blind). Imports go to the top; class bodies to
-          # the bottom. Registration is by hand via a CAPBridgeViewController subclass, so we also
-          # repoint the storyboard's root controller at it (fail loudly if the format drifted).
-          APPDELEGATE="ios/App/App/AppDelegate.swift"
-          for imp in Foundation RoomPlan; do
-            if ! grep -qx "import $imp" "$APPDELEGATE"; then
-              printf 'import %s\n' "$imp" | cat - "$APPDELEGATE" > "$APPDELEGATE.tmp"
-              mv "$APPDELEGATE.tmp" "$APPDELEGATE"
-            fi
-          done
-          for f in native/ios/RoomPlanPlugin.swift native/ios/MainViewController.swift; do
-            printf '\n' >> "$APPDELEGATE"
-            grep -v '^import ' "$f" >> "$APPDELEGATE" || true
-          done
-          # Repoint the root controller at MainViewController by FLAT name only (drop customModule):
-          # UIKit then resolves it via NSClassFromString against the @objc(MainViewController) name,
-          # which is module-independent. Setting customModule="App" here is what black-screened build 3
-          # (unresolved class → UIKit falls back to a plain black UIViewController).
-          STORYBOARD="ios/App/App/Base.lproj/Main.storyboard"
-          sed -i '' 's#customClass="CAPBridgeViewController" customModule="Capacitor"#customClass="MainViewController"#' "$STORYBOARD"
-          grep -q 'customClass="MainViewController"' "$STORYBOARD" || { echo "ERROR: Main.storyboard root-controller patch did not apply — RoomPlan plugin would not register."; exit 1; }
+          # NOTE: the Stage 0 RoomPlan native plugin injection was REVERTED (2026-07-24) — two
+          # storyboard-registration variants (customModule="App", then flat @objc name) both
+          # black-screened at launch on-device, and blind CI-only iteration couldn't diagnose it.
+          # This build is back to the proven hello-shell. RoomPlan re-approach is parked pending a
+          # decision (safe plugin-package integration, or a Mac for local native debugging). The
+          # Swift stays in native/ios/ for the re-approach; see PLAN-STAGE-0.
 
       - name: Write the App Store Connect API key
         env:
@@ -131,14 +111,10 @@ jobs:
           # CI guidance (PLAN-STAGE-0 §7's budgeted signing iteration). If a future runner rejects
           # exporting an unsigned archive, the fallback is to register one device UDID and restore
           # automatic development signing here — but distribution-at-export is the cleaner pattern.
-          # IPHONEOS_DEPLOYMENT_TARGET=17.0: the only device is on iPadOS 26, and RoomPlan needs
-          # iOS 16 (StructureBuilder 17), so target 17 lets the plugin use the API without
-          # per-call availability guards (PLAN-STAGE-0 §2).
           xcodebuild archive \
             "${CONTAINER[@]}" -scheme App -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGNING_ALLOWED=NO
 
           # signingStyle=automatic tells exportArchive to cloud-sign for distribution using the

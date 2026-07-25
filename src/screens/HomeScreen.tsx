@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { BigButton, Sheet, formatBytes } from "../ui/bits";
 import { getAppToken, setAppToken } from "../chat/queue";
-import { Stage0ScanCard } from "./Stage0ScanCard";
 
 export function HomeScreen() {
   const {
@@ -53,8 +52,6 @@ export function HomeScreen() {
       <BigButton disabled={!checklists} onClick={() => navigate({ name: "setup2" })}>
         Start new inspection
       </BigButton>
-
-      <Stage0ScanCard />
 
       {sessionRows.length > 0 && (
         <section className="flex flex-col gap-3">

@@ -199,13 +199,54 @@ can't compile off a Mac, so the next `workflow_dispatch` is the real test; expec
 iteration. **Still pending: the browser projection/harness** — deferred by design until the first
 real scan JSON pins the (Apple-undocumented) `CapturedRoom` schema (§6.3–4).
 
-**Build-3 black-screen fix (the budgeted native iteration).** TestFlight build 3 compiled and
-installed but launched to a **black screen** — a classic UIKit symptom: an unresolvable storyboard
-`customClass` makes UIKit fall back to a plain black `UIViewController`. Cause: the CI patch set
-`customModule="App"`, and that module-qualified lookup didn't resolve `MainViewController`. Fix:
-mark the class `@objc(MainViewController)` (a flat Obj-C runtime name) and drop `customModule` from
-the storyboard so UIKit resolves it via `NSClassFromString` — module-name-independent and reliable.
-(Also added `super.capacitorDidLoad()`.) Signing/upload were unaffected throughout.
+**RoomPlan scan-shell REVERTED — blind native iteration hit its limit (2026-07-24).** Two
+storyboard-registration variants both black-screened on-device: (1) build 3 repointed the root
+controller with `customModule="App"`; (2) build 4 used a flat `@objc(MainViewController)` name +
+dropped `customModule` + `super.capacitorDidLoad()`. Both installed fine but launched to a black
+screen "from the very first instant" (no crash — the app stayed open). On-device Console logs
+(owner-captured) showed only benign SpringBoard/RunningBoard noise (snapshot-denylisted,
+"no handle for focused PID", "Multiple RBSRunningReasonAttribute") — **no smoking-gun app error**,
+so the exact cause stayed undiagnosable from CI + device logs alone. Signing/upload worked
+throughout; this is purely the plugin-registration wiring.
+
+**Decision: revert to the proven hello-shell** (removed the AppDelegate-append + storyboard patch +
+`IPHONEOS_DEPLOYMENT_TARGET` override from the workflow, and the `Stage0ScanCard` from Home) so the
+native app launches again. This is exactly the risk §1 flagged — **"a used M-series Mac mini …
+only if local native debugging ever becomes load-bearing (repeated native-crash diagnosis)."** We
+are there: blind CI-only iteration (each cycle ~15–30 min + billed macOS minutes, no runtime
+visibility) cannot converge on a launch-time native bug. The `native/ios/` Swift + `src/native/
+roomPlan.ts` + `Stage0ScanCard.tsx` stay in the repo (unwired) for the re-approach. **Open owner
+decision** — three paths: (a) re-attempt via a proper Capacitor **plugin package** (SPM, auto-
+registers, structurally can't touch the root VC, so it can't black-screen — worst case is "no scan
+card"); (b) a **used Mac mini** for local build/run, turning days of blind guessing into minutes;
+(c) **park RoomPlan** — the v2 model already treats photo canvases as a first-class fallback
+(REDESIGN §3; §6.5 here: "a poor RoomPlan result is information, not failure"), so the product is
+complete without it. Note the hello-shell milestone (enrollment → signing → upload → install)
+remains proven and complete.
+
+**Black screen RE-DIAGNOSED — it was NEVER RoomPlan (2026-07-25).** The owner ran Safari Web
+Inspector against the iPad: a plain Safari tab was inspectable (the Mac↔iPad link works), but the
+app showed **"no inspectable applications"** — and, critically, **build 2 (pre-RoomPlan) black-screens
+identically**. So the fault is a **pre-existing shell boot failure**, present since the first native
+build — not the plugin wiring. The earlier "hello-shell complete" claim was premature: enrollment →
+signing → upload → install were proven, but the **web view actually rendering was never confirmed
+on-device**. RoomPlan stays parked on its own merits, but it was a red herring for this bug.
+**Confound found:** "no inspectable applications" does **not** prove the bundle failed to load —
+Capacitor sets `WKWebView.isInspectable = isWebDebuggable`, which defaults to **true in DEBUG, false
+in production** (vendored `CAPInstanceDescriptor.swift`: `ios.webContentsDebuggingEnabled` → else
+`#if DEBUG`). Our TestFlight build archives `-configuration Release`, so its web view is
+non-inspectable regardless of whether it loaded. The inspector test could not distinguish "bundle
+never loaded" from "bundle loaded fine but Release isn't inspectable."
+**Instrumentation shipped (make the build self-diagnosing, no Mac required):** (1)
+`ios.webContentsDebuggingEnabled: true` in `capacitor.config.ts` → the Release/TestFlight build is
+now Safari-inspectable, so the owner's Mac↔iPad setup works on the real build. (2) An inline,
+**non-module** boot watchdog in `index.html` (survives even a bundle 404 / non-execution) that
+paints any load failure, thrown error, or unhandled rejection as **readable on-device text** instead
+of a black rectangle, plus an 8s "nothing mounted, nothing threw" catch. (3) A `main.tsx` try/catch
+that reports a synchronous mount crash through the same overlay. **Next step:** merge → re-run the
+iOS build → the shipped app either launches, or shows the exact failure on its own screen *and* is
+inspectable from the Mac. Either way the next build returns real evidence instead of a black
+rectangle — then the true root cause gets a one-shot fix. Tracked as a GitHub issue until closed.
 
 ## 6. Acceptance test (REDESIGN-v2 §5, made concrete)
 

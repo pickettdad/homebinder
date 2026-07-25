@@ -13,6 +13,75 @@
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
     <link rel="icon" href="/icons/icon-192.png" />
     <title>HouseSteady Field Assistant</title>
+    <!--
+      Boot watchdog. Inline + NON-module ON PURPOSE: it must run even if the module bundle
+      404s or fails to execute (the native-shell "silent black screen" failure mode). It turns
+      any boot failure into readable on-device text instead of a black rectangle, and installs
+      window.__hsBootError for main.tsx to report a mount crash. Removing this re-opens the door
+      to a black screen that gives the field no information. Keep it tiny and dependency-free.
+    -->
+    <script>
+      (function () {
+        var shown = false;
+        function esc(s) {
+          return String(s).replace(/[<&>]/g, function (c) {
+            return c === "<" ? "&lt;" : c === "&" ? "&amp;" : "&gt;";
+          });
+        }
+        function show(title, detail) {
+          if (shown) return;
+          shown = true;
+          var host = document.getElementById("root") || document.body;
+          if (!host) return;
+          host.innerHTML =
+            '<div style="position:fixed;inset:0;z-index:99999;background:#0b1220;color:#e2e8f0;' +
+            'font:14px/1.5 -apple-system,system-ui,sans-serif;padding:24px;overflow:auto;' +
+            '-webkit-user-select:text;user-select:text">' +
+            '<h1 style="font-size:16px;margin:0 0 8px;color:#f87171">HouseSteady couldn’t start</h1>' +
+            '<p style="margin:0 0 12px;color:#94a3b8">The shell loaded but the app failed to boot. ' +
+            "Screenshot this and send it to support.</p>" +
+            '<pre style="white-space:pre-wrap;word-break:break-word;background:#111827;padding:12px;' +
+            'border-radius:8px;margin:0">' +
+            esc(title + (detail ? "\n\n" + detail : "")) +
+            "</pre></div>";
+        }
+        // Exposed so the React entry (main.tsx) can report a synchronous mount crash.
+        window.__hsBootError = show;
+        // Capture phase: required to catch resource-load failures (e.g. the JS bundle 404ing),
+        // whose error events target the element and do not bubble to window.
+        window.addEventListener(
+          "error",
+          function (e) {
+            var t = e && e.target;
+            if (t && t !== window && (t.src || t.href)) {
+              show("Failed to load a required file", String(t.src || t.href));
+            } else if (e && e.message) {
+              show(
+                e.message,
+                (e.filename ? e.filename + ":" + e.lineno : "") +
+                  (e.error && e.error.stack ? "\n" + e.error.stack : ""),
+              );
+            }
+          },
+          true,
+        );
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e && e.reason;
+          show("Unhandled promise rejection", (r && (r.stack || r.message)) || String(r));
+        });
+        // Nothing mounted and nothing threw → the bundle silently never ran. Say so.
+        setTimeout(function () {
+          var root = document.getElementById("root");
+          if (!shown && root && root.childElementCount === 0) {
+            show(
+              "App did not start",
+              "The web view loaded but no UI mounted within 8s and no error was reported — " +
+                "the JavaScript bundle did not execute.",
+            );
+          }
+        }, 8000);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

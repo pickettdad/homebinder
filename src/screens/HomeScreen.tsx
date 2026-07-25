@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
+import { isNativePlatform } from "../app/platform";
 import { BigButton, Sheet, formatBytes } from "../ui/bits";
 import { getAppToken, setAppToken } from "../chat/queue";
 
@@ -87,7 +88,15 @@ export function HomeScreen() {
           <p>
             Storage: {storage.usage !== undefined ? formatBytes(storage.usage) : "?"} used
             {storage.quota !== undefined ? ` of ${formatBytes(storage.quota)}` : ""} ·{" "}
-            {storage.persisted ? "persistent" : "NOT persistent — install to home screen"}
+            {storage.persisted
+              ? "persistent"
+              : isNativePlatform()
+                ? // In the native shell, data lives in the app's own container and survives
+                  // across launches — it is NOT subject to browser storage eviction. WKWebView
+                  // reports navigator.storage.persist() === false anyway, so guard the message:
+                  // "install to home screen" is meaningless (it is already an installed app).
+                  "persistent (app storage)"
+                : "NOT persistent — install to home screen"}
           </p>
         )}
         <p className="mt-1">

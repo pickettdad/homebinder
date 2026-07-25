@@ -119,7 +119,9 @@ export type V2SessionEvent =
   | (EventBase & { type: "AnchorMoved"; anchorId: string; x: number; y: number })
   | (EventBase & { type: "AnchorRemoved"; anchorId: string })
   // ---- media + notes, target-addressed (inbox → retag later)
-  | (EventBase & { type: "PhotoAdded"; media: CaptureMediaMeta; target: CaptureTarget })
+  // durationMs is set only for video (added 2026-07-25); stills omit it. Video is filed as
+  // visual evidence through PhotoAdded rather than VoiceNoteAdded — it belongs beside stills.
+  | (EventBase & { type: "PhotoAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
   | (EventBase & { type: "VoiceNoteAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
   | (EventBase & { type: "MediaDiscarded"; mediaId: string })
   | (EventBase & { type: "MediaReassigned"; mediaId: string; target: CaptureTarget })

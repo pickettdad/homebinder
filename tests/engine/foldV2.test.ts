@@ -559,3 +559,57 @@ describe("export tracking / exportIsCurrent", () => {
     expect(exportIsCurrent(state)).toBe(false);
   });
 });
+
+/**
+ * Re-filing video (2026-07-25). MediaReassigned has to decide which collection a capture
+ * lands in. The old rule was "has a duration ⇒ voice note", which is true for audio and
+ * wrong for video: a clip re-filed onto a pin would quietly become a voice note and
+ * disappear from every photo grid.
+ */
+describe("fold v2 — video survives re-filing as visual evidence", () => {
+  const base: V2EventPayload[] = [
+    { type: "SessionInitialized", configId: "cfg", configVersion: "1.0", configHash: "h", propertyFlags: [], propertyLabel: "H" },
+    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {}, level: "basement" },
+    { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+  ];
+
+  it("keeps a video in photos when re-filed inbox → pin", () => {
+    const state = foldV2(
+      mkEvents([
+        ...base,
+        { type: "PhotoAdded", media: { mediaId: "v1", sha256: "s", mime: "video/mp4", bytes: 10 }, target: { kind: "inbox" }, durationMs: 47000 },
+        { type: "MediaReassigned", mediaId: "v1", target: { kind: "pin", id: "p1" } },
+      ]),
+    );
+    const pin = state.pins.find((p) => p.pinId === "p1")!;
+    expect(pin.photos.map((m) => m.mediaId)).toEqual(["v1"]);
+    expect(pin.photos[0]!.durationMs).toBe(47000); // clip length survives the move
+    expect(pin.voiceNotes).toHaveLength(0);
+  });
+
+  it("keeps a video in photos when re-filed zone → pin (the walkabout path)", () => {
+    const state = foldV2(
+      mkEvents([
+        ...base,
+        { type: "PhotoAdded", media: { mediaId: "v2", sha256: "s", mime: "video/quicktime", bytes: 10 }, target: { kind: "zone", id: "z1" }, durationMs: 8000 },
+        { type: "MediaReassigned", mediaId: "v2", target: { kind: "pin", id: "p1" } },
+      ]),
+    );
+    const pin = state.pins.find((p) => p.pinId === "p1")!;
+    expect(pin.photos.map((m) => m.mediaId)).toEqual(["v2"]);
+    expect(pin.voiceNotes).toHaveLength(0);
+  });
+
+  it("still routes an audio voice note to voiceNotes when re-filed", () => {
+    const state = foldV2(
+      mkEvents([
+        ...base,
+        { type: "VoiceNoteAdded", media: { mediaId: "a1", sha256: "s", mime: "audio/mp4", bytes: 10 }, target: { kind: "inbox" }, durationMs: 3000 },
+        { type: "MediaReassigned", mediaId: "a1", target: { kind: "pin", id: "p1" } },
+      ]),
+    );
+    const pin = state.pins.find((p) => p.pinId === "p1")!;
+    expect(pin.voiceNotes.map((m) => m.mediaId)).toEqual(["a1"]);
+    expect(pin.photos).toHaveLength(0);
+  });
+});

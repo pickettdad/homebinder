@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet } from "../../ui/bits";
-import { PhotoInput } from "../../capture/PhotoInput";
+import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { auditSnapshot, deriveZoneAudit } from "../../engine/v2/checklist";
 import { ChecklistPanel } from "./ChecklistPanel";
-import { PinRow, Thumb } from "./shared";
+import { MediaThumb, MediaViewer, PinRow, Thumb } from "./shared";
 
 /** A zone during the walk: canvases, pins, advisory close. Checklist panel lands in step 4. */
 export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
@@ -140,13 +140,24 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             {zone.voiceNotes.length}
           </p>
           {!locked && (
-            <PhotoInput
-              onPhoto={(file) =>
-                capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
-              }
-            >
-              Add photo
-            </PhotoInput>
+            <div className="flex gap-2">
+              <PhotoInput
+                onPhoto={(file) =>
+                  capturePhotoV2({ kind: "zone", id: zoneId }, file).then(() => showToast("Photo saved to zone"))
+                }
+              >
+                Add photo
+              </PhotoInput>
+              <VideoInput
+                onVideo={(file, ms) =>
+                  capturePhotoV2({ kind: "zone", id: zoneId }, file, undefined, ms).then(() =>
+                    showToast("Video saved to zone"),
+                  )
+                }
+              >
+                Add video
+              </VideoInput>
+            </div>
           )}
         </div>
 
@@ -163,7 +174,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
                 onClick={() => setViewerId(p.mediaId)}
                 className="overflow-hidden rounded-lg ring-1 ring-slate-700 active:ring-teal-500"
               >
-                <Thumb mediaId={p.mediaId} className="h-20 w-full" />
+                <MediaThumb mediaId={p.mediaId} mime={p.mime} durationMs={p.durationMs} className="h-20 w-full" />
               </button>
             ))}
           </div>
@@ -173,9 +184,13 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
       <Sheet open={viewerId !== null} onClose={() => setViewerId(null)} title="Zone capture">
         {viewerId && (
           <div className="flex flex-col gap-3">
-            <Thumb mediaId={viewerId} className="max-h-[60dvh] w-full rounded-xl object-contain" />
+            <MediaViewer
+              mediaId={viewerId}
+              mime={zone.photos.find((p) => p.mediaId === viewerId)?.mime ?? "image/jpeg"}
+              className="max-h-[60dvh] w-full rounded-xl object-contain"
+            />
             <p className="text-xs text-slate-500">
-              Captured in this zone. Filing captures onto a pin from here is coming next.
+              Captured in this zone. To move it onto a pin, open Captures and pick this zone's tab.
             </p>
           </div>
         )}

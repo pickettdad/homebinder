@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet, formatDuration } from "../../ui/bits";
 import type { MediaRef } from "../../engine/v2/fold";
-import { PinRow, Thumb } from "./shared";
+import { MediaThumb, PinRow } from "./shared";
 
 /** Session inbox: shoot first, file when hands are free. Everything is retaggable. */
 export function InboxScreen() {
@@ -132,12 +132,12 @@ export function InboxScreen() {
             onClick={() => open(m)}
             className="relative overflow-hidden rounded-xl ring-1 ring-slate-700"
           >
-            {m.mime.startsWith("image") ? (
-              <Thumb mediaId={m.mediaId} className="aspect-square w-full" />
-            ) : (
+            {m.mime.startsWith("audio") ? (
               <div className="flex aspect-square w-full items-center justify-center bg-slate-800 text-slate-300">
                 🎙 {formatDuration(m.durationMs ?? 0)}
               </div>
+            ) : (
+              <MediaThumb mediaId={m.mediaId} mime={m.mime} durationMs={m.durationMs} className="aspect-square w-full" />
             )}
             {m.caption && (
               <span className="absolute inset-x-0 bottom-0 truncate bg-slate-950/70 px-1.5 py-0.5 text-left text-xs text-slate-200">
@@ -164,7 +164,9 @@ export function InboxScreen() {
       >
         {assigning && (
           <div className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto">
-            {assigning.mime.startsWith("image") && <Thumb mediaId={assigning.mediaId} className="h-40 w-full rounded-xl" />}
+            {!assigning.mime.startsWith("audio") && (
+              <MediaThumb mediaId={assigning.mediaId} mime={assigning.mime} className="h-40 w-full rounded-xl" />
+            )}
             <div className="flex gap-2">
               <textarea
                 value={caption}

@@ -163,3 +163,67 @@ describe("sweepMediaIntegrity", () => {
     expect(bad.problems[0]!.kind).toBe("hash-mismatch");
   });
 });
+
+/**
+ * Video capture (2026-07-25). Video rides in the visual (`photos`) collections beside stills,
+ * so every place that used to assume "photos array ⇒ kind photo" is a corruption risk: the
+ * manifest is the provenance record the binder builder trusts.
+ */
+describe("manifest v3 — video classification", () => {
+  const vidZone = { mediaId: "vz", sha256: "shavz", mime: "video/mp4", bytes: 900 };
+  const vidPin = { mediaId: "vp", sha256: "shavp", mime: "video/quicktime", bytes: 800 };
+  const vidInbox = { mediaId: "vi", sha256: "shavi", mime: "video/mp4", bytes: 700 };
+  const audio = { mediaId: "au", sha256: "shaau", mime: "audio/mp4", bytes: 600 };
+
+  function videoSession() {
+    const events = mkEvents([
+      { type: "SessionInitialized", configId: "cfg", configVersion: "1.0", configHash: "h", propertyFlags: [], propertyLabel: "Vid House" },
+      { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {}, level: "basement" },
+      { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+      { type: "PhotoAdded", media: vidZone, target: { kind: "zone", id: "z1" } },
+      { type: "PhotoAdded", media: vidPin, target: { kind: "pin", id: "p1" } },
+      { type: "PhotoAdded", media: vidInbox, target: { kind: "inbox" } },
+      { type: "VoiceNoteAdded", media: audio, target: { kind: "zone", id: "z1" }, durationMs: 4000 },
+    ]);
+    const state = foldV2(events);
+    return buildManifestV3({
+      state, events, configSnapshot: { layers: [] },
+      exportedAt: "2026-07-25T01:00:00.000Z", appVersion: "0.5.0",
+    });
+  }
+
+  const byId = (m: ReturnType<typeof videoSession>, id: string) =>
+    m.media.find((f: MediaFileEntryV3) => f.mediaId === id)!;
+
+  it("labels video as video wherever it is owned — zone, pin and inbox alike", () => {
+    const m = videoSession();
+    expect(byId(m, "vz").kind).toBe("video");
+    expect(byId(m, "vp").kind).toBe("video");
+    expect(byId(m, "vi").kind).toBe("video");
+  });
+
+  it("still labels audio as voice — the video guard must not swallow voice notes", () => {
+    expect(byId(videoSession(), "au").kind).toBe("voice");
+  });
+
+  it("gives video a video extension — 'video/mp4' must never be filed as .m4a", () => {
+    const m = videoSession();
+    expect(byId(m, "vz").file.endsWith(".mp4")).toBe(true);
+    expect(byId(m, "vp").file.endsWith(".mov")).toBe(true);
+    expect(byId(m, "au").file.endsWith(".m4a")).toBe(true);
+  });
+
+  it("keeps video out of the orphan pile and counts its bytes", () => {
+    const m = videoSession();
+    expect(m.orphanEvents).toHaveLength(0);
+    expect(m.totals.mediaBytes).toBe(900 + 800 + 700 + 600);
+  });
+
+  it("totals every media file into exactly one bucket — no video falls through", () => {
+    const t = videoSession().totals;
+    expect(t.videos).toBe(3);
+    expect(t.voiceNotes).toBe(1);
+    expect(t.photos).toBe(0);
+    expect(t.photos + t.videos + t.voiceNotes).toBe(t.mediaFiles);
+  });
+});

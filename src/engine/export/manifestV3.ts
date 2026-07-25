@@ -30,6 +30,13 @@ export const MANIFEST_V3_SCHEMA_VERSION = 3;
 const MISC = "_misc";
 
 function extensionFor(mime: string): string {
+  // Video is tested FIRST: "video/mp4" contains "mp4", and the audio branch below would
+  // otherwise name an inspection video ".m4a" — a silently corrupt file in the binder.
+  if (mime.startsWith("video/")) {
+    if (mime.includes("quicktime")) return "mov";
+    if (mime.includes("webm")) return "webm";
+    return "mp4";
+  }
   if (mime.includes("jpeg")) return "jpg";
   if (mime.includes("png")) return "png";
   if (mime.includes("heic") || mime.includes("heif")) return "heic";
@@ -40,7 +47,12 @@ function extensionFor(mime: string): string {
   return "bin";
 }
 
-const kindOf = (mime: string): "photo" | "voice" => (mime.startsWith("image") ? "photo" : "voice");
+/** Media kind in the manifest. `video` was added 2026-07-25; it rides in the visual
+ *  (`photos`) collections beside stills, so kind is derived from mime, never assumed. */
+export type MediaKindV3 = "photo" | "voice" | "video";
+
+const kindOf = (mime: string): MediaKindV3 =>
+  mime.startsWith("image") ? "photo" : mime.startsWith("video") ? "video" : "voice";
 
 /** What a media file is attached to — the binder builder files it accordingly. */
 export type MediaOwner =
@@ -51,7 +63,7 @@ export type MediaOwner =
 
 export interface MediaFileEntryV3 {
   mediaId: string;
-  kind: "photo" | "voice";
+  kind: MediaKindV3;
   owner: MediaOwner;
   /** Zip grouping key: the zoneId, or `_misc` for inbox / no-zone (misc-bucket pin) media. */
   group: string;
@@ -121,6 +133,9 @@ export interface ManifestV3<TConfig = unknown> {
     pins: number;
     canvases: number;
     photos: number;
+    /** Counted separately from `photos` since 2026-07-25 — without this, videos would fall
+     *  through every bucket and photos+voiceNotes would silently undercount mediaFiles. */
+    videos: number;
     voiceNotes: number;
     notes: number;
     chats: number;
@@ -135,7 +150,7 @@ export interface ManifestV3<TConfig = unknown> {
 
 function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
   const out: MediaFileEntryV3[] = [];
-  const push = (m: MediaRef, kind: "photo" | "voice", owner: MediaOwner, group: string, sub: string) =>
+  const push = (m: MediaRef, kind: MediaKindV3, owner: MediaOwner, group: string, sub: string) =>
     out.push({
       mediaId: m.mediaId,
       kind,
@@ -152,7 +167,8 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
     });
 
   for (const zone of state.zones) {
-    for (const p of zone.photos) push(p, "photo", { kind: "zone", zoneId: zone.zoneId }, zone.zoneId, "_zone");
+    // kindOf, not "photo": videos ride in the visual collection beside stills.
+    for (const p of zone.photos) push(p, kindOf(p.mime), { kind: "zone", zoneId: zone.zoneId }, zone.zoneId, "_zone");
     for (const v of zone.voiceNotes) push(v, "voice", { kind: "zone", zoneId: zone.zoneId }, zone.zoneId, "_zone");
     for (const c of zone.canvases)
       push(c.media, "photo", { kind: "canvas", canvasId: c.canvasId }, zone.zoneId, "_canvas");
@@ -161,7 +177,7 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
     const group = pin.zoneId ?? MISC;
     const sub = `pin-${pin.number}`;
     const owner: MediaOwner = { kind: "pin", pinId: pin.pinId, pinNumber: pin.number };
-    for (const p of pin.photos) push(p, "photo", owner, group, sub);
+    for (const p of pin.photos) push(p, kindOf(p.mime), owner, group, sub);
     for (const v of pin.voiceNotes) push(v, "voice", owner, group, sub);
   }
   for (const m of state.inbox) push(m, kindOf(m.mime), { kind: "inbox" }, MISC, "_inbox");
@@ -233,6 +249,7 @@ export function buildManifestV3<TConfig = unknown>(args: {
       pins: state.pins.length,
       canvases: state.zones.reduce((n, z) => n + z.canvases.length, 0),
       photos: media.filter((m) => m.kind === "photo").length,
+      videos: media.filter((m) => m.kind === "video").length,
       voiceNotes: media.filter((m) => m.kind === "voice").length,
       notes: state.notes.size,
       chats: state.chats.size,

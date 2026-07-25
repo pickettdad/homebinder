@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet, formatDuration } from "../../ui/bits";
-import { PhotoInput } from "../../capture/PhotoInput";
+import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { suggestedPinTypes } from "../../engine/v2/checklist";
 import type { PinFlag } from "../../engine/v2/events";
-import { FlagChip, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
+import { FlagChip, MediaThumb, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
 import { ChatPanel } from "./ChatPanel";
 
 const FLAGS: PinFlag[] = ["fine", "monitor", "issue"];
@@ -115,11 +115,20 @@ export function PinScreen({ pinId }: { pinId: string }) {
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-slate-300">Photos ({pin.photos.length})</h2>
+          <h2 className="font-semibold text-slate-300">Photos &amp; video ({pin.photos.length})</h2>
           {!ro && (
-            <PhotoInput onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast("Photo added"))}>
-              Add photo
-            </PhotoInput>
+            <div className="flex gap-2">
+              <PhotoInput onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast("Photo added"))}>
+                Add photo
+              </PhotoInput>
+              <VideoInput
+                onVideo={(file, ms) =>
+                  capturePhotoV2(target, file, undefined, ms).then(() => showToast("Video added"))
+                }
+              >
+                Add video
+              </VideoInput>
+            </div>
           )}
         </div>
         <div className="grid grid-cols-3 gap-2">
@@ -128,11 +137,12 @@ export function PinScreen({ pinId }: { pinId: string }) {
               key={m.mediaId}
               type="button"
               onClick={() => {
-                if (!ro && confirm("Discard this photo?")) void discardMediaV2(m.mediaId);
+                const what = m.mime.startsWith("video") ? "video" : "photo";
+                if (!ro && confirm(`Discard this ${what}?`)) void discardMediaV2(m.mediaId);
               }}
               className="overflow-hidden rounded-xl ring-1 ring-slate-700"
             >
-              <Thumb mediaId={m.mediaId} className="aspect-square w-full" />
+              <MediaThumb mediaId={m.mediaId} mime={m.mime} durationMs={m.durationMs} className="aspect-square w-full" />
             </button>
           ))}
         </div>

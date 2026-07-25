@@ -326,6 +326,24 @@ because the manifest carries both the ingredients (pins with type/flag/anchors) 
 definitions (the config snapshot's `layers`) — the binder builder derives the shutoffs
 map / issues index from those two, and the schema comment says so.
 
+**Owner decisions folded into step 7 (2026-07-25):**
+- **A completed inspection is not "done" until a verified off-device copy exists** (owner:
+  "yes"). Session completion surfaces/requires an export whose files are confirmed handed off
+  (the existing per-file `shared|downloaded` confirmation is the verification); until then a
+  completed session is "captured, not backed up." A one-tap **"emergency backup now"** export
+  can run before completion too. This is the operational form of the Stage-2 durability gate.
+- **Provenance stays integrity-only for now** (owner Q: tamper-evidence "not sure"). The
+  per-media sha256 + config hash detect accidental corruption; a *tamper-evident* signed
+  chain-of-custody (for disputed inspections) is **deferred** — revisit only if disputes become
+  a real need. No signing is built in step 7.
+- **Pin moved to a different zone drops its anchors** (owner: "if a pin is legitimately moving
+  zones, they'd need to be removed" — rare case). Anchors belong to a zone's canvases, so a
+  cross-zone move clears the pin's `anchors[]`. This is a **fold rule** (`foldV2`), independent
+  of export; add it where the pin-move/re-target event is handled, with a test.
+- **RoomPlan is a launch requirement but parked** pending a *borrowed* Mac for local native
+  debugging (owner: "yes … we'll park roomplan while I borrow"). Tracked in issue #36; not a
+  step-7 concern.
+
 ### 7a. The manifest is a ROUND TRIP, not a one-way export (owner, 2026-07-25)
 
 Field → binder builder is the manifest above. **Binder builder → field is a *session

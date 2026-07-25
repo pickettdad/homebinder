@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { useWakeLock } from "./useWakeLock";
 import { UpdateBanner } from "./UpdateBanner";
@@ -16,42 +16,72 @@ import { PinScreen } from "../screens/v2/PinScreen";
 import { CanvasScreen } from "../screens/v2/CanvasScreen";
 import { InboxScreen } from "../screens/v2/InboxScreen";
 import { ExportV2Screen } from "../screens/v2/ExportV2Screen";
-import { PhotoInput } from "../capture/PhotoInput";
+import { PhotoInput, VideoInput } from "../capture/PhotoInput";
+import { SweepCamera } from "../capture/SweepCamera";
 import type { CaptureTarget } from "../engine/v2/events";
 
 /**
- * Global camera (REDESIGN-v2 §3): a shutter on every in-session v2 screen. Captures
+ * Global capture (REDESIGN-v2 §3): a shutter on every in-session v2 screen. Captures
  * default to the screen's context — the open zone or pin — and to the inbox anywhere
  * else. Shoot first, file when hands are free.
+ *
+ * Three doors, because the work has three shapes (field report 2026-07-25):
+ *   Photo — native camera, full 12MP, for the nameplate that must stay legible.
+ *   Sweep — stay-open viewfinder, for walking a room shooting continuously.
+ *   Video — native recorder, for runs of pipe, operating equipment, water flow.
+ * The destination is named on every one of them, so a capture never disappears.
  */
 function GlobalCamera() {
   const { screen, v2Session, capturePhotoV2, showToast } = useApp();
+  const [sweeping, setSweeping] = useState(false);
   if (!v2Session || v2Session.completedAt) return null;
   if (!["walk", "zone2", "pin", "inbox"].includes(screen.name)) return null;
 
   let target: CaptureTarget = { kind: "inbox" };
-  let where = "inbox";
+  let where = "Inbox";
   if (screen.name === "zone2") {
     target = { kind: "zone", id: screen.zoneId };
-    where = "zone";
+    where = v2Session.zones.find((z) => z.zoneId === screen.zoneId)?.label ?? "zone";
   } else if (screen.name === "pin") {
     target = { kind: "pin", id: screen.pinId };
-    where = "pin";
+    const pin = v2Session.pins.find((p) => p.pinId === screen.pinId);
+    where = pin ? `pin #${pin.number}` : "pin";
   }
 
+  const saved = (what: string) => () => showToast(`${what} → ${where}`);
+  const failed = () => showToast("Not saved — storage may be full");
+
   return (
-    <div className="fixed bottom-6 right-6 z-40">
-      <PhotoInput
-        onPhoto={(file) =>
-          capturePhotoV2(target, file)
-            .then(() => showToast(`Photo → ${where}`))
-            .catch(() => showToast("Photo not saved — storage may be full"))
-        }
-        className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-600 text-3xl shadow-lg active:bg-teal-500"
-      >
-        📷
-      </PhotoInput>
-    </div>
+    <>
+      {sweeping && (
+        <SweepCamera
+          destination={where}
+          onShot={(blob) => capturePhotoV2(target, blob, "image/jpeg")}
+          onClose={() => setSweeping(false)}
+        />
+      )}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
+        <VideoInput
+          onVideo={(file, ms) => capturePhotoV2(target, file, undefined, ms).then(saved("Video")).catch(failed)}
+          className="flex items-center gap-2 rounded-full bg-slate-800/95 px-4 py-2 text-sm font-medium text-slate-100 shadow-lg ring-1 ring-slate-600 active:bg-slate-700"
+        >
+          🎥 Video
+        </VideoInput>
+        <button
+          type="button"
+          onClick={() => setSweeping(true)}
+          className="flex items-center gap-2 rounded-full bg-slate-800/95 px-4 py-2 text-sm font-medium text-slate-100 shadow-lg ring-1 ring-slate-600 active:bg-slate-700"
+        >
+          ⚡ Sweep
+        </button>
+        <PhotoInput
+          onPhoto={(file) => capturePhotoV2(target, file).then(saved("Photo")).catch(failed)}
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-600 text-3xl shadow-lg active:bg-teal-500"
+        >
+          📷
+        </PhotoInput>
+      </div>
+    </>
   );
 }
 

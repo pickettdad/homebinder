@@ -139,7 +139,8 @@ interface AppStore {
   addCanvas(zoneId: string, file: File | Blob, mime?: string): Promise<string>;
   placeAnchor(pinId: string, canvasId: string, x: number, y: number): Promise<void>;
   removeAnchor(anchorId: string): Promise<void>;
-  capturePhotoV2(target: CaptureTarget, file: File | Blob, mime?: string): Promise<string>;
+  /** durationMs applies to video only — stills leave it undefined. */
+  capturePhotoV2(target: CaptureTarget, file: File | Blob, mime?: string, durationMs?: number): Promise<string>;
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
   discardMediaV2(mediaId: string): Promise<void>;
   reassignMedia(mediaId: string, target: CaptureTarget): Promise<void>;
@@ -398,7 +399,7 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "AnchorRemoved", anchorId }]);
   },
 
-  async capturePhotoV2(target, file, mimeOverride) {
+  async capturePhotoV2(target, file, mimeOverride, durationMs) {
     const { sessionId } = get();
     if (!sessionId) throw new Error("no active session");
     assertEditable(get().v2Session, targetZoneId(get().v2Session, target));
@@ -408,10 +409,10 @@ export const useApp = create<AppStore>((set, get) => ({
     const row: MediaRow = {
       id: mediaId, sessionId, kind: "photo",
       targetKind: target.kind, targetId: target.kind === "inbox" ? undefined : target.id,
-      mime, bytes: file.size, sha256, capturedAt: new Date().toISOString(), blob: file,
+      mime, bytes: file.size, sha256, capturedAt: new Date().toISOString(), durationMs, blob: file,
     };
     await get().dispatchV2(
-      [{ type: "PhotoAdded", media: { mediaId, sha256, mime, bytes: file.size }, target }],
+      [{ type: "PhotoAdded", media: { mediaId, sha256, mime, bytes: file.size }, target, durationMs }],
       [row],
     );
     return mediaId;

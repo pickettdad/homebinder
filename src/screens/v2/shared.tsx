@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { useMediaUrl } from "../../ui/useMediaUrl";
-import { BigButton } from "../../ui/bits";
+import { BigButton, formatDuration } from "../../ui/bits";
 import type { PinFlag, PinTypeRef } from "../../engine/v2/events";
 import type { PinStateV2 } from "../../engine/v2/fold";
 
@@ -21,6 +21,47 @@ export function Thumb({ mediaId, className }: { mediaId: string; className?: str
   const url = useMediaUrl(mediaId);
   if (!url) return <div className={`animate-pulse bg-slate-700 ${className ?? ""}`} />;
   return <img src={url} alt="" className={`object-cover ${className ?? ""}`} />;
+}
+
+/**
+ * Video thumbnail: a real <video> element with a play badge, so a clip reads as a clip in
+ * the grid. `preload="metadata"` renders the poster frame without pulling the whole file —
+ * an inspection video can be hundreds of MB and a zone grid may hold several.
+ */
+export function VideoThumb(props: { mediaId: string; durationMs?: number; className?: string }) {
+  const url = useMediaUrl(props.mediaId);
+  if (!url) return <div className={`animate-pulse bg-slate-700 ${props.className ?? ""}`} />;
+  return (
+    <span className={`relative block ${props.className ?? ""}`}>
+      <video src={url} preload="metadata" muted playsInline className="h-full w-full object-cover" />
+      <span className="absolute inset-0 flex items-center justify-center text-2xl drop-shadow">▶</span>
+      {props.durationMs !== undefined && (
+        <span className="absolute bottom-0.5 right-0.5 rounded bg-slate-950/80 px-1 text-[10px] text-slate-200">
+          {formatDuration(props.durationMs)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Full-size view: a video must be *playable* here, not a still frame with no controls. */
+export function MediaViewer({ mediaId, mime, className }: { mediaId: string; mime: string; className?: string }) {
+  const url = useMediaUrl(mediaId);
+  if (!url) return <div className={`animate-pulse bg-slate-700 ${className ?? ""}`} />;
+  if (mime.startsWith("video")) return <video src={url} controls playsInline className={className} />;
+  if (mime.startsWith("audio")) return <audio src={url} controls className="w-full" />;
+  return <img src={url} alt="" className={className} />;
+}
+
+/** One thumbnail rule for every grid: image, video, or audio — decided by mime, not by guess. */
+export function MediaThumb(props: { mediaId: string; mime: string; durationMs?: number; className?: string }) {
+  const { mediaId, mime, className } = props;
+  if (mime.startsWith("image")) return <Thumb mediaId={mediaId} className={className} />;
+  if (mime.startsWith("video"))
+    return <VideoThumb mediaId={mediaId} durationMs={props.durationMs} className={className} />;
+  return (
+    <span className={`flex items-center justify-center bg-slate-800 text-slate-300 ${className ?? ""}`}>🎙</span>
+  );
 }
 
 export function pinTypeLabel(pinType?: PinTypeRef): string {

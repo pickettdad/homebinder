@@ -463,7 +463,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
       }
 
       case "PhotoAdded":
-        if (!attachMedia(mediaRef(e.media, e.at, e.source), e.target, false)) orphan(e);
+        if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs), e.target, false)) orphan(e);
         break;
       case "VoiceNoteAdded":
         if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs), e.target, true)) orphan(e);
@@ -483,7 +483,10 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
           orphan(e);
           break;
         }
-        const voice = ref.durationMs !== undefined || ref.mime.startsWith("audio");
+        // Video has a duration but is *visual* evidence — it belongs in `photos`, not
+        // `voiceNotes`. Without the video guard, re-filing a clip would silently reclassify
+        // it as a voice note (added 2026-07-25 with video capture).
+        const voice = ref.mime.startsWith("audio") || (ref.durationMs !== undefined && !ref.mime.startsWith("video"));
         if (!attachMedia(ref, e.target, voice)) {
           // Target vanished mid-retag: park it back in the inbox rather than lose it.
           state.inbox.push(ref);

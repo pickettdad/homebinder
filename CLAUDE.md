@@ -24,6 +24,16 @@ on drift. The master itself is edited by the owner's side, never unilaterally he
 defects become change-requests in `docs/CHECKLIST-MASTER-REVIEW.md`. Same rule as
 `route.baseline.ts`: config is data, ids are never renamed or reused.
 
+**Move keeps the id; redefine retires it (owner rule 2026-07-26).** An item that *moves* to a
+different list but asks the same question — same text, same `attest` — keeps its id; the
+prefix goes historical and that is fine, ids are opaque (`liv.egress`, `bsm.finished-behind`).
+An item that is *redefined* — different question, or different `attest`, even in the same slot
+— **retires**, and its replacement takes a new id (`bth.toilet-secure`, a check/action test,
+→ `bth.toilet`, a pin/evidence linkage item). Restoring an id across a redefinition would let
+a past pass/fail render as satisfying a different question: **false continuity is worse than
+an honest orphan** — a stale test result silently vouching for something nobody checked.
+A retired id is never reissued; `tests/engine/checklists.test.ts` enforces that.
+
 **Master editing — whole file, never dictated edits (owner rule 2026-07-26).** Whoever
 authors a master version produces the **complete file**. Dictated edits applied here as a
 transcription are what forked v1.2.1: those six edits existed only in the repo, the owner's

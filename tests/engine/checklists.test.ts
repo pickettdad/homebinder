@@ -417,14 +417,17 @@ describe("component inheritance (master v1.4)", () => {
 });
 
 /**
- * Id stability. CLAUDE.md: "config is data, ids are never renamed or reused." The rename
- * half was broken by v1.4 (recorded in REVIEW §12) and is the owner's to adjudicate; the
- * REUSE half is the dangerous one and is pinned here — a dead id coming back attached to a
- * different verification would silently re-point historical resolutions at new meaning.
+ * Id stability. CLAUDE.md: "config is data, ids are never renamed or reused", refined by the
+ * v1.4.1 ruling — **move keeps the id; redefine retires it**. All six ids below were
+ * REDEFINED (check/action tests became pin/evidence linkage items, or their content moved
+ * onto a component), so retiring them is correct: restoring one would let a past pass/fail
+ * render as satisfying a different question. False continuity is worse than an honest
+ * orphan. What must never happen is REUSE — a dead id returning attached to a different
+ * verification would silently re-point historical resolutions at new meaning.
  */
 describe("id stability", () => {
   const cfg = validConfig();
-  /** Ids that existed in a shipped master and must never be re-issued for anything else. */
+  /** Retired in v1.4/v1.4.1. Existed in a shipped master; never re-issue for anything else. */
   const RETIRED = [
     "bth.toilet-secure", "bth.tub-surround",
     "kit.dw-connection", "kit.fridge-line", "kit.fuel-range", "lnd.hoses",

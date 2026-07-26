@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.4.0",
+  "configVersion": "1.4.1",
   "propertyFlags": [
     {
       "id": "municipal_water",

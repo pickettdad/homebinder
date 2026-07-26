@@ -648,3 +648,58 @@ Table D's `issues`/`monitor` break is correctly flagged and correctly **not** fi
 rewriting those predicates now empties two working layers for an entity that doesn't exist.
 They land with the concern entity. Nicknames stay through the next walk, per §9.5: retiring
 the workaround in the same pass that fixes the gap makes it impossible to tell which mattered.
+
+---
+
+## 13. v1.4.1 — owner ruling on the id finding (2026-07-26)
+
+**§12.2's recommendation is overruled, correctly.** I proposed restoring `bth.toilet-secure`
+and `bth.tub-surround`. That would have been wrong, and the reasoning that replaces it is
+better than mine.
+
+**Both were redefined, not renamed.** The old items were `check`/`action` — physical tests
+the inspector performs ("Toilet secure to floor, no rock, base dry"). The new `bth.toilet`
+and `bth.fixtures` are `pin`/`evidence` linkage items ("Toilet pinned"). Different question,
+different attest. Restoring the id would let a past **pass** from a physical test render as
+satisfying a pin-linkage question — a stale test result silently vouching for something
+nobody checked. **False continuity is worse than an honest orphan**, and I had weighed only
+the orphan side.
+
+The old content is not lost: it moved to `wc.secure` / `wc.base-dry` and `tub.surround` /
+`shw.surround` — the same pattern as `kit.dw-connection` → `apd.connections`, which §12.2
+already called a legitimate retirement. **All six v1.4 departures are retirements.** The
+authoring error was mis-filing two of them as renames in the changelog, not the change itself.
+
+### 13.1 The rule this produces
+
+> **Move keeps the id; redefine retires it.**
+> *Move* — same question, same text, same `attest`, different list — keeps its id; the prefix
+> goes historical, and ids are opaque (`liv.egress`, `bsm.finished-behind`).
+> *Redefine* — different question, or different `attest`, even in the same slot — retires,
+> and the replacement takes a new id.
+
+This is decidable at a glance and would have caught the error at authoring time. My §12.2
+analysis cited `liv.egress` and `bsm.finished-behind` as precedent *against* v1.4 — but those
+are moves, and these are redefinitions. The precedent was real; the classification was the
+missing distinction.
+
+Recorded in `CLAUDE.md` (config discipline) and master §2 (id lifecycle).
+
+### 13.2 Applied as v1.4.1
+
+Changelog reclassifies the two as retirements joining the other four; the v1.4 entry's `→`
+notation is corrected in place; the bathroom section gains a retirement note matching the
+kitchen/laundry pattern; §2 gains the rule. **No cell values change** — 346 items, unchanged
+content, `configVersion` 1.4.0 → 1.4.1.
+
+The no-reuse tests stay exactly as written: reuse is the guarantee that actually protects the
+record, and it is orthogonal to this ruling.
+
+### 13.3 Process note — v1.4 was not in main when it was merged
+
+PR #48 merged at `708f608` (media fixes). The v1.4 commit `714064d` was pushed to the branch
+afterwards and **was not included in the merge**, so main sat at master v1.3.1 while both
+sides believed v1.4 was live. Recovered by cherry-pick; v1.4 and v1.4.1 ship together here.
+
+Worth a habit on both sides: a PR that gains commits after review needs a fresh look at the
+head SHA before merging, since GitHub merges what the button saw.

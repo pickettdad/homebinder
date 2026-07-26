@@ -1,6 +1,6 @@
-# HouseSteady Field Assistant — Checklist Master (v1.4)
+# HouseSteady Field Assistant — Checklist Master (v1.4.1)
 
-**Version:** v1.4 · **Date:** 2026-07-26 · **Supersedes:** v1.3.1 (2026-07-26)
+**Version:** v1.4.1 · **Date:** 2026-07-26 · **Supersedes:** v1.4 (2026-07-26)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 **Authored from:** the v1.3.1 repo copy, per the whole-file transfer rule.
 
@@ -12,6 +12,10 @@
 Both are the same defect: the library was built from mechanical systems outward and never covered the ordinary. This version closes it.
 
 **It also resolves the sub-type taxonomy that has been "awaiting telemetry" since v1.1.** The telemetry arrived: the owner freeform-entered plumbing fixtures, and nicknamed six kitchen appliances because `appliance` couldn't distinguish them. That is the signal the deferral was waiting for. Sub-types are now authored, not invented.
+
+**Changelog v1.4 → v1.4.1** (owner adjudication 2026-07-26 — classification and rule only; **no cell value changes**):
+- **`bth.toilet-secure` and `bth.tub-surround` reclassified from renames to retirements.** v1.4's changelog called them "re-pointed", which read as renaming an id — against the id-stability rule. They were in fact **redefined**: the old items were `check`/`action` physical tests; `bth.toilet` and `bth.fixtures` are `pin`/`evidence` linkage items. Restoring the old ids would let a past pass/fail test result render as satisfying a pin-linkage question — **false continuity, which is worse than an honest orphan.** Their content moved to `wc.secure` / `wc.base-dry` and `tub.surround` / `shw.surround`, exactly as `kit.dw-connection` → `apd.connections` did. All six v1.4 id departures are retirements.
+- **New rule, §2: move keeps the id; redefine retires it.** The precedent cases are a different class — `liv.egress` and `bsm.finished-behind` *moved* (same question, same text, same attest, different list) and correctly kept their ids. Decidable at a glance, and it would have caught this at authoring time.
 
 **Changelog v1.3.1 → v1.4**
 
@@ -25,7 +29,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 *Whole-unit photo items (14 added):* `wh.unit` `fur.unit` `blr.unit` `hp.unit` `hrv.unit` `wt.unit` `wpt.unit` `gen.unit` `gd.unit` `fp.unit` `app.unit` `dk.unit` `ch.unit` `wlh.unit` — plus one on each new plumbing fixture. **Scoped deliberately, not blanket:** equipment, plus things whose condition visibly changes (deck, chimney, wellhead). Not added to `window`, `door`, `tree`, `register`, `cleanout`, `floor-drain`, `backwater-valve`, `vent-termination`, `receptacle-gfci` — a whole-unit shot of a receptacle serves nothing. Types that already carry one (`pnl.wide`, `wm.wide`, `gs.wide`, `ft.wide`, `sp.pit`, `rw.photo`, `sl.photo`, `ds.discharge`, `fd.photo`, `co.photo`, `bw.photo`, `fc.photo`, `cp.reference`) are unchanged.
 
-*Zone items re-pointed to the new fixtures:* `bth.toilet-secure` → `bth.toilet` (pin) · `bth.tub-surround` → `bth.fixtures` (pin) · new `kit.sink` · new `lnd.tub`. The fixture's own items now carry the detail; the zone item just ensures the fixture gets pinned.
+*Zone items re-pointed to the new fixtures:* `bth.toilet-secure` **retired**, replaced by `bth.toilet` (pin) · `bth.tub-surround` **retired**, replaced by `bth.fixtures` (pin) · new `kit.sink` · new `lnd.tub`. *(v1.4 wrote these as `→` renames; corrected to retirements in v1.4.1 — see that changelog.)* The fixture's own items now carry the detail; the zone item just ensures the fixture gets pinned.
 
 *Interim notes collapsed:* `wt.train` reworded — with sub-types real, the "type" half is the pin type; only position in the train remains. `app.type` reworded for the same reason and demoted to `standard` (the pin type now carries it).
 
@@ -100,6 +104,8 @@ water-treatment ┬── water-softener · sediment-filter
 **Rendering rule (owner decision):** Documentation (`evidence`) and Tests (`action`) are separate sections in the zone panel and the close audit — never mixed. Tests are text-documented, not media-documented.
 
 **Whole-unit photo items (v1.4):** ids ending `.unit` are the object's condition baseline — the whole thing, in place, framed so the same shot can be taken next year. Distinct from `.nameplate` (identity) and from close-ups of specific parts. Across visits these are what make condition comparable. Always `photo` + `evidence`.
+
+**Id lifecycle — move keeps the id, redefine retires it (v1.4.1).** An item that *moves* to a different list but asks the same question, with the same text and the same `attest`, **keeps its id**; the prefix simply goes historical, and ids are opaque (`liv.egress`, `bsm.finished-behind`). An item that is *redefined* — a different question, or a different `attest`, even in the same slot — **retires**, and the replacement takes a new id. A retired id is never reissued for anything else. The reason is record continuity: a resolution recorded against a retired id becoming attached to a differently-meaning item is false continuity, and a stale test result silently vouching for something nobody checked is worse than an honest orphan.
 
 **States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table C, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` and `no-access` N/A land on the visit-two gap list.
 
@@ -266,6 +272,8 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `bth.toilet` | Toilet pinned | pin `toilet` | core | evidence |
 | `bth.fixtures` | Sink, tub, and/or shower pinned | pin `sink\|bathtub\|shower` | core | evidence |
 | `bth.fan-vs-window` | Ventilation adequate for the space | check | standard | action |
+
+*`bth.toilet-secure` and `bth.tub-surround` retired in v1.4 (reclassified from "renamed" in v1.4.1) — their content now lives on the fixtures: `wc.secure`/`wc.base-dry` and `tub.surround`/`shw.surround`. Retired ids are never reissued.*
 
 ### `laundry`
 

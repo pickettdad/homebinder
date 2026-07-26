@@ -128,6 +128,19 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
   if (!v2Config || !v2Session) return null;
   const item = d.item;
   const isTest = item.attest === "action";
+
+  /**
+   * `measure (year)` range gate — master v1.3.1: plausible years are 1900 → current year,
+   * **rejected at entry** rather than caught downstream. An 1890 water heater doesn't
+   * exist; a 2205 one is a typo. These feed the equipment registry's fleet queries, where
+   * a single bad year is worse than a missing one — it silently skews an aggregate.
+   */
+  const isYear = item.satisfy === "measure" && item.unit === "year";
+  const yearMax = new Date().getFullYear();
+  const yearBad = isYear && value.trim() !== "" && !(/^\d{4}$/.test(value.trim()) && +value >= 1900 && +value <= yearMax);
+  /** Any entry gate that must block recording, whatever the button. */
+  const blocked =
+    yearBad || ((item.satisfy === "measure" || item.satisfy === "choice") && !value.trim());
   const resolved = d.status.kind === "satisfied" || d.status.kind === "na";
   const zoneId = d.scope.kind === "zone" ? d.scope.zoneId : undefined;
   // Pins in this zone whose type can evidence this item (for "link an existing pin").
@@ -253,13 +266,23 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
         ) : (
           <>
             {item.satisfy === "measure" && (
-              <input
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                inputMode="decimal"
-                placeholder={item.unit ? `Reading (${item.unit})` : "Reading"}
-                className="rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
-              />
+              <>
+                <input
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  inputMode={isYear ? "numeric" : "decimal"}
+                  maxLength={isYear ? 4 : undefined}
+                  placeholder={isYear ? `Year (1900–${yearMax})` : item.unit ? `Reading (${item.unit})` : "Reading"}
+                  className={`rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 focus:ring-teal-500 ${
+                    yearBad ? "ring-rose-500" : "ring-slate-600"
+                  }`}
+                />
+                {yearBad && (
+                  <p className="text-sm text-rose-300">
+                    Enter a 4-digit year between 1900 and {yearMax}.
+                  </p>
+                )}
+              </>
             )}
             {item.satisfy === "choice" && (
               <div className="flex flex-col gap-2">
@@ -298,8 +321,10 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                 software path. Pass/Fail would be meaningless for "how far did you get". */}
             {isTest && item.satisfy !== "choice" ? (
               <div className="flex gap-3">
-                <BigButton className="flex-1" onClick={() => satisfied("pass")}>Pass</BigButton>
-                <BigButton variant="danger" className="flex-1" onClick={() => satisfied("fail")}>Fail</BigButton>
+                <BigButton className="flex-1" disabled={yearBad} onClick={() => satisfied("pass")}>Pass</BigButton>
+                <BigButton variant="danger" className="flex-1" disabled={yearBad} onClick={() => satisfied("fail")}>
+                  Fail
+                </BigButton>
               </div>
             ) : d.status.kind === "proposed" && item.satisfy !== "choice" ? (
               <BigButton onClick={() => satisfied()}>
@@ -313,10 +338,7 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                 })()}
               </BigButton>
             ) : (
-              <BigButton
-                disabled={(item.satisfy === "measure" || item.satisfy === "choice") && !value.trim()}
-                onClick={() => satisfied()}
-              >
+              <BigButton disabled={blocked} onClick={() => satisfied()}>
                 {item.satisfy === "choice" ? (isTest ? "Record extent" : "Record selection") : "Mark satisfied"}
               </BigButton>
             )}

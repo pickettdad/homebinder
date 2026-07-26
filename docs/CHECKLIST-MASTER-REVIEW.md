@@ -466,3 +466,67 @@ query can group on, and the retrofit cost is asymmetric in exactly the way the c
 says. One caveat for the content pass: `measure (year)` has no validation that the value is
 a plausible year — an inspector can type `19` or `2205`. Worth a range check when the
 equipment registry is built; not worth blocking on now.
+
+---
+
+## 10. v1.3.1 adjudication record (2026-07-26)
+
+Owner rulings on §9's open items, applied. Master bumped v1.3 → **v1.3.1**.
+
+### 10.1 Escape values — rule amended, two cells changed
+
+§2's "always include an escape" was **too absolute**, and the master violated it six times.
+Amended to: *every choice carries an escape unless the option set is exhaustive **and**
+always determinable when the item is reachable* — because the N/A path (`no-access`,
+`none-present`) is already the escape for the unreachable case.
+
+- `unknown` **added** to `fp.type` (sealed insert, no visible plate) and `gen.fuel`
+  (unlabeled unit, buried supply line).
+- **Left escape-free, by adjudication:** `pnl.type` and `fc.orientation` (always
+  determinable once the thing is visible); `att.access-honesty` and `crw.access-honesty`
+  (`no access` **is** the answer — adding "unknown" would be incoherent, since the inspector
+  always knows how far they went).
+
+13/17 choice items now carry an escape. The escape-free four are **pinned by test**
+(`choice escape adjudication`) as an exact set, so a later content pass that adds "unknown"
+to access-honesty or drops it from `fp.type` fails CI rather than the field.
+
+### 10.2 `measure (year)` range — 1900 → current year, rejected at entry
+
+Implemented in the resolve sheet: 4-digit numeric entry, red ring plus an inline reason when
+out of range, and **every** recording path blocked while invalid (Mark satisfied *and*
+Pass/Fail — a `measure`+`action` item could otherwise record a bad year through the test
+buttons). Rejecting at entry rather than downstream matters because these feed the equipment
+registry: one bad year is worse than a missing one, since it silently skews an aggregate
+instead of just shrinking the sample.
+
+Config-level guard: `wh.age` / `ft.age` are pinned as `measure (year)` by test, since the UI
+gate keys off `unit === "year"` and a rename would silently disable it.
+
+### 10.3 Auto-flagging — argument selected, and the dismissal record
+
+Owner adopts the sharper argument as the one to lead with: **any answer that silently spawns
+work gets picked less often**, and the entire value of `choice` over prose is that the true
+answer is the cheapest to record. Auto-flagging taxes honesty.
+
+**Dismissal logging is accepted as a requirement, not a nicety.** When the prompt lands it
+must record the *declined* judgement — "poly-B was seen and not flagged" — on the same
+principle that makes `none-present` real inspection data: a decision made and recorded is
+evidence; a decision made and discarded is a hole. Not built this turn; no prompting exists
+in the resolve flow yet.
+
+### 10.4 Process — the actual fix for the v1.2.1 fork
+
+Recorded as a standing rule in `CLAUDE.md`, not just here, because it binds both sides:
+
+> Whoever authors a master version produces the **complete file**. No dictated edits.
+> Before the owner authors a new version, the current repo copy is sent to them.
+> After any owner-adjudicated cell change applied here, bump the patch version and send the
+> file back.
+
+The v1.2.1 fork was not a content mistake — it was a *transport* mistake. Six edits dictated
+for transcription existed only in the repo; the owner's copy stayed at v1.2; v1.3 was written
+on top of that and reverted all six, one of which broke the generator outright. Whole-file
+transfer in both directions removes the class of error, not the instance.
+
+**v1.3.1 is being sent to the owner with this change** — first application of the new rule.

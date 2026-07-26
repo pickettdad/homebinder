@@ -24,6 +24,17 @@ on drift. The master itself is edited by the owner's side, never unilaterally he
 defects become change-requests in `docs/CHECKLIST-MASTER-REVIEW.md`. Same rule as
 `route.baseline.ts`: config is data, ids are never renamed or reused.
 
+**Master editing — whole file, never dictated edits (owner rule 2026-07-26).** Whoever
+authors a master version produces the **complete file**. Dictated edits applied here as a
+transcription are what forked v1.2.1: those six edits existed only in the repo, the owner's
+copy stayed at v1.2, and v1.3 was written on top of it — silently reverting all six, one of
+which (Table B `askAtCreation`) broke the generator outright. Corollaries: (1) **before the
+owner authors a new version, send them the current repo copy** — they will not write blind;
+(2) after applying any owner-adjudicated cell change here, bump the patch version and send
+the file back, so the repo copy and the owner's copy never diverge again. A dictated edit
+feels efficient and creates exactly the downstream fork the "never edited downstream"
+discipline exists to prevent.
+
 **Pull requests — one per run, always.** Every run ends with an open PR into the
 default branch for that run's commits (owner decision 2026-07-25: "work I can't see is
 work I can't test" — the owner merges, which triggers the Netlify deploy to the test

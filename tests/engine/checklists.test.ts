@@ -275,3 +275,67 @@ describe("choice dialect (master v1.3)", () => {
     }
   });
 });
+
+/**
+ * Escape-value adjudication (owner, 2026-07-26). §2 no longer demands an escape on every
+ * choice — only where the option set isn't exhaustive-and-always-determinable. That makes
+ * the escape-free set a deliberate, named four rather than an oversight, so it is pinned:
+ * a future content pass that adds "unknown" to access-honesty (incoherent — you always
+ * know how far you went) or drops it from fp.type must fail here, not in the field.
+ */
+describe("choice escape adjudication (master v1.3.1)", () => {
+  const ESCAPE_FREE = ["att.access-honesty", "crw.access-honesty", "pnl.type", "fc.orientation"];
+  const hasEscape = (opts: string[]) => opts.some((o) => /^(unknown|other)\b/i.test(o));
+
+  const choices = () => {
+    const out: { id: string; satisfy: string; options?: string[] }[] = [];
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (r.satisfy === "choice") out.push(r as unknown as (typeof out)[number]);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(checklistsBaseline);
+    return out;
+  };
+
+  it("exactly the four adjudicated items are escape-free — no more, no fewer", () => {
+    const actual = choices().filter((c) => !hasEscape(c.options!)).map((c) => c.id).sort();
+    expect(actual).toEqual([...ESCAPE_FREE].sort());
+  });
+
+  it("fp.type and gen.fuel carry the unknown added by adjudication", () => {
+    for (const id of ["fp.type", "gen.fuel"]) {
+      const item = choices().find((c) => c.id === id);
+      expect(item?.options, `${id} missing`).toBeDefined();
+      expect(item!.options).toContain("unknown");
+    }
+  });
+});
+
+/**
+ * `measure (year)` plausible range (master v1.3.1): 1900 → current year. Pinned at the
+ * config level so the two registry-backbone items keep the unit the UI gate keys off —
+ * rename the unit and the range check silently stops applying.
+ */
+describe("year-unit measures (master v1.3.1)", () => {
+  it("wh.age and ft.age are measure (year)", () => {
+    const found: Record<string, { satisfy: string; unit?: string }> = {};
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (r.id === "wh.age" || r.id === "ft.age")
+          found[r.id as string] = r as unknown as { satisfy: string; unit?: string };
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(checklistsBaseline);
+    for (const id of ["wh.age", "ft.age"]) {
+      expect(found[id]?.satisfy, `${id} satisfy`).toBe("measure");
+      expect(found[id]?.unit, `${id} unit`).toBe("year");
+    }
+  });
+});

@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.3.1",
+  "configVersion": "1.4.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -316,7 +316,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "int.receptacles",
-          "text": "Representative receptacles tested; every GFCI tripped and reset — pin failures as issues",
+          "text": "Representative receptacles tested; every GFCI tripped and reset — pin failures as concerns",
           "satisfy": "check",
           "tier": "core",
           "attest": "action",
@@ -527,7 +527,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "rgh.wiring-legacy",
-          "text": "Visible wiring types noted; knob-and-tube or aluminum flagged as issue pins",
+          "text": "Visible wiring types noted; knob-and-tube or aluminum flagged as concerns",
           "satisfy": "note",
           "tier": "core",
           "attest": "action",
@@ -1024,11 +1024,30 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "zoneType": "kitchen",
       "items": [
         {
-          "id": "kit.appliances",
-          "text": "Every appliance pinned with nameplate",
+          "id": "kit.sink",
+          "text": "Kitchen sink pinned",
           "satisfy": "pin",
           "pinTypes": [
-            "appliance"
+            "sink"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "kit.appliances",
+          "text": "Every appliance pinned with its specific type",
+          "satisfy": "pin",
+          "pinTypes": [
+            "appliance",
+            "appliance-refrigerator",
+            "appliance-dishwasher",
+            "appliance-range",
+            "appliance-range-hood",
+            "appliance-microwave",
+            "appliance-freezer"
           ],
           "tier": "core",
           "attest": "evidence",
@@ -1047,40 +1066,10 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
-          "id": "kit.dw-connection",
-          "text": "Dishwasher supply, drain, air gap / high loop",
-          "satisfy": "check",
-          "tier": "standard",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "kit.fridge-line",
-          "text": "Fridge water line type and shutoff located",
-          "satisfy": "check",
-          "tier": "standard",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
           "id": "kit.counter-gfci",
           "text": "Counter receptacles GFCI-protected",
           "satisfy": "check",
           "tier": "core",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "kit.fuel-range",
-          "text": "If gas range: shutoff accessible, connector type",
-          "satisfy": "check",
-          "tier": "standard",
           "attest": "action",
           "scope": [
             "baseline"
@@ -1092,21 +1081,29 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "zoneType": "bathroom",
       "items": [
         {
-          "id": "bth.toilet-secure",
-          "text": "Toilet secure to floor, no rock, base dry",
-          "satisfy": "check",
+          "id": "bth.toilet",
+          "text": "Toilet pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "toilet"
+          ],
           "tier": "core",
-          "attest": "action",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]
         },
         {
-          "id": "bth.tub-surround",
-          "text": "Surround, enclosure, door seals",
-          "satisfy": "check",
-          "tier": "standard",
-          "attest": "action",
+          "id": "bth.fixtures",
+          "text": "Sink, tub, and/or shower pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "sink",
+            "bathtub",
+            "shower"
+          ],
+          "tier": "core",
+          "attest": "evidence",
           "scope": [
             "baseline"
           ]
@@ -1127,9 +1124,25 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "zoneType": "laundry",
       "items": [
         {
-          "id": "lnd.hoses",
-          "text": "Washer hoses: type (rubber vs braided) and age documented",
-          "satisfy": "photo",
+          "id": "lnd.washer",
+          "text": "Washer pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "appliance-washer"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "lnd.dryer",
+          "text": "Dryer pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "appliance-dryer"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -1150,8 +1163,21 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "lnd.tub",
+          "text": "Laundry tub pinned if present",
+          "satisfy": "pin",
+          "pinTypes": [
+            "laundry-tub"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "lnd.drain-standpipe",
-          "text": "Standpipe height and trap; laundry tub condition",
+          "text": "Standpipe height and trap",
           "satisfy": "check",
           "tier": "standard",
           "attest": "action",
@@ -1689,6 +1715,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "wh.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "wh.nameplate",
           "text": "Nameplate photographed legibly",
           "satisfy": "photo",
@@ -1782,6 +1818,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "fur.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "fur.nameplate",
           "text": "Nameplate photographed",
           "satisfy": "photo",
@@ -1869,6 +1915,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "blr.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "blr.nameplate",
           "text": "Nameplate photographed",
           "satisfy": "photo",
@@ -1947,6 +2003,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "hp.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "hp.nameplate",
           "text": "Nameplate photographed",
           "satisfy": "photo",
@@ -2014,6 +2080,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "hrv-erv"
       ],
       "items": [
+        {
+          "id": "hrv.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
         {
           "id": "hrv.nameplate",
           "text": "Nameplate photographed",
@@ -2304,6 +2380,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "wpt.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "wpt.nameplate",
           "text": "Nameplate photographed",
           "satisfy": "photo",
@@ -2361,6 +2447,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "wt.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "wt.nameplate",
           "text": "Nameplate photographed",
           "satisfy": "photo",
@@ -2372,7 +2468,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "wt.train",
-          "text": "Type and position in treatment train recorded",
+          "text": "Position in the treatment train recorded (order relative to other units)",
           "satisfy": "note",
           "tier": "core",
           "attest": "evidence",
@@ -2413,6 +2509,470 @@ export const checklistsBaseline: ChecklistConfigInput = {
         {
           "id": "wt.bypass",
           "text": "Bypass located",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "water-softener"
+      ],
+      "items": [
+        {
+          "id": "wsf.salt",
+          "text": "Salt level checked; bridging checked",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wsf.age",
+          "text": "Install/manufacture year if determinable",
+          "satisfy": "measure",
+          "unit": "year",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wsf.regen",
+          "text": "Regeneration schedule setting recorded",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wsf.brine",
+          "text": "Brine tank condition; no standing water above salt",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "water-treatment"
+    },
+    {
+      "types": [
+        "sediment-filter"
+      ],
+      "items": [
+        {
+          "id": "sfl.cartridge",
+          "text": "Cartridge size and micron rating recorded",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sfl.changed",
+          "text": "Last change date recorded",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sfl.housing",
+          "text": "Housing condition; no weeping at the seal",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "water-treatment"
+    },
+    {
+      "types": [
+        "uv-sterilizer"
+      ],
+      "items": [
+        {
+          "id": "uvs.lamp",
+          "text": "Lamp change due-date recorded",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "uvs.alarm",
+          "text": "Alarm/indicator functioning",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "uvs.sleeve",
+          "text": "Quartz sleeve condition noted",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "water-treatment"
+    },
+    {
+      "types": [
+        "reverse-osmosis"
+      ],
+      "items": [
+        {
+          "id": "rov.membrane",
+          "text": "Membrane and pre/post filter change dates recorded",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "rov.tank",
+          "text": "Storage tank condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "rov.drain",
+          "text": "Drain line connection and air gap",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "water-treatment"
+    },
+    {
+      "types": [
+        "toilet"
+      ],
+      "items": [
+        {
+          "id": "wc.unit",
+          "text": "Fixture photographed whole",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wc.secure",
+          "text": "Secure to floor; no rock",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wc.base-dry",
+          "text": "Base and surrounding floor dry; no staining",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wc.flush",
+          "text": "Flushes and refills correctly; no continuous run",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wc.stop",
+          "text": "Supply shutoff present, accessible, not weeping",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wc.supply-line",
+          "text": "Supply line type",
+          "satisfy": "choice",
+          "options": [
+            "braided stainless",
+            "plastic",
+            "copper",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "wc.tank",
+          "text": "Tank internals condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "sink"
+      ],
+      "items": [
+        {
+          "id": "snk.unit",
+          "text": "Fixture photographed whole",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "snk.stops",
+          "text": "Hot and cold shutoffs present, accessible, not weeping",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "snk.trap",
+          "text": "Trap and drain connections dry; no corrosion",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "snk.drain-flow",
+          "text": "Drains at a normal rate",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "snk.cabinet",
+          "text": "Cabinet floor inspected while water runs; metered if suspect",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "snk.faucet",
+          "text": "Faucet operates; no drip at spout or base",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "shower"
+      ],
+      "items": [
+        {
+          "id": "shw.unit",
+          "text": "Enclosure photographed whole",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "shw.surround",
+          "text": "Surround condition; grout and caulk at all joints",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "shw.drain-flow",
+          "text": "Drains at a normal rate",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "shw.valve",
+          "text": "Mixing valve operates through its range",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "shw.door",
+          "text": "Door/curtain track and seals",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "bathtub"
+      ],
+      "items": [
+        {
+          "id": "tub.unit",
+          "text": "Tub photographed whole",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "tub.surround",
+          "text": "Surround condition; grout and caulk",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "tub.drain-overflow",
+          "text": "Drain and overflow function; no leak visible below",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "tub.faucet",
+          "text": "Faucet and diverter operate",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "tub.support",
+          "text": "Tub support/deck condition where visible",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "laundry-tub"
+      ],
+      "items": [
+        {
+          "id": "ltb.unit",
+          "text": "Tub photographed whole",
+          "satisfy": "photo",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ltb.stops",
+          "text": "Shutoffs present, not weeping",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ltb.drain",
+          "text": "Drains at a normal rate",
           "satisfy": "check",
           "tier": "standard",
           "attest": "action",
@@ -2605,6 +3165,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "fp.unit",
+          "text": "Appliance photographed whole, in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "fp.type",
           "text": "Appliance type",
           "satisfy": "choice",
@@ -2749,6 +3319,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "gd.unit",
+          "text": "Door and opener photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "gd.beam",
           "text": "Beam reversal tested",
           "satisfy": "check",
@@ -2805,6 +3385,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "generator"
       ],
       "items": [
+        {
+          "id": "gen.unit",
+          "text": "Whole unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
         {
           "id": "gen.nameplate",
           "text": "Nameplate photographed",
@@ -2995,6 +3585,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "wellhead"
       ],
       "items": [
+        {
+          "id": "wlh.unit",
+          "text": "Wellhead photographed whole, with surroundings",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
         {
           "id": "wlh.cap",
           "text": "Cap condition and seal",
@@ -3270,6 +3870,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "dk.unit",
+          "text": "Deck photographed whole from a repeatable position",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "dk.ledger",
           "text": "Ledger attachment assessed",
           "satisfy": "check",
@@ -3326,6 +3936,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "chimney"
       ],
       "items": [
+        {
+          "id": "ch.unit",
+          "text": "Chimney photographed full height from the ground",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
         {
           "id": "ch.cap",
           "text": "Cap and screen",
@@ -3563,6 +4183,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "items": [
         {
+          "id": "app.unit",
+          "text": "Appliance photographed whole, in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "app.nameplate",
           "text": "Nameplate photographed",
           "satisfy": "photo",
@@ -3573,10 +4203,21 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "app.age",
+          "text": "Manufacture year if determinable",
+          "satisfy": "measure",
+          "unit": "year",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "app.type",
-          "text": "Type/subtype recorded",
+          "text": "Descriptive note where the sub-type doesn't fit",
           "satisfy": "note",
-          "tier": "core",
+          "tier": "standard",
           "attest": "evidence",
           "scope": [
             "baseline"
@@ -3593,6 +4234,317 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         }
       ]
+    },
+    {
+      "types": [
+        "appliance-refrigerator"
+      ],
+      "items": [
+        {
+          "id": "apr.water-line",
+          "text": "Water line type and shutoff located (if plumbed)",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apr.seals",
+          "text": "Door seals condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apr.coils",
+          "text": "Coils accessible and reasonably clear",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
+    },
+    {
+      "types": [
+        "appliance-dishwasher"
+      ],
+      "items": [
+        {
+          "id": "apd.airgap",
+          "text": "Air gap or high loop present",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apd.connections",
+          "text": "Supply and drain connections dry",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apd.base",
+          "text": "No staining at the base or in the adjacent cabinet",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
+    },
+    {
+      "types": [
+        "appliance-range"
+      ],
+      "items": [
+        {
+          "id": "apg.fuel",
+          "text": "Fuel type",
+          "satisfy": "choice",
+          "options": [
+            "natural gas",
+            "propane",
+            "electric",
+            "induction",
+            "dual-fuel",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apg.anti-tip",
+          "text": "Anti-tip bracket present",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apg.shutoff",
+          "text": "Gas: shutoff accessible behind the unit",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apg.connector",
+          "text": "Gas: flexible connector condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
+    },
+    {
+      "types": [
+        "appliance-range-hood"
+      ],
+      "items": [
+        {
+          "id": "aph.vent",
+          "text": "Vent configuration",
+          "satisfy": "choice",
+          "options": [
+            "ducted to exterior",
+            "recirculating",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "aph.fan",
+          "text": "Fan operates through its speeds",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "aph.filter",
+          "text": "Filter condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
+    },
+    {
+      "types": [
+        "appliance-washer"
+      ],
+      "items": [
+        {
+          "id": "apw.hoses",
+          "text": "Supply hose type",
+          "satisfy": "choice",
+          "options": [
+            "braided stainless",
+            "rubber",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apw.hose-age",
+          "text": "Hose year if marked",
+          "satisfy": "measure",
+          "unit": "year",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apw.stops",
+          "text": "Shutoffs present and accessible",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apw.pan",
+          "text": "Drain pan present if above living space",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
+    },
+    {
+      "types": [
+        "appliance-dryer"
+      ],
+      "items": [
+        {
+          "id": "apy.fuel",
+          "text": "Fuel type",
+          "satisfy": "choice",
+          "options": [
+            "electric",
+            "natural gas",
+            "propane",
+            "heat-pump",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apy.duct",
+          "text": "Dryer duct pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "dryer-duct"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apy.gas-shutoff",
+          "text": "Gas: shutoff accessible",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
+    },
+    {
+      "types": [
+        "appliance-microwave"
+      ],
+      "items": [
+        {
+          "id": "apm.mount",
+          "text": "Mounting secure (over-range units)",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "apm.vent",
+          "text": "Vent configuration if over-range",
+          "satisfy": "choice",
+          "options": [
+            "ducted to exterior",
+            "recirculating",
+            "n/a — countertop",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ],
+      "inherits": "appliance"
     },
     {
       "types": [
@@ -3697,6 +4649,20 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "stub": true,
       "items": []
+    },
+    {
+      "types": [
+        "appliance-freezer"
+      ],
+      "stub": true,
+      "items": []
+    },
+    {
+      "types": [
+        "iron-filter"
+      ],
+      "stub": true,
+      "items": []
     }
   ],
   "naReasons": [
@@ -3779,6 +4745,19 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "predicate": {
         "componentTypes": [
           "receptacle-gfci"
+        ]
+      }
+    },
+    {
+      "id": "plumbing-fixtures",
+      "label": "Plumbing fixtures",
+      "predicate": {
+        "componentTypes": [
+          "toilet",
+          "sink",
+          "shower",
+          "bathtub",
+          "laundry-tub"
         ]
       }
     },

@@ -574,3 +574,77 @@ With component types carrying the identity, the free-text nickname may be redund
 call is to **legacy it for now** and watch. No change requested; recorded so the question
 isn't lost. Note that 11.1 is likely the real cause: nicknames were doing the work missing
 component types should have been doing.
+
+---
+
+## 12. v1.4 intake adjudication (2026-07-26)
+
+v1.4 closes the sub-type taxonomy that had been "awaiting telemetry" since v1.1, on the
+correct reading that the owner's freeform fixtures and repeated appliance nicknames **were**
+the telemetry. **Accepted as authored**, with one defect recorded below.
+
+Landed: 16 new component types (5 plumbing fixtures standalone, 7 appliance sub-types,
+4 water-treatment sub-types), component inheritance in the schema and generator, 14 whole-unit
+photo items, zone items re-pointed, `plumbing-fixtures` layer. **270 → 346 items**
+(+76, master predicted ~+75); 47 → 65 component lists; 7 → 8 layers.
+
+### 12.1 Component inheritance — implemented, with one trap worth recording
+
+Inheritance is stored **declaratively** (`inherits` on the component list) and composed at
+derivation, mirroring how zone-type inheritance already works. It is deliberately *not*
+flattened into the generated config: flattening would copy parent items into every child
+list, duplicating item ids and breaking the invariant that an item exists exactly once.
+
+**The trap:** the heading syntax `` ### `child` — inherits `parent` `` reuses backticks, and
+two backticked ids on a component heading *already meant* a shared list (`smoke-alarm` /
+`co-alarm`). A naive parse merges every sub-type with its parent instead of inheriting.
+The parser strips the clause before collecting ids, and a guard rejects an inheriting heading
+that names more than one id. Verified by reverting the strip: generation now fails closed
+with a clear message. Without the guard it would still have failed, but as a confusing
+"duplicate component type" three steps downstream.
+
+Also fixed: the **core-cap invariant test was silently under-counting**. It measured each
+list's own items, but a sub-type renders as one group carrying parent + own. It now composes
+before counting. No type currently exceeds the cap (worst is `water-softener` at 7 core).
+
+### 12.2 DEFECT — v1.4 renames two item ids, against the master's own precedent
+
+`CLAUDE.md`: *config is data, ids are never renamed or reused.* Six ids disappear in v1.4:
+
+| id | v1.4 disposition | verdict |
+|---|---|---|
+| `bth.toilet-secure` | renamed → `bth.toilet` | **rename — against the rule** |
+| `bth.tub-surround` | renamed → `bth.fixtures` | **rename — against the rule** |
+| `kit.dw-connection` | retired; content → `apd.airgap` | legitimate retirement |
+| `kit.fridge-line` | retired; content → `apr.water-line` | legitimate retirement |
+| `kit.fuel-range` | retired; content → `apg.shutoff` | legitimate retirement |
+| `lnd.hoses` | retired; content → `apw.hoses` | legitimate retirement |
+
+The four retirements are fine — the content genuinely moved onto the object it belongs to,
+and that is a lifecycle event, not a rename.
+
+**The two renames contradict the master's own established practice.** When `liv.egress` moved
+into `interior-base` (v1.2) and `bsm.finished-behind` moved into `rough-base` (v1.2.1), both
+changelogs explicitly kept the id and recorded *"the prefix is now historical, which is fine —
+ids are opaque."* `bth.toilet-secure` is the same case: it is still "the toilet item in the
+bathroom list," now satisfied by a pin rather than a check. Nothing required a new id.
+
+**Consequence:** a resolution recorded against `bth.toilet-secure` in an existing session no
+longer matches any item after regeneration. The event log is append-only so nothing is lost,
+but the resolution stops rendering and stops counting in the audit. With one archived field
+export the blast radius is small — the rule exists so it stays small.
+
+**Recommendation (owner's call):** restore `bth.toilet-secure` and `bth.tub-surround` as the
+ids, keeping v1.4's new text and satisfy types. Two cells. If instead the renames are
+deliberate, record them as retirements-with-successors so the binder can map old to new.
+
+**Pinned by test either way:** `id stability` now asserts that none of the six retired ids is
+ever reissued. Reuse is the genuinely dangerous half — a dead id returning attached to a
+different verification would silently re-point historical resolutions at new meaning.
+
+### 12.3 Carried, unchanged
+
+Table D's `issues`/`monitor` break is correctly flagged and correctly **not** fixed here —
+rewriting those predicates now empties two working layers for an entity that doesn't exist.
+They land with the concern entity. Nicknames stay through the next walk, per §9.5: retiring
+the workaround in the same pass that fixes the gap makes it impossible to tell which mattered.

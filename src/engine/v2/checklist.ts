@@ -123,6 +123,27 @@ export function deriveZoneItems(
 }
 
 /** Component items for every non-retired typed pin in a zone — attached PER PIN. */
+/**
+ * A component type's full item list: inherited items first, then its own (master v1.4).
+ *
+ * Depth-guarded rather than assumed shallow — the authored taxonomy is one level today, but
+ * a cycle here would hang the audit rather than fail a build. `validateChecklistConfig`
+ * rejects cycles up front; this is the belt to that braces.
+ */
+export function componentItemsFor(config: ChecklistConfig, type: string): ChecklistItem[] {
+  const chain: ChecklistItem[][] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined = type;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const list = config.componentLists.find((c) => c.types.includes(cursor!));
+    if (!list) break;
+    chain.unshift(list.items); // parent ends up ahead of child
+    cursor = list.inherits;
+  }
+  return chain.flat();
+}
+
 export function deriveComponentItems(
   config: ChecklistConfig,
   state: SessionStateV2,
@@ -142,7 +163,11 @@ export function deriveComponentItems(
     // The pin's nickname rides in the group heading so the audit reads
     // "#2 water-treatment — chlorine tank", not three indistinguishable "#N water-treatment".
     const group = `#${p.number} ${type}${p.label ? ` — ${p.label}` : ""}`;
-    for (const item of list.items)
+    // ONE group per pin, parent items first (master v1.4). A sub-type is still one object;
+    // splitting inherited items into their own rendered group would show the inspector two
+    // headings for one water softener, which is the fragmentation the zone-vs-object work
+    // exists to remove.
+    for (const item of componentItemsFor(config, type))
       out.push({ item, scope, group, status: statusOf(state, scope, item, allPins) });
   }
   return out;

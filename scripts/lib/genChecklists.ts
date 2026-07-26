@@ -173,11 +173,22 @@ function parseItemRow(table: Table, row: { cells: string[]; line: number }, grou
 }
 
 /** `### \`utility\` (renders grouped …)` → { ids: ["utility"], note: "renders grouped …" } */
-function parseTaggedHeading(line: string, n: number): { ids: string[]; note?: string } {
-  const ids = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
+function parseTaggedHeading(line: string, n: number): { ids: string[]; note?: string; inherits?: string } {
+  // v1.4 component inheritance: "### `child` — inherits `parent`". The clause MUST be
+  // stripped before ids are collected — otherwise the parent reads as a second id on the
+  // heading, which is the existing syntax for a *shared* list (`smoke-alarm` / `co-alarm`),
+  // and the two types would merge into one list instead of one inheriting the other.
+  // The guard below turns that into a clear error; without it the failure still surfaces,
+  // but as a confusing "duplicate component type" from the validator three steps later.
+  const inheritsMatch = line.match(/[—-]\s*inherits\s+`([^`]+)`\s*$/);
+  const head = inheritsMatch ? line.slice(0, line.indexOf(inheritsMatch[0])) : line;
+  const ids = [...head.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
   if (!ids.length) throw new MasterParseError(n, `heading names no backticked id: ${line}`);
-  const note = line.match(/\(([^)]+)\)\s*$/)?.[1];
-  return note ? { ids, note } : { ids };
+  const note = head.match(/\(([^)]+)\)\s*$/)?.[1];
+  const inherits = inheritsMatch?.[1]!.trim();
+  if (inherits && ids.length !== 1)
+    throw new MasterParseError(n, `an inheriting component heading must name exactly one id: ${line}`);
+  return { ids, ...(note ? { note } : {}), ...(inherits ? { inherits } : {}) };
 }
 
 export function parseMaster(markdown: string): ChecklistConfigInput {
@@ -205,7 +216,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     | "none" | "taxonomy" | "base" | "zone" | "session" | "component" | "stubs"
     | "flags" | "attrs" | "na" | "layers";
   let section: Section = "none";
-  let currentList: { ids: string[]; note?: string } | null = null;
+  let currentList: { ids: string[]; note?: string; inherits?: string } | null = null;
   let currentGroup: string | undefined;
 
   let i = 0;
@@ -297,6 +308,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
             items,
           };
           if (currentList.note) entry.note = currentList.note;
+          if (currentList.inherits) entry.inherits = currentList.inherits;
           cfg.componentLists!.push(entry);
           currentList = null;
         }

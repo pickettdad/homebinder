@@ -152,6 +152,9 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
       evidence.value = value.trim();
       if (item.unit) evidence.unit = item.unit;
     }
+    // choice records the selected option in the same `value` slot measure uses, so the
+    // binder reads one structured field for both (master v1.3 §2).
+    if (item.satisfy === "choice" && value) evidence.value = value;
     if (d.status.kind === "proposed") evidence.pinId = d.status.pinIds[0];
     finish({
       kind: "satisfied",
@@ -258,19 +261,47 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                 className="rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
               />
             )}
+            {item.satisfy === "choice" && (
+              <div className="flex flex-col gap-2">
+                {item.options?.map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    aria-pressed={value === opt}
+                    onClick={() => setValue(value === opt ? "" : opt)}
+                    className={`rounded-xl px-4 py-3 text-left font-medium ring-1 ${
+                      value === opt
+                        ? "bg-teal-600 text-slate-950 ring-teal-400"
+                        : "bg-slate-900 text-slate-100 ring-slate-600 active:bg-slate-800"
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Note (optional — type or dictate)"
+              placeholder={
+                // Master v1.3 §9.1: an `other` selection should carry a free-text note.
+                item.satisfy === "choice" && /^other\b/i.test(value)
+                  ? "Say what it is — “other” without a note isn't a record"
+                  : "Note (optional — type or dictate)"
+              }
               rows={2}
               className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
             />
-            {isTest ? (
+            {/* A choice+action item (attic/crawlspace access extent) records the SELECTED
+                EXTENT, not pass/fail — master v1.3 §2. Picking an option is itself the
+                deliberate human tap that attest:action requires, so it still never has a
+                software path. Pass/Fail would be meaningless for "how far did you get". */}
+            {isTest && item.satisfy !== "choice" ? (
               <div className="flex gap-3">
                 <BigButton className="flex-1" onClick={() => satisfied("pass")}>Pass</BigButton>
                 <BigButton variant="danger" className="flex-1" onClick={() => satisfied("fail")}>Fail</BigButton>
               </div>
-            ) : d.status.kind === "proposed" ? (
+            ) : d.status.kind === "proposed" && item.satisfy !== "choice" ? (
               <BigButton onClick={() => satisfied()}>
                 Confirm — pinned{(() => {
                   const st = d.status;
@@ -282,8 +313,11 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                 })()}
               </BigButton>
             ) : (
-              <BigButton disabled={item.satisfy === "measure" && !value.trim()} onClick={() => satisfied()}>
-                Mark satisfied
+              <BigButton
+                disabled={(item.satisfy === "measure" || item.satisfy === "choice") && !value.trim()}
+                onClick={() => satisfied()}
+              >
+                {item.satisfy === "choice" ? (isTest ? "Record extent" : "Record selection") : "Mark satisfied"}
               </BigButton>
             )}
 

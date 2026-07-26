@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.2.1",
+  "configVersion": "1.3.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -725,7 +725,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "utl.pipe-material",
-          "text": "Supply pipe material identified with close-up (copper/PEX/poly-B/Kitec/galv)",
+          "text": "Supply pipe material photographed close-up",
           "satisfy": "photo",
           "tier": "core",
           "attest": "evidence",
@@ -735,9 +735,51 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "group": "Water"
         },
         {
+          "id": "utl.pipe-material-id",
+          "text": "Supply pipe material identified",
+          "satisfy": "choice",
+          "options": [
+            "copper",
+            "PEX",
+            "poly-B",
+            "Kitec",
+            "galvanized",
+            "CPVC",
+            "mixed",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ],
+          "group": "Water"
+        },
+        {
           "id": "utl.drain-material",
-          "text": "Drain/vent material identified (ABS/cast iron/clay evidence)",
+          "text": "Drain/vent material photographed",
           "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ],
+          "group": "Water"
+        },
+        {
+          "id": "utl.drain-material-id",
+          "text": "Drain/vent material identified",
+          "satisfy": "choice",
+          "options": [
+            "ABS",
+            "PVC",
+            "cast iron",
+            "clay",
+            "Orangeburg",
+            "copper",
+            "mixed",
+            "unknown"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -890,7 +932,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "utl.fuel-tank",
-          "text": "Oil/propane tank pinned; age and condition",
+          "text": "Oil/propane tank pinned",
           "satisfy": "pin",
           "pinTypes": [
             "fuel-tank"
@@ -1096,7 +1138,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "lnd.dryer-duct",
-          "text": "Dryer duct pinned — material, route, length; foil flex flagged",
+          "text": "Dryer duct pinned",
           "satisfy": "pin",
           "pinTypes": [
             "dryer-duct"
@@ -1230,8 +1272,14 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "items": [
         {
           "id": "att.access-honesty",
-          "text": "Access method recorded — *inspected from hatch* vs. traversed",
-          "satisfy": "note",
+          "text": "Extent of attic access achieved",
+          "satisfy": "choice",
+          "options": [
+            "from hatch only",
+            "partial traverse",
+            "full traverse",
+            "no access"
+          ],
           "tier": "core",
           "attest": "action",
           "scope": [
@@ -1306,8 +1354,14 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "items": [
         {
           "id": "crw.access-honesty",
-          "text": "Access method and extent recorded",
-          "satisfy": "note",
+          "text": "Extent of crawlspace access achieved",
+          "satisfy": "choice",
+          "options": [
+            "from access point only",
+            "partial entry",
+            "full entry",
+            "no access"
+          ],
           "tier": "core",
           "attest": "action",
           "scope": [
@@ -1646,8 +1700,9 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "wh.age",
-          "text": "Age decoded from serial and recorded",
-          "satisfy": "note",
+          "text": "Install/manufacture year decoded from serial",
+          "satisfy": "measure",
+          "unit": "year",
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -1696,8 +1751,13 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "wh.ownership",
-          "text": "Owned vs. rented recorded",
-          "satisfy": "note",
+          "text": "Ownership status",
+          "satisfy": "choice",
+          "options": [
+            "owned",
+            "rented",
+            "unknown"
+          ],
           "tier": "standard",
           "attest": "evidence",
           "scope": [
@@ -1820,7 +1880,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "blr.pressure",
-          "text": "Operating pressure/temp reading recorded",
+          "text": "Operating pressure reading recorded",
           "satisfy": "measure",
           "unit": "psi",
           "tier": "core",
@@ -2043,8 +2103,18 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "pnl.service",
-          "text": "Service size recorded",
-          "satisfy": "note",
+          "text": "Service size",
+          "satisfy": "choice",
+          "options": [
+            "60A",
+            "100A",
+            "125A",
+            "150A",
+            "200A",
+            "400A",
+            "other",
+            "unknown"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2053,8 +2123,13 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "pnl.type",
-          "text": "Breaker vs. fuse recorded",
-          "satisfy": "note",
+          "text": "Overcurrent protection type",
+          "satisfy": "choice",
+          "options": [
+            "breaker",
+            "fuse",
+            "mixed"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2110,8 +2185,14 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "wm.type",
-          "text": "Valve type recorded (ball vs. gate)",
-          "satisfy": "note",
+          "text": "Valve type",
+          "satisfy": "choice",
+          "options": [
+            "ball",
+            "gate",
+            "other",
+            "unknown"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2359,8 +2440,15 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "alm.power",
-          "text": "Power source recorded",
-          "satisfy": "note",
+          "text": "Power source",
+          "satisfy": "choice",
+          "options": [
+            "hardwired",
+            "hardwired + battery backup",
+            "battery only",
+            "plug-in",
+            "unknown"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2379,8 +2467,17 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "alm.type",
-          "text": "Type recorded",
-          "satisfy": "note",
+          "text": "Detector type",
+          "satisfy": "choice",
+          "options": [
+            "smoke — ionization",
+            "smoke — photoelectric",
+            "smoke — dual sensor",
+            "CO only",
+            "combination smoke/CO",
+            "heat",
+            "unknown"
+          ],
           "tier": "standard",
           "attest": "evidence",
           "scope": [
@@ -2443,9 +2540,27 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "ft.type",
+          "text": "Tank configuration",
+          "satisfy": "choice",
+          "options": [
+            "above-ground indoor",
+            "above-ground outdoor",
+            "underground",
+            "propane cylinder",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "ft.age",
-          "text": "Age/type recorded",
-          "satisfy": "note",
+          "text": "Manufacture year from data plate",
+          "satisfy": "measure",
+          "unit": "year",
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2491,8 +2606,17 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "items": [
         {
           "id": "fp.type",
-          "text": "Type recorded (wood/gas/pellet)",
-          "satisfy": "note",
+          "text": "Appliance type",
+          "satisfy": "choice",
+          "options": [
+            "wood fireplace",
+            "woodstove",
+            "pellet stove",
+            "gas fireplace",
+            "gas insert",
+            "electric",
+            "decorative — non-functional"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2561,8 +2685,25 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "items": [
         {
           "id": "dd.material",
-          "text": "Material photographed — foil flex = finding",
+          "text": "Duct material photographed",
           "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "dd.material-id",
+          "text": "Duct material identified",
+          "satisfy": "choice",
+          "options": [
+            "rigid metal",
+            "semi-rigid metal",
+            "foil flex",
+            "plastic",
+            "unknown"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2685,8 +2826,15 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "gen.fuel",
-          "text": "Fuel source and supply recorded",
-          "satisfy": "note",
+          "text": "Fuel source",
+          "satisfy": "choice",
+          "options": [
+            "natural gas",
+            "propane",
+            "diesel",
+            "gasoline",
+            "dual-fuel"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -2743,8 +2891,15 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "fc.orientation",
-          "text": "Orientation recorded (horiz/vert/diag/stepped)",
-          "satisfy": "note",
+          "text": "Crack orientation",
+          "satisfy": "choice",
+          "options": [
+            "horizontal",
+            "vertical",
+            "diagonal",
+            "stepped",
+            "map/random"
+          ],
           "tier": "core",
           "attest": "evidence",
           "scope": [
@@ -3001,8 +3156,13 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "hb.type",
-          "text": "Frost-free or standard recorded",
-          "satisfy": "note",
+          "text": "Bib type",
+          "satisfy": "choice",
+          "options": [
+            "frost-free",
+            "standard",
+            "unknown"
+          ],
           "tier": "standard",
           "attest": "evidence",
           "scope": [
@@ -3206,8 +3366,15 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "ch.liner",
-          "text": "Liner type if known",
-          "satisfy": "note",
+          "text": "Liner type",
+          "satisfy": "choice",
+          "options": [
+            "clay tile",
+            "metal",
+            "cast-in-place",
+            "unlined",
+            "unknown"
+          ],
           "tier": "standard",
           "attest": "evidence",
           "scope": [
@@ -3242,21 +3409,21 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
-          "id": "tr.lean",
-          "text": "Lean or root heave",
-          "satisfy": "check",
-          "tier": "standard",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
           "id": "tr.species",
           "text": "Species recorded if known",
           "satisfy": "note",
           "tier": "standard",
           "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "tr.lean",
+          "text": "Lean or root heave",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
           "scope": [
             "baseline"
           ]

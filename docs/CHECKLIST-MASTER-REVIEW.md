@@ -380,3 +380,89 @@ own wins), exactly as `deriveZoneItems` already composes base lists; (4) tests. 
 is established (zone-type inheritance), so this is a focused, well-bounded change to land
 alongside the content pass — not a blocker, and nothing to build until the vocabulary is
 authored.
+
+---
+
+## 9. v1.3 intake adjudication (2026-07-25)
+
+v1.3 adds the `choice` satisfy type and converts 13 items off free-text `note`, splits 3
+items into photo+choice pairs, adds `ft.type`, and structures 2 ages as `measure (year)`.
+**Accepted as authored.** The diagnosis is right: `alm.power = "Direct power"` as prose is
+a fixed enumerable answer stored where it can never be validated, queried, or aggregated.
+
+Implemented this turn: `choice` in the schema (with `options`), `choice (a|b|c)` parsing in
+the generator dialect, and a single-select control in the checklist panel. 270 items,
+17 of them `choice`. Config regenerated; drift gate green.
+
+### 9.1 Reconciliation — v1.3 was authored against v1.2, not v1.2.1
+
+v1.3's header read "Supersedes: v1.2", and four v1.2.1 decisions arrived reverted or
+broken. All four are **carried forward** (restored), annotated in the master's changelog.
+None is re-litigated here; if any revert was deliberate, say so and it flips back.
+
+| # | What | v1.2.1 | v1.3 as received | Action |
+|---|---|---|---|---|
+| 1 | `fc.comparison` attest | evidence | action | restored to evidence |
+| 2 | `wh.anode` attest | evidence | action | restored to evidence |
+| 3 | §8 apartment/condo parked marker | present | dropped | restored |
+| 4 | Table B `askAtCreation` for `has_plumbing` / `exterior_wall` | `no (…)` | `reserved — …` | restored to `no (…)` |
+
+(4) was not cosmetic: §0 requires `askAtCreation` to start with yes/no, so the generator
+**failed closed** and v1.3 could not be built at all until the cell was restored. The other
+two v1.2.1 attest flips (`sit.shoreline`, `hp.snow`) survived v1.3 unchanged.
+
+### 9.2 Defect — six choice items violate the master's own escape rule
+
+§2 "choice discipline" states options must "always include an escape (`unknown`, `other`,
+or both)". Six authored items have none:
+
+| item | options | reading |
+|---|---|---|
+| `pnl.type` | breaker / fuse / mixed | plausibly exhaustive |
+| `fc.orientation` | horizontal / vertical / diagonal / stepped / map/random | a crack always has one |
+| `gen.fuel` | natural gas / propane / diesel / gasoline / dual-fuel | plausibly exhaustive |
+| `fp.type` | 7 appliance types | **an unknown is realistic** — a sealed insert with no visible plate |
+| `att.access-honesty` | … / no access | `no access` is a real terminal answer, not an escape |
+| `crw.access-honesty` | … / no access | same |
+
+**Not enforced in code, deliberately.** A hard check would fail the build on the owner's
+own content, and choosing between "add escapes" and "relax the rule" is a content decision.
+Recommendation: relax §2 from *always* to *wherever the enumeration is not exhaustive*, and
+add `unknown` to `fp.type` only. The two access-honesty items are correctly escape-free —
+their whole point is that every outcome including "couldn't get in" is a real answer.
+
+### 9.3 Verdicts on v1.3 §9 open decisions
+
+**1. Choice escape values — confirmed.** The UI's note field is live alongside every choice,
+and its placeholder changes to demand detail when an `other`-prefixed option is selected.
+`unknown` records as a normal satisfied resolution with `evidence.value = "unknown"`, and
+exports as such — it is a legitimate answer, not an unresolved item. See 9.2 for the six
+items that offer no escape at all.
+
+**2. Auto-flagging on dangerous choice values — agree: prompt, never impose.** Two reasons
+beyond the adjudication-seat argument, both concrete:
+
+- *The value and the finding are different records.* `dd.material-id = foil flex` is a fact
+  about the duct. "This is a fire hazard requiring remediation" is a judgement about this
+  house. Auto-creating the second from the first puts an assertion in the binder that no
+  human made — and the binder is the liability document.
+- *It would train the inspector to avoid the honest value.* Any selection that silently
+  spawns work gets picked less often. The rule that makes `choice` worth having is that the
+  true answer is always the cheapest one to record.
+
+Implementation when it lands: offer the issue pin, pre-typed and pre-labelled, one tap to
+accept and one to dismiss — and record the dismissal, so "we saw poly-B and chose not to
+flag it" is itself in the event log. **Not built this turn** (no prompting exists yet in the
+resolve flow); it is a small, well-bounded follow-up.
+
+**3. Choice vs multi-select — agree, no action.** Nothing authored needs multi. Recorded so
+the next person doesn't widen `choice` by reflex: widening it would silently change every
+existing single-select resolution's value type from string to array. A new type is correct.
+
+### 9.4 Note on `wh.age` / `ft.age` → `measure (year)`
+
+Flagged in v1.3 as beyond the stated brief. **Endorsed.** A year is the only field the fleet
+query can group on, and the retrofit cost is asymmetric in exactly the way the changelog
+says. One caveat for the content pass: `measure (year)` has no validation that the value is
+a plausible year — an inspector can type `19` or `2205`. Worth a range check when the
+equipment registry is built; not worth blocking on now.

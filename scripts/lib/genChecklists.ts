@@ -88,7 +88,7 @@ function checkItemHeader(table: Table): void {
 
 const stripTicks = (s: string) => s.replace(/`/g, "").trim();
 
-function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "pinTypes" | "unit"> {
+function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "pinTypes" | "unit" | "options"> {
   const pin = cell.match(/^pin `([^`]+)`$/);
   if (pin) {
     const types = pin[1]!.split("|").map((t) => t.trim());
@@ -97,6 +97,20 @@ function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "
   }
   const measure = cell.match(/^measure(?: \(([^)]+)\))?$/);
   if (measure) return measure[1] ? { satisfy: "measure", unit: measure[1] } : { satisfy: "measure" };
+  // Master v1.3: `choice (a|b|c)` — options inline, mirroring `measure (unit)`. The cell
+  // arrives with markdown pipe-escapes intact (`a\|b`), since a literal `|` inside a table
+  // cell must be escaped; strip the backslashes here so option text is what was authored.
+  const choice = cell.match(/^choice \(([^)]+)\)$/);
+  if (choice) {
+    const options = choice[1]!
+      .split(/(?<!\\)\|/)
+      .map((o) => o.replace(/\\\|/g, "|").trim());
+    if (options.some((o) => !o)) throw new MasterParseError(line, `empty choice option in: ${cell}`);
+    if (options.length < 2) throw new MasterParseError(line, `choice needs 2+ options: ${cell}`);
+    if (new Set(options).size !== options.length)
+      throw new MasterParseError(line, `duplicate choice option in: ${cell}`);
+    return { satisfy: "choice", options };
+  }
   if (cell === "check" || cell === "note" || cell === "photo") return { satisfy: cell };
   throw new MasterParseError(line, `unparseable satisfy cell: '${cell}'`);
 }

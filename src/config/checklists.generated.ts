@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.3.0",
+  "configVersion": "1.3.1",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -2615,7 +2615,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "gas fireplace",
             "gas insert",
             "electric",
-            "decorative — non-functional"
+            "decorative — non-functional",
+            "unknown"
           ],
           "tier": "core",
           "attest": "evidence",
@@ -2833,7 +2834,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "propane",
             "diesel",
             "gasoline",
-            "dual-fuel"
+            "dual-fuel",
+            "unknown"
           ],
           "tier": "core",
           "attest": "evidence",

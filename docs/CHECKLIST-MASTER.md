@@ -1,9 +1,16 @@
-# HouseSteady Field Assistant — Checklist Master (v1.3)
+# HouseSteady Field Assistant — Checklist Master (v1.3.1)
 
-**Version:** v1.3 · **Date:** 2026-07-25 · **Supersedes:** v1.2.1 (2026-07-23)
+**Version:** v1.3.1 · **Date:** 2026-07-26 · **Supersedes:** v1.3 (2026-07-25)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
 **Why this revision exists:** field test (2026-07-25, 2 zones, TestFlight) produced a proof case. `alm.power` — "how is this smoke alarm powered" — was satisfied via a free-text **note** reading "Direct power". That is a fixed, enumerable answer being captured as prose. It can't be validated, can't be queried, and won't aggregate. The same defect exists across roughly a dozen items. v1.3 adds a `choice` satisfy type and converts them.
+
+**Changelog v1.3 → v1.3.1** (owner adjudication 2026-07-26, applied at intake):
+- **§2 choice-discipline rule amended** from *always* carry an escape to: carry one **unless the option set is exhaustive and always determinable when the item is reachable**. The N/A path (`no-access`, `none-present`) is already the escape for the unreachable case. The absolute form was too strict and the master violated it in six places.
+- **`unknown` added to `fp.type`** — a sealed insert with no visible plate is real — **and to `gen.fuel`** — an unlabeled unit with a buried supply line is genuinely ambiguous.
+- **Four items adjudicated escape-free and left alone:** `pnl.type`, `fc.orientation`, `att.access-honesty`, `crw.access-honesty` (rationale recorded in §2).
+- **`measure (year)` range:** plausible years are **1900 → current year**, rejected at entry rather than caught downstream. Applies to `wh.age` and `ft.age`.
+- **Process rule (not content):** the master is edited by producing the **complete file**, never by dictating edits for transcription. Dictated edits created the v1.2.1 fork this version reconciles. Before authoring a new version, the current repo copy is sent to the author.
 
 **Changelog v1.2 → v1.3**
 
@@ -77,7 +84,9 @@ exterior-base ──┬── elevation
 | `photo` | an image on the pin, or a zone-level image tagged to the item | mediaId |
 | **`choice`** | **selecting exactly one authored option** | **the option value** |
 
-**Choice discipline:** options must be exhaustive for the realistic field cases and always include an escape (`unknown`, `other`, or both) — an inspector who cannot determine the answer must be able to record *that*, not be forced into a wrong value. Where `other` is selected, the UI should accept an accompanying note; where `unknown` is selected, it is a legitimate resolution and exports as such.
+**Choice discipline (amended v1.3.1):** options must be exhaustive for the realistic field cases, and **every choice carries an escape (`unknown`, `other`, or both) unless the option set is exhaustive *and* always determinable when the item is reachable.** The unreachable case already has its escape: the N/A path (`no-access`, `none-present`). An inspector who cannot determine a determinable-in-principle answer must be able to record *that*, not be forced into a wrong value.
+
+*Escape-free by adjudication (2026-07-26):* `pnl.type` and `fc.orientation` — always determinable once you can see the thing. `att.access-honesty` and `crw.access-honesty` — `no access` **is** the answer, not an evasion; "unknown" would be incoherent, since the inspector always knows how far they went. Where `other` is selected, the UI should accept an accompanying note; where `unknown` is selected, it is a legitimate resolution and exports as such.
 
 **Attest (always wins over satisfy kind):**
 - `evidence` — the item is satisfied by something existing (nameplate photo, typed pin, entered value, an observable property). Matching evidence surfaces the item as *proposed* — one confirming human tap records it. Retiring the evidence reopens it.
@@ -481,7 +490,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 ### `fireplace`
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
-| `fp.type` | Appliance type | choice (wood fireplace\|woodstove\|pellet stove\|gas fireplace\|gas insert\|electric\|decorative — non-functional) | core | evidence |
+| `fp.type` | Appliance type | choice (wood fireplace\|woodstove\|pellet stove\|gas fireplace\|gas insert\|electric\|decorative — non-functional\|unknown) | core | evidence |
 | `fp.clearances` | Clearances to combustibles | check | core | action |
 | `fp.wett` | Wood: WETT-class inspection flag recorded — never cleared by us | check | core | action |
 | `fp.gas-valve` | Gas: valve located | check | core | action |
@@ -513,7 +522,7 @@ Dialect: `id | text | satisfy | tier | attest`.
 |---|---|---|---|---|
 | `gen.nameplate` | Nameplate photographed | photo | core | evidence |
 | `gen.transfer` | Transfer switch located | check | core | action |
-| `gen.fuel` | Fuel source | choice (natural gas\|propane\|diesel\|gasoline\|dual-fuel) | core | evidence |
+| `gen.fuel` | Fuel source | choice (natural gas\|propane\|diesel\|gasoline\|dual-fuel\|unknown) | core | evidence |
 | `gen.exhaust` | Exhaust clearance from openings | check | core | action |
 | `gen.log` | Exercise log noted | note | standard | evidence |
 

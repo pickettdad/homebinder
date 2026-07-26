@@ -109,6 +109,17 @@ const componentListSchema = z.object({
   types: z.array(idSchema).min(1),
   note: z.string().optional(),
   stub: z.boolean().default(false),
+  /**
+   * Component inheritance (master v1.4): this type carries the named parent's items first,
+   * then its own — mirroring zone-type inheritance.
+   *
+   * Deliberately kept DECLARATIVE rather than flattened at generation time. Flattening would
+   * copy every parent item into every child list, which (a) breaks the invariant above that
+   * item ids exist exactly once, failing the duplicate-id check, and (b) discards the
+   * authored structure the binder's config snapshot needs. Composition happens where zone
+   * inheritance already happens: at derivation.
+   */
+  inherits: idSchema.optional(),
   items: z.array(itemSchema).default([]),
 });
 export type ComponentList = z.output<typeof componentListSchema>;
@@ -185,6 +196,32 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
   for (const b of cfg.baseLists) addUnique(baseListIds, b.id, "base list");
   for (const zt of cfg.zoneTypes) addUnique(zoneTypeIds, zt.id, "zone type");
   for (const c of cfg.componentLists) for (const t of c.types) addUnique(componentTypeIds, t, "component type");
+
+  // Component inheritance: the parent must exist, must carry items, and the chain must
+  // terminate. A cycle would hang derivation rather than fail a build, so it fails here.
+  const listByType = new Map<string, (typeof cfg.componentLists)[number]>();
+  for (const c of cfg.componentLists) for (const t of c.types) listByType.set(t, c);
+  for (const c of cfg.componentLists) {
+    if (!c.inherits) continue;
+    const child = c.types[0]!;
+    if (!componentTypeIds.has(c.inherits)) {
+      issue(`component ${child} inherits unknown type ${c.inherits}`);
+      continue;
+    }
+    if (c.types.includes(c.inherits)) issue(`component ${child} inherits itself`);
+    const parent = listByType.get(c.inherits);
+    if (parent?.stub) issue(`component ${child} inherits ${c.inherits}, which is a stub with no items`);
+    const seen = new Set<string>([child]);
+    let cursor = c.inherits;
+    while (cursor) {
+      if (seen.has(cursor)) {
+        issue(`component inheritance cycle through ${cursor}`);
+        break;
+      }
+      seen.add(cursor);
+      cursor = listByType.get(cursor)?.inherits ?? "";
+    }
+  }
 
   for (const zt of cfg.zoneTypes)
     for (const inh of zt.inherits)

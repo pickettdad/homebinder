@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseMaster, emitModule } from "../../scripts/lib/genChecklists";
+import { componentItemsFor } from "../../src/engine/v2/checklist";
 import { checklistsBaseline } from "../../src/config/checklists.generated";
 import {
   parseChecklistConfig,
@@ -94,8 +95,14 @@ describe("content invariants (master v1.1 discipline)", () => {
       for (const [key, items] of byGroup)
         groups.push({ name: `zone:${zl.zoneType}:${key}`, core: countCore(items) });
     }
+    // componentItemsFor, NOT c.items: a sub-type renders as ONE group carrying its parent's
+    // items plus its own (master v1.4). Counting only own items would let an inheriting type
+    // blow the cap while this test reported clean — the cap exists per *rendered* group.
     for (const c of cfg.componentLists.filter((c) => !c.stub))
-      groups.push({ name: `component:${c.types.join("/")}`, core: countCore(c.items) });
+      groups.push({
+        name: `component:${c.types.join("/")}`,
+        core: countCore(componentItemsFor(cfg, c.types[0]!)),
+      });
     groups.push({ name: "session", core: countCore(cfg.sessionItems) });
 
     const over = groups.filter((g) => g.core > 8);
@@ -337,5 +344,122 @@ describe("year-unit measures (master v1.3.1)", () => {
       expect(found[id]?.satisfy, `${id} satisfy`).toBe("measure");
       expect(found[id]?.unit, `${id} unit`).toBe("year");
     }
+  });
+});
+
+/**
+ * Component inheritance (master v1.4). Sub-types carry a parent's items plus their own,
+ * mirroring zone-type inheritance. Two things make this fragile enough to pin hard:
+ *
+ * 1. The heading syntax "### `child` — inherits `parent`" reuses backticks, and the
+ *    *existing* meaning of two backticked ids on one component heading is a SHARED list
+ *    (`smoke-alarm` / `co-alarm`). Parsed naively, every sub-type merges with its parent
+ *    instead of inheriting from it. Verified by reverting the parser: it now fails closed at
+ *    generation ("must name exactly one id"), but only because that guard exists — without
+ *    it the symptom surfaces as a confusing duplicate-component-type error much later.
+ * 2. Inheritance is stored declaratively and composed at derivation. Flattening it into the
+ *    generated config would duplicate parent item ids and break the globally-unique-id rule.
+ */
+describe("component inheritance (master v1.4)", () => {
+  const cfg = validConfig();
+  const listFor = (t: string) => cfg.componentLists.find((c) => c.types.includes(t));
+
+  it("an inheriting heading declares ONE type, not a shared list", () => {
+    for (const c of cfg.componentLists.filter((c) => c.inherits))
+      expect(c.types, `${c.types.join("/")} merged its parent into a shared list`).toHaveLength(1);
+  });
+
+  it("every declared parent exists and carries items", () => {
+    for (const c of cfg.componentLists.filter((c) => c.inherits)) {
+      const parent = listFor(c.inherits!);
+      expect(parent, `${c.types[0]} inherits missing ${c.inherits}`).toBeDefined();
+      expect(parent!.stub).toBe(false);
+      expect(parent!.items.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("composes parent items FIRST, then the child's own", () => {
+    const composed = componentItemsFor(cfg, "water-softener").map((i) => i.id);
+    const parent = listFor("water-treatment")!.items.map((i) => i.id);
+    const own = listFor("water-softener")!.items.map((i) => i.id);
+    expect(composed).toEqual([...parent, ...own]);
+  });
+
+  it("does not flatten inheritance into the generated config", () => {
+    // If the generator flattened, the child list would already contain the parent's ids —
+    // duplicating them across lists and breaking the unique-id invariant.
+    const own = listFor("appliance-dishwasher")!.items.map((i) => i.id);
+    expect(own).not.toContain("app.nameplate");
+    expect(own.every((id) => id.startsWith("apd."))).toBe(true);
+  });
+
+  it("a non-inheriting type composes to exactly its own items", () => {
+    const t = "toilet";
+    expect(componentItemsFor(cfg, t).map((i) => i.id)).toEqual(listFor(t)!.items.map((i) => i.id));
+  });
+
+  it("terminates on an unknown type instead of looping", () => {
+    expect(componentItemsFor(cfg, "no-such-component")).toEqual([]);
+  });
+
+  it("the 16 v1.4 types are all present and reachable", () => {
+    const added = [
+      "toilet", "sink", "shower", "bathtub", "laundry-tub",
+      "appliance-refrigerator", "appliance-dishwasher", "appliance-range",
+      "appliance-range-hood", "appliance-washer", "appliance-dryer", "appliance-microwave",
+      "water-softener", "sediment-filter", "uv-sterilizer", "reverse-osmosis",
+    ];
+    for (const t of added) {
+      expect(listFor(t), `${t} missing`).toBeDefined();
+      expect(componentItemsFor(cfg, t).length, `${t} has no items`).toBeGreaterThan(0);
+    }
+  });
+});
+
+/**
+ * Id stability. CLAUDE.md: "config is data, ids are never renamed or reused", refined by the
+ * v1.4.1 ruling — **move keeps the id; redefine retires it**. All six ids below were
+ * REDEFINED (check/action tests became pin/evidence linkage items, or their content moved
+ * onto a component), so retiring them is correct: restoring one would let a past pass/fail
+ * render as satisfying a different question. False continuity is worse than an honest
+ * orphan. What must never happen is REUSE — a dead id returning attached to a different
+ * verification would silently re-point historical resolutions at new meaning.
+ */
+describe("id stability", () => {
+  const cfg = validConfig();
+  /** Retired in v1.4/v1.4.1. Existed in a shipped master; never re-issue for anything else. */
+  const RETIRED = [
+    "bth.toilet-secure", "bth.tub-surround",
+    "kit.dw-connection", "kit.fridge-line", "kit.fuel-range", "lnd.hoses",
+  ];
+
+  it("no retired id has been reused", () => {
+    const live = new Set<string>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (typeof r.id === "string" && typeof r.satisfy === "string") live.add(r.id);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    const reused = RETIRED.filter((id) => live.has(id));
+    expect(reused, `retired ids reissued: ${reused.join(", ")}`).toEqual([]);
+  });
+
+  it("every item id is globally unique across all lists", () => {
+    const counts = new Map<string, number>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (typeof r.id === "string" && typeof r.satisfy === "string")
+          counts.set(r.id, (counts.get(r.id) ?? 0) + 1);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    expect([...counts.entries()].filter(([, n]) => n > 1)).toEqual([]);
   });
 });

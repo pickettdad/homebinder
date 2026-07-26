@@ -329,7 +329,7 @@ describe("checklist derivation (real config)", () => {
     const ids = items.map((d) => d.item.id);
     expect(ids).toContain("int.surfaces"); // interior-base
     expect(ids).toContain("wet.under-sink"); // wet-base
-    expect(ids).toContain("bth.toilet-secure"); // own list
+    expect(ids).toContain("bth.toilet"); // own list (was bth.toilet-secure before v1.4 renamed it)
     expect(ids).not.toContain("rgh.structure"); // rough-base not inherited
     const groups = new Set(items.map((d) => d.group));
     expect(groups.has("interior-base")).toBe(true);

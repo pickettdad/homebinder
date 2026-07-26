@@ -5,7 +5,8 @@ import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { suggestedPinTypes } from "../../engine/v2/checklist";
 import type { PinFlag } from "../../engine/v2/events";
-import { FlagChip, MediaThumb, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
+import { FlagChip, MediaThumb, MediaViewer, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
+import { AttachFromInbox } from "./AttachFromInbox";
 import { ChatPanel } from "./ChatPanel";
 
 const FLAGS: PinFlag[] = ["fine", "monitor", "issue"];
@@ -20,6 +21,11 @@ export function PinScreen({ pinId }: { pinId: string }) {
   const [nick, setNick] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [editingNote, setEditingNote] = useState<{ id: string; text: string } | null>(null);
+  /** Evidence opened full-size. Tapping a thumbnail used to jump straight to a discard
+      confirm — you could not look at a photo, and a video was an unidentifiable black
+      square whose only affordance was deletion (field test 2026-07-26). */
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [attaching, setAttaching] = useState(false);
   const recorder = useVoiceRecorder();
 
   const pin = v2Session?.pins.find((p) => p.pinId === pinId);
@@ -32,6 +38,10 @@ export function PinScreen({ pinId }: { pinId: string }) {
 
   const typeChoices = suggestedPinTypes(v2Config, zone?.zoneType ?? "utility");
   const target = { kind: "pin" as const, id: pinId };
+  /** Photos, video and audio in one list — capture kind is a property of the evidence,
+      not a category the inspector should have to file into. */
+  const evidence = [...pin.photos, ...pin.voiceNotes];
+  const viewing = viewerId ? evidence.find((m) => m.mediaId === viewerId) : undefined;
   const notes = pin.noteIds.map((id) => v2Session.notes.get(id)).filter((n) => n !== undefined);
   // Nickname draft: null = not editing (mirror the saved value); a string = in-progress edit.
   const nickValue = nick ?? pin.label ?? "";
@@ -115,37 +125,64 @@ export function PinScreen({ pinId }: { pinId: string }) {
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-slate-300">Photos &amp; video ({pin.photos.length})</h2>
+          <h2 className="font-semibold text-slate-300">Evidence ({evidence.length})</h2>
           {!ro && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <PhotoInput onPhoto={(file) => capturePhotoV2(target, file).then(() => showToast("Photo added"))}>
-                Add photo
+                Photo
               </PhotoInput>
               <VideoInput
                 onVideo={(file, ms) =>
                   capturePhotoV2(target, file, undefined, ms).then(() => showToast("Video added"))
                 }
               >
-                Add video
+                Video
               </VideoInput>
+              {recorder.state === "recording" ? (
+                <BigButton variant="danger" onClick={() => void stopRecording()}>
+                  Stop {formatDuration(recorder.elapsedMs)}
+                </BigButton>
+              ) : (
+                <BigButton
+                  variant="secondary"
+                  disabled={recorder.state === "unsupported"}
+                  onClick={() => void recorder.start()}
+                >
+                  Audio
+                </BigButton>
+              )}
+              <BigButton variant="secondary" onClick={() => setAttaching(true)}>
+                From inbox
+              </BigButton>
             </div>
           )}
         </div>
+        {/* One evidence grid: photo, video and audio together. Audio had its own section and
+            its own field, which overstated it — a video of the rattling fan is better evidence
+            than the sound alone, and the field test said so. */}
         <div className="grid grid-cols-3 gap-2">
-          {pin.photos.map((m) => (
+          {evidence.map((m) => (
             <button
               key={m.mediaId}
               type="button"
-              onClick={() => {
-                const what = m.mime.startsWith("video") ? "video" : "photo";
-                if (!ro && confirm(`Discard this ${what}?`)) void discardMediaV2(m.mediaId);
-              }}
-              className="overflow-hidden rounded-xl ring-1 ring-slate-700"
+              onClick={() => setViewerId(m.mediaId)}
+              className="relative overflow-hidden rounded-xl ring-1 ring-slate-700 active:ring-teal-500"
             >
-              <MediaThumb mediaId={m.mediaId} mime={m.mime} durationMs={m.durationMs} className="aspect-square w-full" />
+              {m.mime.startsWith("audio") ? (
+                <span className="flex aspect-square w-full items-center justify-center bg-slate-800 text-slate-300">
+                  🎙 {formatDuration(m.durationMs ?? 0)}
+                </span>
+              ) : (
+                <MediaThumb mediaId={m.mediaId} mime={m.mime} durationMs={m.durationMs} className="aspect-square w-full" />
+              )}
             </button>
           ))}
         </div>
+        {evidence.length === 0 && (
+          <p className="rounded-xl border border-dashed border-slate-700 p-3 text-sm text-slate-400">
+            No evidence yet. Shoot it here, or pull captures you already took with “From inbox”.
+          </p>
+        )}
       </section>
 
       <section className="flex flex-col gap-2">
@@ -206,28 +243,6 @@ export function PinScreen({ pinId }: { pinId: string }) {
         )}
       </section>
 
-      <section className="flex items-center justify-between gap-3 rounded-xl bg-slate-800 p-4">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-200">
-            Audio evidence{pin.voiceNotes.length > 0 ? ` (${pin.voiceNotes.map((v) => formatDuration(v.durationMs ?? 0)).join(", ")})` : ""}
-          </p>
-          <p className="text-xs text-slate-500">For sounds — a rattling fan, a banging pipe. Notes are better typed or dictated above.</p>
-        </div>
-        {!ro && (recorder.state === "recording" ? (
-          <BigButton variant="danger" onClick={() => void stopRecording()}>
-            Stop {formatDuration(recorder.elapsedMs)}
-          </BigButton>
-        ) : (
-          <BigButton
-            variant="secondary"
-            disabled={recorder.state === "unsupported"}
-            onClick={() => void recorder.start()}
-          >
-            Record
-          </BigButton>
-        ))}
-      </section>
-
       <ChatPanel pinId={pinId} readOnly={ro} />
 
       <section className="flex flex-col gap-2">
@@ -274,6 +289,43 @@ export function PinScreen({ pinId }: { pinId: string }) {
           onPick={(pinType) => void setPinType(pinId, pinType).then(() => setTypeSheet(false))}
         />
       </Sheet>
+
+      <Sheet open={viewing !== undefined} onClose={() => setViewerId(null)} title="Evidence">
+        {viewing && (
+          <div className="flex flex-col gap-3">
+            <MediaViewer
+              mediaId={viewing.mediaId}
+              mime={viewing.mime}
+              className="max-h-[60dvh] w-full rounded-xl object-contain"
+            />
+            {viewing.caption && <p className="text-sm text-slate-300">{viewing.caption}</p>}
+            {!ro && (
+              <BigButton
+                variant="danger"
+                onClick={() => {
+                  const what = viewing.mime.startsWith("video")
+                    ? "video"
+                    : viewing.mime.startsWith("audio")
+                      ? "recording"
+                      : "photo";
+                  if (confirm(`Discard this ${what}? It's gone for good.`))
+                    void discardMediaV2(viewing.mediaId).then(() => setViewerId(null));
+                }}
+              >
+                Discard
+              </BigButton>
+            )}
+          </div>
+        )}
+      </Sheet>
+
+      <AttachFromInbox
+        open={attaching}
+        onClose={() => setAttaching(false)}
+        target={target}
+        zoneId={pin.zoneId}
+        label={`pin #${pin.number}`}
+      />
     </div>
   );
 }

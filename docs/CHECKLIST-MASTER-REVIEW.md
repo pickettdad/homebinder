@@ -530,3 +530,47 @@ on top of that and reverted all six, one of which broke the generator outright. 
 transfer in both directions removes the class of error, not the instance.
 
 **v1.3.1 is being sent to the owner with this change** — first application of the new rule.
+
+---
+
+## 11. Field-test-3 change-requests (2026-07-26) — master content, for the v1.4 pass
+
+Two content gaps found by walking the app. Both are owner-edited master content, recorded
+here rather than changed downstream.
+
+### 11.1 No plumbing-fixture component types exist
+
+Pinning a toilet, sink or shower forced **freeform entry** — exactly the path that poisons
+the component taxonomy the §8 sub-type work is meant to grow from real usage. Verified: of
+**52 component types**, none is a plumbing fixture. No `toilet`, `sink`, `shower`, `tub`,
+`faucet`, `vanity`.
+
+This is a coverage gap rather than a taxonomy question: these are the most common objects in
+a wet zone, they recur in every house, and their items are largely already written elsewhere
+(`wet.under-sink`, `wet.supply-stops`, `bth.toilet-secure`, `wet.surround-moisture` are all
+zone items that would read better as component items on the fixture they describe).
+
+Recommend: add `toilet`, `sink`, `shower-tub`, and consider `faucet` folded into `sink`
+rather than split. Worth deciding whether the existing wet-zone items *move* onto the new
+components or stay duplicated at zone level — moving is cleaner but changes zone lists.
+
+### 11.2 Whole-unit photo items — the `.unit` gap (carried from §9, now measured)
+
+Only **4 of 36** component types with items carry a whole-unit/wide photo (`electrical-panel`,
+`water-main`, `gas-shutoff`, `fuel-tank`). **10** carry a nameplate photo. **32 have no
+whole-object capture at all.**
+
+Whole-unit shots are what make year-over-year condition comparison possible, and a photo not
+taken cannot be retrofitted — every visit without them is a permanently missing baseline.
+
+Scope it to equipment plus anything whose condition visibly changes (deck, chimney, retaining
+wall, dryer duct); a `window`, `door`, `tree` or `register` does not need one. A blanket
+`.unit` on all 36 would be noise, and noise in the checklist is the thing the field test
+already complained about.
+
+### 11.3 Nickname — owner asks whether it still earns its place
+
+With component types carrying the identity, the free-text nickname may be redundant. Owner's
+call is to **legacy it for now** and watch. No change requested; recorded so the question
+isn't lost. Note that 11.1 is likely the real cause: nicknames were doing the work missing
+component types should have been doing.

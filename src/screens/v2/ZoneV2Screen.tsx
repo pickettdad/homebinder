@@ -5,12 +5,13 @@ import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { auditSnapshot, deriveZoneAudit } from "../../engine/v2/checklist";
 import { ChecklistPanel } from "./ChecklistPanel";
 import { MediaThumb, MediaViewer, PinRow, Thumb } from "./shared";
+import { AttachFromInbox } from "./AttachFromInbox";
 
 /** A zone during the walk: canvases, pins, advisory close. Checklist panel lands in step 4. */
 export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   const {
     v2Session, v2Config, navigate, createPin, addCanvas, capturePhotoV2,
-    closeZoneV2, reopenZoneV2, showToast,
+    closeZoneV2, reopenZoneV2, reassignMedia, showToast,
   } = useApp();
   const [closeSheet, setCloseSheet] = useState(false);
   const [closeNote, setCloseNote] = useState("");
@@ -19,6 +20,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   const [busy, setBusy] = useState(false);
   /** Zone capture opened full-size. */
   const [viewerId, setViewerId] = useState<string | null>(null);
+  const [attaching, setAttaching] = useState(false);
 
   const zone = v2Session?.zones.find((z) => z.zoneId === zoneId);
   if (!v2Session || !v2Config || !zone) return null;
@@ -157,6 +159,9 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
               >
                 Add video
               </VideoInput>
+              <BigButton variant="secondary" onClick={() => setAttaching(true)}>
+                From inbox
+              </BigButton>
             </div>
           )}
         </div>
@@ -183,18 +188,48 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
 
       <Sheet open={viewerId !== null} onClose={() => setViewerId(null)} title="Zone capture">
         {viewerId && (
-          <div className="flex flex-col gap-3">
+          <div className="flex max-h-[75dvh] flex-col gap-3 overflow-y-auto">
             <MediaViewer
               mediaId={viewerId}
               mime={zone.photos.find((p) => p.mediaId === viewerId)?.mime ?? "image/jpeg"}
-              className="max-h-[60dvh] w-full rounded-xl object-contain"
+              className="max-h-[50dvh] w-full rounded-xl object-contain"
             />
-            <p className="text-xs text-slate-500">
-              Captured in this zone. To move it onto a pin, open Captures and pick this zone's tab.
-            </p>
+            {/* Filing lives HERE, not behind a trip to Captures: the field test could view a
+                zone capture but not act on it, which made viewing a dead end. */}
+            {!locked &&
+              (pins.length > 0 ? (
+                <section className="flex flex-col gap-2">
+                  <h3 className="text-sm font-semibold text-slate-400">Move onto a pin</h3>
+                  {pins.map((p) => (
+                    <PinRow
+                      key={p.pinId}
+                      pin={p}
+                      onClick={() =>
+                        void reassignMedia(viewerId, { kind: "pin", id: p.pinId })
+                          .then(() => {
+                            setViewerId(null);
+                            showToast(`Moved to pin #${p.number}`);
+                          })
+                          .catch((err) => showToast(err instanceof Error ? err.message : "Could not move"))
+                      }
+                    />
+                  ))}
+                </section>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  No pins in this zone yet — create one and this capture can be moved onto it.
+                </p>
+              ))}
           </div>
         )}
       </Sheet>
+
+      <AttachFromInbox
+        open={attaching}
+        onClose={() => setAttaching(false)}
+        target={{ kind: "zone", id: zoneId }}
+        label={zone.label}
+      />
 
       <Sheet open={closeSheet} onClose={() => setCloseSheet(false)} title={`Close ${zone.label}`}>
         <div className="flex flex-col gap-3">

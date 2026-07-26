@@ -28,12 +28,36 @@ export function Thumb({ mediaId, className }: { mediaId: string; className?: str
  * the grid. `preload="metadata"` renders the poster frame without pulling the whole file —
  * an inspection video can be hundreds of MB and a zone grid may hold several.
  */
+/**
+ * iOS Safari paints NOTHING from `preload="metadata"` on a blob URL — the field test saw
+ * pure black rectangles with a play badge and no way to tell one clip from another. Nudging
+ * `currentTime` off zero forces the first frame to decode and render as a poster. This is
+ * the whole fix; there is no poster attribute that works for local blobs.
+ */
+const posterNudge = (e: { currentTarget: HTMLVideoElement }) => {
+  const v = e.currentTarget;
+  if (v.currentTime === 0) {
+    try {
+      v.currentTime = 0.1;
+    } catch {
+      /* seeking can throw before the buffer exists; the play badge still identifies it */
+    }
+  }
+};
+
 export function VideoThumb(props: { mediaId: string; durationMs?: number; className?: string }) {
   const url = useMediaUrl(props.mediaId);
   if (!url) return <div className={`animate-pulse bg-slate-700 ${props.className ?? ""}`} />;
   return (
     <span className={`relative block ${props.className ?? ""}`}>
-      <video src={url} preload="metadata" muted playsInline className="h-full w-full object-cover" />
+      <video
+        src={url}
+        preload="metadata"
+        muted
+        playsInline
+        onLoadedMetadata={posterNudge}
+        className="h-full w-full bg-slate-900 object-cover"
+      />
       <span className="absolute inset-0 flex items-center justify-center text-2xl drop-shadow">▶</span>
       {props.durationMs !== undefined && (
         <span className="absolute bottom-0.5 right-0.5 rounded bg-slate-950/80 px-1 text-[10px] text-slate-200">
@@ -48,7 +72,8 @@ export function VideoThumb(props: { mediaId: string; durationMs?: number; classN
 export function MediaViewer({ mediaId, mime, className }: { mediaId: string; mime: string; className?: string }) {
   const url = useMediaUrl(mediaId);
   if (!url) return <div className={`animate-pulse bg-slate-700 ${className ?? ""}`} />;
-  if (mime.startsWith("video")) return <video src={url} controls playsInline className={className} />;
+  if (mime.startsWith("video"))
+    return <video src={url} controls playsInline preload="metadata" onLoadedMetadata={posterNudge} className={className} />;
   if (mime.startsWith("audio")) return <audio src={url} controls className="w-full" />;
   return <img src={url} alt="" className={className} />;
 }

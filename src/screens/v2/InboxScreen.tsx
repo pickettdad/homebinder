@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet, formatDuration } from "../../ui/bits";
 import type { MediaRef } from "../../engine/v2/fold";
-import { MediaThumb, PinRow } from "./shared";
+import { MediaThumb, MediaViewer, PinRow } from "./shared";
 
 /** Session inbox: shoot first, file when hands are free. Everything is retaggable. */
 export function InboxScreen() {
@@ -165,7 +165,14 @@ export function InboxScreen() {
         {assigning && (
           <div className="flex max-h-[70dvh] flex-col gap-4 overflow-y-auto">
             {!assigning.mime.startsWith("audio") && (
-              <MediaThumb mediaId={assigning.mediaId} mime={assigning.mime} className="h-40 w-full rounded-xl" />
+              // MediaViewer, not MediaThumb: the filing sheet is where you decide WHERE a
+              // capture goes, so it has to be viewable — the field test hit a black square
+              // with a play button and no way to tell what it was.
+              <MediaViewer
+                mediaId={assigning.mediaId}
+                mime={assigning.mime}
+                className="max-h-[45dvh] w-full rounded-xl object-contain"
+              />
             )}
             <div className="flex gap-2">
               <textarea

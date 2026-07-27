@@ -4,6 +4,7 @@ import { useApp } from "../../store/sessionStore";
 import { useMediaUrl } from "../../ui/useMediaUrl";
 import { BigButton, formatDuration } from "../../ui/bits";
 import type { PinFlag, PinTypeRef } from "../../engine/v2/events";
+import { normalizeAlias, type ComponentAlias } from "../../engine/schema/checklistConfig";
 import type { PinStateV2 } from "../../engine/v2/fold";
 
 /**
@@ -129,18 +130,35 @@ export function PinBadge({ number }: { number: number }) {
  */
 export function TypePicker({
   choices,
+  aliases,
   current,
   onPick,
 }: {
   /** Prior-ordered component types (suggestedPinTypes). */
   choices: string[];
+  /** Table E search synonyms (master v1.5) — never types, only ways to find one. */
+  aliases?: ComponentAlias[];
   current?: PinTypeRef;
   onPick: (pinType: PinTypeRef) => void;
 }) {
   const [query, setQuery] = useState("");
-  const q = query.trim().toLowerCase();
-  const matches = q ? choices.filter((t) => t.includes(q)) : choices.slice(0, 8);
-  const exact = q !== "" && choices.includes(q);
+  // Normalise the query the same way aliases and type names are normalised, so "heat pump",
+  // "heat-pump" and "Heat Pump" are one search.
+  const q = normalizeAlias(query);
+  // Alias hits fold into the same result list: searching "air conditioner" must surface
+  // heat-pump, because finding nothing is what drives a freeform entry — and freeform
+  // entries are the telemetry the taxonomy work depends on staying clean (master v1.5 §E).
+  const aliasHitByType = new Map<string, string>();
+  if (q) {
+    for (const a of aliases ?? []) {
+      const key = normalizeAlias(a.alias);
+      if (key.includes(q) && choices.includes(a.type) && !aliasHitByType.has(a.type))
+        aliasHitByType.set(a.type, a.alias);
+    }
+  }
+  const direct = q ? choices.filter((t) => normalizeAlias(t).includes(q)) : choices.slice(0, 8);
+  const matches = q ? [...new Set([...direct, ...aliasHitByType.keys()])] : direct;
+  const exact = q !== "" && choices.some((t) => normalizeAlias(t) === q);
 
   return (
     <div className="flex flex-col gap-3">
@@ -164,6 +182,11 @@ export function TypePicker({
             }`}
           >
             {t}
+            {/* Name the synonym that matched: the concierge typed "air conditioner" and got
+                a row called heat-pump, which is confusing without saying why. */}
+            {aliasHitByType.has(t) && !normalizeAlias(t).includes(q) && (
+              <span className="ml-2 text-xs font-normal opacity-70">matched “{aliasHitByType.get(t)}”</span>
+            )}
           </button>
         ))}
         {q === "" && choices.length > 8 && (

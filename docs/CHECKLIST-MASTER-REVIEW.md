@@ -703,3 +703,60 @@ sides believed v1.4 was live. Recovered by cherry-pick; v1.4 and v1.4.1 ship tog
 
 Worth a habit on both sides: a PR that gains commits after review needs a fresh look at the
 head SHA before merging, since GitHub merges what the button saw.
+
+---
+
+## 14. v1.5 intake adjudication (2026-07-27)
+
+**Accepted as authored.** The framing is the valuable part: six of the eight dry-run gaps
+were not scattered misses but one hole — the library could not populate Master Spec §1, the
+emergency shutoff map. Making §1 the master's acceptance test is the right structural move,
+and the pin-vs-item rule (*does the thing need its own position on the map?*) is teachable in
+a way that "use judgement" is not.
+
+Landed: 5 new component types · 4 new items on existing components · 2 zone items ·
+`wm.curbstop` retired · Table E (30 aliases). **346 → 377 items** (+32, −1). 57 real
+component types + 10 stubs.
+
+### 14.1 Generator bug found by v1.5 — mine, not the master's
+
+Generation failed on `duplicate component type: solar-inverter` (and two more). The master
+was **correct**: the Stubs line properly lists only the ten remaining stubs, and the three
+promoted types appear as real sections. The fault was in my stubs parser, which treated
+*every* backticked token in the stubs section as a stub id — including the new explanatory
+prose beneath the list ("*Three stubs filled in v1.5 (`solar-inverter`, …)*"), re-registering
+them on top of their real sections.
+
+Fixed: a line registers stubs only if nothing but ids and separators remains once the
+backticked ids are stripped. Prose has words outside the ticks and is skipped. The fail-closed
+design did its job — a silently-doubled type would have been much worse than a build error.
+
+### 14.2 G7 recurred inside its own fix — caught by test
+
+Table E authors the alias as `air-conditioner`, in id style. A concierge types
+**"air conditioner"**, with a space, and finds nothing — which is precisely the failure the
+alias exists to prevent, reintroduced one layer down.
+
+Fixed in code rather than by doubling every row: `normalizeAlias` now treats hyphens,
+underscores and whitespace as one separator, and the picker normalises the query, the alias
+and the type name through it. So "air conditioner", "air-conditioner" and "AC" are one
+search — and "heat pump" now finds `heat-pump` directly, which it previously did not.
+
+This is worth remembering when authoring Table E: **aliases are typed by humans, so author
+them the way a person speaks, not the way an id looks.** The normaliser now covers the
+separator case; it cannot cover a genuinely different word.
+
+### 14.3 Aliases in the picker
+
+`TypePicker` folds alias hits into the same result list and labels them — *heat-pump ·
+matched "air conditioner"* — because a search for one word returning a differently-named row
+is confusing without saying why. Aliases stay out of `componentLists`, out of the manifest,
+and carry no items, exactly as authored; tests assert all three.
+
+### 14.4 Cosmetic defects in v1.5, for the next version (no action taken)
+
+Left verbatim per the never-edited-downstream rule; none affects generation:
+1. The header carries **two** "Authored from:" lines — a stale `v1.3.1` above the correct
+   `v1.4.1`. Worth deleting, since that line exists specifically to prevent version confusion.
+2. §0 is still titled "(for the generator — **v1.4**)".
+3. §0 still says "Vocabulary tables (**A–D** at end)" — now A–E.

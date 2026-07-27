@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.4.1",
+  "configVersion": "1.5.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -870,6 +870,20 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "group": "Drainage"
         },
         {
+          "id": "utl.septic-alarm",
+          "text": "Septic/sewage-pump alarm panel pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "septic-alarm"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ],
+          "group": "Drainage"
+        },
+        {
           "id": "utl.panel",
           "text": "Main panel pinned; directory photographed",
           "satisfy": "pin",
@@ -1530,6 +1544,24 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "sit.curbstop",
+          "text": "Municipal curb stop pinned if locatable",
+          "satisfy": "pin",
+          "pinTypes": [
+            "curb-stop"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ],
+          "trigger": {
+            "anyOf": [
+              "property.municipal_water"
+            ]
+          }
+        },
+        {
           "id": "sit.wellhead",
           "text": "Wellhead pinned: cap, grade, separations",
           "satisfy": "pin",
@@ -1776,6 +1808,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "wh.shutoff",
+          "text": "Water shutoff **and** fuel/power isolation located and photographed",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "wh.pan",
           "text": "Drain pan / location risk assessed",
           "satisfy": "check",
@@ -1958,6 +2000,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         {
           "id": "blr.venting",
           "text": "Venting condition",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "blr.switch",
+          "text": "Emergency switch and fuel shutoff located",
           "satisfy": "check",
           "tier": "core",
           "attest": "action",
@@ -2294,16 +2346,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "scope": [
             "baseline"
           ]
-        },
-        {
-          "id": "wm.curbstop",
-          "text": "Curb-stop location noted if known",
-          "satisfy": "note",
-          "tier": "standard",
-          "attest": "evidence",
-          "scope": [
-            "baseline"
-          ]
         }
       ]
     },
@@ -2312,6 +2354,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "sump-pump"
       ],
       "items": [
+        {
+          "id": "sp.unit",
+          "text": "Sump located and photographed wide enough to find it",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
         {
           "id": "sp.pit",
           "text": "Pit interior photographed",
@@ -2335,6 +2387,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         {
           "id": "sp.discharge",
           "text": "Discharge route traced to exterior",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sp.breaker",
+          "text": "Sump breaker located",
           "satisfy": "check",
           "tier": "core",
           "attest": "action",
@@ -4575,28 +4637,328 @@ export const checklistsBaseline: ChecklistConfigInput = {
     },
     {
       "types": [
-        "ev-charger"
+        "curb-stop"
       ],
-      "stub": true,
-      "items": []
+      "items": [
+        {
+          "id": "cs.photo",
+          "text": "Located and photographed with a permanent landmark in frame",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "cs.access",
+          "text": "Accessible — not paved over, buried, or obstructed",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "cs.key",
+          "text": "Whether a curb key is required, and where one is",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "septic-alarm"
+      ],
+      "items": [
+        {
+          "id": "sa.photo",
+          "text": "Alarm panel located and photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sa.test",
+          "text": "Alarm tested (test button)",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sa.silence",
+          "text": "Silence/reset control located",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sa.breaker",
+          "text": "Pump breaker located",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sa.meaning",
+          "text": "What the alarm indicates, recorded for the emergency sheet",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
     },
     {
       "types": [
         "solar-inverter"
       ],
-      "stub": true,
-      "items": []
+      "items": [
+        {
+          "id": "sol.unit",
+          "text": "Inverter photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sol.nameplate",
+          "text": "Nameplate photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sol.dc-disconnect",
+          "text": "DC disconnect located",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sol.ac-disconnect",
+          "text": "AC disconnect located",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sol.rapid-shutdown",
+          "text": "Rapid-shutdown device and label present",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sol.storage",
+          "text": "Battery storage present",
+          "satisfy": "choice",
+          "options": [
+            "none",
+            "battery storage present",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "sol.esa",
+          "text": "ESA/inspection documentation noted",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
     },
     {
       "types": [
         "pool-equipment"
       ],
-      "stub": true,
-      "items": []
+      "items": [
+        {
+          "id": "pol.unit",
+          "text": "Equipment pad photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "pol.disconnect",
+          "text": "Electrical disconnect located",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "pol.barrier",
+          "text": "Barrier and self-closing, self-latching gate operate",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "pol.pump",
+          "text": "Pump nameplate photographed",
+          "satisfy": "photo",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "pol.heater",
+          "text": "Heater type",
+          "satisfy": "choice",
+          "options": [
+            "natural gas",
+            "propane",
+            "electric",
+            "heat pump",
+            "none",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "pol.season",
+          "text": "Current seasonal state",
+          "satisfy": "choice",
+          "options": [
+            "open/operating",
+            "closed/winterized",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
     },
     {
       "types": [
         "irrigation-backflow"
+      ],
+      "items": [
+        {
+          "id": "irr.unit",
+          "text": "Backflow device photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "irr.shutoff",
+          "text": "Irrigation shutoff located",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "irr.type",
+          "text": "Device type",
+          "satisfy": "choice",
+          "options": [
+            "RPZ",
+            "double check",
+            "pressure vacuum breaker",
+            "atmospheric vacuum breaker",
+            "none observed",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "irr.test-record",
+          "text": "Last certification/test date if documented",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "irr.blowout",
+          "text": "Winterization/blow-out evidence noted",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "ev-charger"
       ],
       "stub": true,
       "items": []
@@ -4663,6 +5025,128 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "stub": true,
       "items": []
+    }
+  ],
+  "componentAliases": [
+    {
+      "alias": "air-conditioner",
+      "type": "heat-pump"
+    },
+    {
+      "alias": "ac",
+      "type": "heat-pump"
+    },
+    {
+      "alias": "ac-condenser",
+      "type": "heat-pump"
+    },
+    {
+      "alias": "condenser",
+      "type": "heat-pump"
+    },
+    {
+      "alias": "air handler",
+      "type": "furnace"
+    },
+    {
+      "alias": "hot water tank",
+      "type": "water-heater"
+    },
+    {
+      "alias": "hot water heater",
+      "type": "water-heater"
+    },
+    {
+      "alias": "breaker panel",
+      "type": "electrical-panel"
+    },
+    {
+      "alias": "fuse box",
+      "type": "electrical-panel"
+    },
+    {
+      "alias": "service panel",
+      "type": "electrical-panel"
+    },
+    {
+      "alias": "main shutoff",
+      "type": "water-main"
+    },
+    {
+      "alias": "water shutoff",
+      "type": "water-main"
+    },
+    {
+      "alias": "curb valve",
+      "type": "curb-stop"
+    },
+    {
+      "alias": "municipal shutoff",
+      "type": "curb-stop"
+    },
+    {
+      "alias": "stove",
+      "type": "appliance-range"
+    },
+    {
+      "alias": "oven",
+      "type": "appliance-range"
+    },
+    {
+      "alias": "cooktop",
+      "type": "appliance-range"
+    },
+    {
+      "alias": "fridge",
+      "type": "appliance-refrigerator"
+    },
+    {
+      "alias": "exhaust fan",
+      "type": "appliance-range-hood"
+    },
+    {
+      "alias": "softener",
+      "type": "water-softener"
+    },
+    {
+      "alias": "UV",
+      "type": "uv-sterilizer"
+    },
+    {
+      "alias": "RO",
+      "type": "reverse-osmosis"
+    },
+    {
+      "alias": "WC",
+      "type": "toilet"
+    },
+    {
+      "alias": "lavatory",
+      "type": "sink"
+    },
+    {
+      "alias": "vanity",
+      "type": "sink"
+    },
+    {
+      "alias": "tub",
+      "type": "bathtub"
+    },
+    {
+      "alias": "eavestrough",
+      "type": "downspout"
+    },
+    {
+      "alias": "outdoor tap",
+      "type": "hose-bib"
+    },
+    {
+      "alias": "spigot",
+      "type": "hose-bib"
+    },
+    {
+      "alias": "sillcock",
+      "type": "hose-bib"
     }
   ],
   "naReasons": [

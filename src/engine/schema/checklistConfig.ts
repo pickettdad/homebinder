@@ -124,6 +124,35 @@ const componentListSchema = z.object({
 });
 export type ComponentList = z.output<typeof componentListSchema>;
 
+/**
+ * Component alias (master v1.5, Table E) — a SEARCH-ONLY synonym resolving to a canonical
+ * component type. Aliases never create a type, never appear in the manifest, and never carry
+ * items; they exist so a concierge searching "air conditioner" finds `heat-pump` instead of
+ * finding nothing and freeform-entering it — which would manufacture exactly the telemetry
+ * noise the sub-type work removed.
+ *
+ * `alias` is deliberately NOT an id: the authored terms carry spaces and capitals
+ * ("hot water tank", "UV", "WC"). It is display/search text, normalised at match time.
+ */
+const componentAliasSchema = z.object({
+  alias: z.string().min(1),
+  type: idSchema,
+});
+export type ComponentAlias = z.output<typeof componentAliasSchema>;
+
+/**
+ * The single normalisation used for alias and type-name matching: lowercase, and treat
+ * hyphens, underscores and whitespace as one separator.
+ *
+ * The separator collapse is not cosmetic — it is the fix for G7 recurring. Table E authors
+ * `air-conditioner` in id style, but a concierge types "air conditioner" with a space and
+ * would otherwise find nothing, which is the exact failure the alias existed to prevent.
+ * Normalising both sides fixes the whole class in one place instead of doubling every row,
+ * and it also lets "heat pump" match the `heat-pump` type directly.
+ */
+export const normalizeAlias = (s: string): string =>
+  s.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+
 const propertyFlagSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_]*$/, "property flag ids are lowercase snake"),
   label: z.string().min(1),
@@ -175,6 +204,8 @@ const checklistConfigObject = z.object({
   /** Surface only in the session-close audit (review §3.2). */
   sessionItems: z.array(itemSchema),
   componentLists: z.array(componentListSchema).min(1),
+  /** Table E (v1.5). Optional so a pre-v1.5 config still validates. */
+  componentAliases: z.array(componentAliasSchema).default([]),
   naReasons: z.array(naReasonSchema).min(1),
   layers: z.array(layerSchema).min(1),
 });
@@ -196,6 +227,21 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
   for (const b of cfg.baseLists) addUnique(baseListIds, b.id, "base list");
   for (const zt of cfg.zoneTypes) addUnique(zoneTypeIds, zt.id, "zone type");
   for (const c of cfg.componentLists) for (const t of c.types) addUnique(componentTypeIds, t, "component type");
+
+  // Table E aliases (v1.5): must resolve to a real type, must not shadow one, no duplicates.
+  const seenAliases = new Set<string>();
+  // Compare against NORMALISED type ids: `air-conditioner` and "air conditioner" are the
+  // same term, so a raw kebab comparison would miss the collision it exists to catch.
+  const normalizedTypeIds = new Set([...componentTypeIds].map(normalizeAlias));
+  for (const a of cfg.componentAliases) {
+    const key = normalizeAlias(a.alias);
+    if (!componentTypeIds.has(a.type)) issue(`alias "${a.alias}" resolves to unknown component type ${a.type}`);
+    // A shadowing alias is worse than a missing one: searching the real type name would
+    // silently resolve through the alias table instead of matching the type itself.
+    if (normalizedTypeIds.has(key)) issue(`alias "${a.alias}" collides with the component type of the same name`);
+    if (seenAliases.has(key)) issue(`duplicate alias "${a.alias}"`);
+    seenAliases.add(key);
+  }
 
   // Component inheritance: the parent must exist, must carry items, and the chain must
   // terminate. A cycle would hang derivation rather than fail a build, so it fails here.

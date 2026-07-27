@@ -208,13 +208,14 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     zoneLists: [],
     sessionItems: [],
     componentLists: [],
+    componentAliases: [],
     naReasons: [],
     layers: [],
   };
 
   type Section =
     | "none" | "taxonomy" | "base" | "zone" | "session" | "component" | "stubs"
-    | "flags" | "attrs" | "na" | "layers";
+    | "flags" | "attrs" | "na" | "layers" | "aliases";
   let section: Section = "none";
   let currentList: { ids: string[]; note?: string; inherits?: string } | null = null;
   let currentGroup: string | undefined;
@@ -235,6 +236,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
         : /^## B\./.test(line) ? "attrs"
         : /^## C\./.test(line) ? "na"
         : /^## D\./.test(line) ? "layers"
+        : /^## E\./.test(line) ? "aliases"
         : "none";
       currentList = null;
       currentGroup = undefined;
@@ -255,8 +257,17 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     }
 
     if (section === "stubs") {
-      const stubIds = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
-      for (const id of stubIds) cfg.componentLists!.push({ types: [id], stub: true, items: [] });
+      // Only a PURE id list registers stubs. v1.5 added an explanatory note under the stub
+      // line naming the three types it had just promoted out of stubs — and this loop, which
+      // took every backticked token in the section, re-registered them as stubs on top of
+      // their real sections ("duplicate component type"). A line qualifies only if nothing
+      // but ids and separators remains once the backticked ids are removed; prose has words
+      // outside the ticks and is skipped.
+      const residue = line.replace(/`[^`]+`/g, "").replace(/[·,;.\s]/g, "");
+      if (residue === "") {
+        const stubIds = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
+        for (const id of stubIds) cfg.componentLists!.push({ types: [id], stub: true, items: [] });
+      }
       i++;
       continue;
     }
@@ -375,6 +386,19 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
             label: (row.cells[1] ?? "").trim(),
             predicate,
           });
+        }
+      } else if (section === "aliases") {
+        // Table E (v1.5): search-only synonyms. The alias cell is free text — the authored
+        // terms carry spaces and capitals ("hot water tank", "UV") — so it is NOT stripTicks'd
+        // into an id shape; only the target is a backticked component type.
+        if (table.header.join("|") !== "alias|resolves to")
+          throw new MasterParseError(table.line, `unexpected aliases header: ${table.header.join(" | ")}`);
+        for (const row of table.rows) {
+          const alias = (row.cells[0] ?? "").trim();
+          const type = stripTicks(row.cells[1] ?? "");
+          if (!alias) throw new MasterParseError(row.line, "empty alias cell");
+          if (!type) throw new MasterParseError(row.line, `alias '${alias}' resolves to nothing`);
+          cfg.componentAliases!.push({ alias, type });
         }
       } else {
         // Tables in prose sections (§0 dialect examples, changelog) are not config — skip.

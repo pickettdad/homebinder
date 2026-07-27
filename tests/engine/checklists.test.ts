@@ -551,3 +551,93 @@ describe("§1 shutoff map coverage (master v1.5)", () => {
     expect(types.has("curb-stop")).toBe(true);
   });
 });
+
+/**
+ * v1.6.1 dialect support, tested against fixtures because the v1.5.1 master in the repo
+ * does not yet exercise it. Landing the engine ahead of the content keeps the two changes
+ * reviewable apart — the master intake is blocked on one authoring fix (REVIEW §16).
+ */
+describe("v1.6.1 dialect support", () => {
+  /** Swap one section of the real master so the fixture stays otherwise valid. */
+  const withSection = (heading: string, body: string) => {
+    const i = masterText.indexOf(heading);
+    if (i === -1) throw new Error(`fixture anchor missing: ${heading}`);
+    const j = masterText.indexOf("### ", i + 5);
+    return masterText.slice(0, i) + body + masterText.slice(j);
+  };
+
+  it("a base list may span several tables under bold sub-headings", () => {
+    // Before v1.6.1 a base list was one heading = one table; the second table errored with
+    // "item table outside a ### heading". mechanical-base has six.
+    const cfg = parseMaster(
+      withSection(
+        "### `wet-base`",
+        [
+          "### `wet-base`",
+          "",
+          "**Group A**",
+          "| id | text | satisfy | tier | attest |",
+          "|---|---|---|---|---|",
+          "| `wet.under-sink` | A | check | core | action |",
+          "",
+          "**Group B**",
+          "| id | text | satisfy | tier | attest |",
+          "|---|---|---|---|---|",
+          "| `wet.supply-stops` | B | check | standard | action |",
+          "",
+        ].join("\n"),
+      ),
+    );
+    const wet = cfg.baseLists!.find((b) => b.id === "wet-base")!;
+    expect(wet.items.map((i) => i.id)).toEqual(["wet.under-sink", "wet.supply-stops"]);
+    expect(wet.items.map((i) => i.group)).toEqual(["Group A", "Group B"]);
+  });
+
+  it("strips markdown emphasis from id cells", () => {
+    // v1.6.1 authored the new inherits entry as **mechanical-base**; unstripped, thirteen
+    // zone types inherited a base list that did not exist — and the failure was a
+    // validation error three steps from the cause.
+    const cfg = parseMaster(masterText.replace("| `utility` | mechanical room, furnace room | interior-base, rough-base |",
+      "| `utility` | mechanical room, furnace room | **interior-base**, _rough-base_ |"));
+    const utility = cfg.zoneTypes!.find((z) => z.id === "utility")!;
+    expect(utility.inherits).toEqual(["interior-base", "rough-base"]);
+  });
+
+  it("parses Table B's `defaults true for` column, and tolerates its absence", () => {
+    const withCol = masterText
+      .replace("| id | label | askAtCreation |", "| id | label | askAtCreation | defaults true for |")
+      .replace("|---|---|---|\n| `finished` | Finished space | yes |", "|---|---|---|---|\n| `finished` | Finished space | yes | `utility` |")
+      .replace(/^\| `(sleeping|has_stairs)` \| ([^|]+) \| (yes|no)[^|]*\|$/gm, "| `$1` | $2 | $3 | — |")
+      .replace(/^\| `(has_plumbing|exterior_wall)` \| ([^|]+) \| ([^|]+)\|$/gm, "| `$1` | $2 | $3 | — |");
+    const cfg = parseMaster(withCol);
+    const fin = cfg.zoneAttributes!.find((a) => a.id === "finished")!;
+    expect(fin.defaultsTrueFor).toEqual(["utility"]);
+    // The 3-column form still parses — regenerating an older master must not break.
+    const plain = parseMaster(masterText).zoneAttributes!.find((a) => a.id === "finished")!;
+    expect(plain.defaultsTrueFor ?? []).toEqual([]);
+  });
+});
+
+/**
+ * house.* vs pin.* scoping (master v1.6.1 §3). pin.* asks "in THIS ZONE"; house.* asks
+ * "anywhere this visit". Before v1.6.1, pin.* silently answered house-wide at session scope.
+ */
+describe("house.* trigger namespace (master v1.6.1)", () => {
+  it("rejects pin.* on a session item and points at house.*", () => {
+    const cfg = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+    (cfg.sessionItems as { id: string; trigger?: unknown }[])[0]!.trigger = { anyOf: ["pin.sump-pump"] };
+    const result = validateChecklistConfig(cfg);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join("\n")).toMatch(/pin\.\* is zone-only; use house\.sump-pump/);
+  });
+
+  it("accepts house.* anywhere, and rejects an unknown house type", () => {
+    const good = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+    (good.sessionItems as { trigger?: unknown }[])[0]!.trigger = { anyOf: ["house.sump-pump"] };
+    expect(validateChecklistConfig(good).ok).toBe(true);
+
+    const bad = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+    (bad.sessionItems as { trigger?: unknown }[])[0]!.trigger = { anyOf: ["house.no-such-thing"] };
+    expect(validateChecklistConfig(bad).ok).toBe(false);
+  });
+});

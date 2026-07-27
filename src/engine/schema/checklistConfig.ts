@@ -36,10 +36,18 @@ const scopeSchema = z
   .regex(/^(baseline|monthly|seasonal:(spring|summer|fall|winter))$/, "unknown scope tag");
 export type ScopeTag = z.output<typeof scopeSchema>;
 
-/** Trigger refs are namespaced: property.<flag> · zone.<attribute> · pin.<component-type> */
+/**
+ * Trigger refs are namespaced: property.<flag> · zone.<attribute> · pin.<type> · house.<type>
+ *
+ * `pin.*` and `house.*` are deliberately NOT the same question (master v1.6.1 §3):
+ * `pin.foo` = a pin of that type exists IN THIS ZONE · `house.foo` = anywhere this visit.
+ * Before v1.6.1 `pin.*` silently meant house-wide when evaluated at session scope, so one
+ * namespace meant two things depending on where it was read. `pin.*` is now zone-only and
+ * rejected at session scope; nothing used it there, so the restriction was free to take.
+ */
 const triggerRefSchema = z
   .string()
-  .regex(/^(property|zone|pin)\.[a-z0-9][a-z0-9_-]*$/, "trigger refs are property.* / zone.* / pin.*");
+  .regex(/^(property|zone|pin|house)\.[a-z0-9][a-z0-9_-]*$/, "trigger refs are property.* / zone.* / pin.* / house.*");
 
 const whenSchema = z
   .object({
@@ -166,6 +174,13 @@ const zoneAttributeSchema = z.object({
   label: z.string().min(1),
   /** false = derived from pins/observation rather than asked at zone creation. */
   askAtCreation: z.boolean(),
+  /**
+   * Zone types that start with this attribute ON (master v1.6.1 Table B col 4).
+   * `has_mechanicals` defaults true for `utility`. Kept in config rather than app code so
+   * the rule stays data — hardcoding "utility" in the UI is exactly the drift the
+   * config-is-data discipline exists to prevent.
+   */
+  defaultsTrueFor: z.array(idSchema).default([]),
 });
 export type ZoneAttribute = z.output<typeof zoneAttributeSchema>;
 
@@ -228,6 +243,12 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
   for (const zt of cfg.zoneTypes) addUnique(zoneTypeIds, zt.id, "zone type");
   for (const c of cfg.componentLists) for (const t of c.types) addUnique(componentTypeIds, t, "component type");
 
+  // Table B col 4 (v1.6.1): a zone-type default must name a real zone type.
+  const declaredZoneTypes = new Set(cfg.zoneTypes.map((z) => z.id));
+  for (const a of cfg.zoneAttributes)
+    for (const zt of a.defaultsTrueFor)
+      if (!declaredZoneTypes.has(zt)) issue(`zone attribute ${a.id} defaults true for unknown zone type ${zt}`);
+
   // Table E aliases (v1.5): must resolve to a real type, must not shadow one, no duplicates.
   const seenAliases = new Set<string>();
   // Compare against NORMALISED type ids: `air-conditioner` and "air conditioner" are the
@@ -280,7 +301,7 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
   }
 
   const itemIds = new Set<string>();
-  const checkItem = (item: ChecklistItem, where: string) => {
+  const checkItem = (item: ChecklistItem, where: string, atSessionScope = false) => {
     addUnique(itemIds, item.id, "item");
     if (item.satisfy === "pin") {
       if (!item.pinTypes?.length) issue(`${where}: ${item.id} is satisfy:pin but names no pinTypes`);
@@ -309,13 +330,18 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
         if (ns === "property" && !flagIds.has(rest)) issue(`${where}: ${item.id} triggers on unknown property flag ${rest}`);
         if (ns === "zone" && !attrIds.has(rest)) issue(`${where}: ${item.id} triggers on unknown zone attribute ${rest}`);
         if (ns === "pin" && !componentTypeIds.has(rest)) issue(`${where}: ${item.id} triggers on unknown pin type ${rest}`);
+        if (ns === "house" && !componentTypeIds.has(rest)) issue(`${where}: ${item.id} triggers on unknown house pin type ${rest}`);
+        // `pin.*` asks "in THIS ZONE", which has no meaning without a zone. Before v1.6.1 it
+        // silently answered house-wide here — use `house.*` and say so (master v1.6.1 §3).
+        if (ns === "pin" && atSessionScope)
+          issue(`${where}: ${item.id} triggers on ${ref} at session scope — pin.* is zone-only; use house.${rest}`);
       }
     }
   };
 
   for (const b of cfg.baseLists) for (const item of b.items) checkItem(item, `base ${b.id}`);
   for (const zl of cfg.zoneLists) for (const item of zl.items) checkItem(item, `zone ${zl.zoneType}`);
-  for (const item of cfg.sessionItems) checkItem(item, "session");
+  for (const item of cfg.sessionItems) checkItem(item, "session", true);
   for (const c of cfg.componentLists) {
     if (c.stub && c.items.length) issue(`stub component ${c.types.join("/")} carries items`);
     if (!c.stub && !c.items.length) issue(`component ${c.types.join("/")} has no items and is not a stub`);

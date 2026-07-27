@@ -285,6 +285,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
       <Sheet open={typeSheet} onClose={() => setTypeSheet(false)} title={`Type for pin #${pin.number}`}>
         <TypePicker
           choices={typeChoices}
+          aliases={v2Config.componentAliases}
           current={pin.pinType}
           onPick={(pinType) => void setPinType(pinId, pinType).then(() => setTypeSheet(false))}
         />

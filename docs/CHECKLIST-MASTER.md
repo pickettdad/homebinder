@@ -1,8 +1,45 @@
-# HouseSteady Field Assistant — Checklist Master (v1.4.1)
+# HouseSteady Field Assistant — Checklist Master (v1.5)
 
-**Version:** v1.4.1 · **Date:** 2026-07-26 · **Supersedes:** v1.4 (2026-07-26)
+**Version:** v1.5 · **Date:** 2026-07-27 · **Supersedes:** v1.4.1 (2026-07-26)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 **Authored from:** the v1.3.1 repo copy, per the whole-file transfer rule.
+
+
+**Authored from:** the v1.4.1 repo copy, per the whole-file transfer rule.
+
+**Why v1.5 exists — the emergency shutoff map is incomplete.**
+
+The binder session hand-audited the real field export against Master Spec §1 and found eight gaps (G1–G8). Read together they are not eight unrelated misses: **six of the eight are the same hole.** §1 is the shutoff-and-control map — the page a homeowner opens when water is coming through the ceiling — and the library could not populate it. A water heater with no shutoff item, a septic system with no alarm, solar with no disconnect, a pool with no bonding disconnect, irrigation with no shutoff, a curb stop filed as a note on a basement pin.
+
+v1.5 closes §1. Every entry on the Master Spec §1 shutoff list now has somewhere in this library to land.
+
+**Changelog v1.4.1 → v1.5**
+
+*New rule, §2 — the pin-vs-item test (from the G8 diagnosis, adopted as authored):*
+> **Does the thing need its own position on the map? If someone must walk somewhere else to reach it, it is a pin, not an item.**
+
+This is what caught G8: `wm.curbstop` was an item on the interior `water-main` pin, so it inherited a basement position — but the curb stop is at the street. Applied the other way, G1's water-heater shutoff is correctly an *item*: it is on or immediately at the unit, so it shares the unit's position.
+
+*New component types (5):*
+- **`curb-stop`** — G8. A site pin. `wm.curbstop` retires (redefinition, not a move: an item became an entity — per the §2 move-vs-redefine rule the id does not carry over).
+- **`septic-alarm`** — G5. The alarm panel is typically at the house while the lids are in the yard; two positions, two pins.
+- **`solar-inverter`** — G2, stub filled. Carries the DC and AC disconnects §1 needs.
+- **`pool-equipment`** — G3, stub filled. Carries the electrical disconnect and the barrier check.
+- **`irrigation-backflow`** — G4, stub filled. Carries the irrigation shutoff.
+
+*New items on existing components (4):*
+- **`wh.shutoff`** — G1. Water heater water shutoff **and** fuel/power isolation, in one item because the emergency sheet needs both. **The highest-priority single fix in this revision.**
+- **`blr.switch`** — found while closing G1: the boiler had no emergency-switch item though the furnace has `fur.switch`. Same class of gap, same §1 line.
+- **`sp.unit`** — G6 remainder. `sp.pit` photographs the pit interior, which is not a locating shot; §1 needs to find the sump.
+- **`sp.breaker`** — found while closing G6: §1 lists "sump pump breaker and discharge." Discharge was covered by `sp.discharge`; the breaker was not.
+
+*New zone items (2):* `sit.curbstop` (site, municipal-water trigger) · `utl.septic-alarm` (utility, septic trigger).
+
+*New Table E — component aliases.* G7 reported no `air-conditioner` type. There is no missing type — `heat-pump` already serves AC condensers — but a concierge searching "air conditioner" finds nothing, which is a real defect in a type picker. Aliases are search-only synonyms that resolve to a canonical type. They never create a type, never appear in the manifest, and never carry items.
+
+*G6/G7 partial-closure note:* the dry run analysed the pre-v1.4 config (266 items, 48 types). v1.4 had already added `fur.unit` and `wh.unit`, closing most of G6 before it was reported. Only the sump-pump half remained, and it is closed here.
+
+*Carried forward, still open:* guidance text · monthly-scope coherence · seasonal mapping · remaining stubs · binder traceability · apartment/condo parked.
 
 **Why this revision exists — two field findings from the 2-zone TestFlight walk:**
 
@@ -106,6 +143,8 @@ water-treatment ┬── water-softener · sediment-filter
 **Whole-unit photo items (v1.4):** ids ending `.unit` are the object's condition baseline — the whole thing, in place, framed so the same shot can be taken next year. Distinct from `.nameplate` (identity) and from close-ups of specific parts. Across visits these are what make condition comparable. Always `photo` + `evidence`.
 
 **Id lifecycle — move keeps the id, redefine retires it (v1.4.1).** An item that *moves* to a different list but asks the same question, with the same text and the same `attest`, **keeps its id**; the prefix simply goes historical, and ids are opaque (`liv.egress`, `bsm.finished-behind`). An item that is *redefined* — a different question, or a different `attest`, even in the same slot — **retires**, and the replacement takes a new id. A retired id is never reissued for anything else. The reason is record continuity: a resolution recorded against a retired id becoming attached to a differently-meaning item is false continuity, and a stale test result silently vouching for something nobody checked is worse than an honest orphan.
+
+**The pin-vs-item test (v1.5):** **does the thing need its own position on the map?** If someone must walk somewhere else to reach it, it is a **pin**. If it is on or immediately at another object, it is an **item** on that object's list. A curb stop is at the street while the main shutoff is in the basement — two positions, two pins. A water heater's shutoff is on the water heater — one position, so an item. Getting this wrong puts a thing on the emergency map at the wrong address, which is worse than omitting it.
 
 **States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table C, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` and `no-access` N/A land on the visit-two gap list.
 
@@ -223,6 +262,9 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `utl.floor-drain` | Floor drain located, clear, trap primed | pin `floor-drain` | standard | evidence |
 | `utl.backwater` | Backwater valve located or confirmed absent | pin `backwater-valve` | core | evidence |
 | `utl.cleanout` | Sewer cleanout located | pin `cleanout` | standard | evidence |
+| `utl.septic-alarm` | Septic/sewage-pump alarm panel pinned | pin `septic-alarm` | core | evidence |
+
+*`utl.septic-alarm` resolves N/A `none-present` on municipal-sewer properties — a confirmed absence, which is real data. It is not trigger-gated because sewage-ejector alarms exist on municipal systems too.*
 
 **Electrical**
 | id | text | satisfy | tier | attest |
@@ -350,6 +392,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | id | text | satisfy | tier | attest | trigger |
 |---|---|---|---|---|---|
 | `sit.drainage-path` | Where water goes: swales, ditches, culverts | check | core | action | — |
+| `sit.curbstop` | Municipal curb stop pinned if locatable | pin `curb-stop` | standard | evidence | `property.municipal_water` |
 | `sit.wellhead` | Wellhead pinned: cap, grade, separations | pin `wellhead` | core | evidence | `property.well` |
 | `sit.septic` | Septic lids and bed area pinned; surface condition | pin `septic-lid` | core | evidence | `property.septic` |
 | `sit.septic-protection` | Bed area: nothing parked, built, or deep-rooted | check | core | action | `property.septic` |
@@ -382,6 +425,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `wh.tpr` | TPR valve present; discharge piped toward floor | check | core | action |
 | `wh.fittings` | Fittings and base dry; no rust trails | check | core | action |
 | `wh.venting` | Venting condition and connection | check | core | action |
+| `wh.shutoff` | Water shutoff **and** fuel/power isolation located and photographed | check | core | action |
 | `wh.pan` | Drain pan / location risk assessed | check | standard | action |
 | `wh.ownership` | Ownership status | choice (owned\|rented\|unknown) | standard | evidence |
 | `wh.anode` | Anode access noted | note | standard | evidence |
@@ -407,6 +451,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `blr.pressure` | Operating pressure reading recorded | measure (psi) | core | action |
 | `blr.relief` | Relief valve piped | check | core | action |
 | `blr.venting` | Venting condition | check | core | action |
+| `blr.switch` | Emergency switch and fuel shutoff located | check | core | action |
 | `blr.expansion` | Expansion tank condition | check | standard | action |
 | `blr.circulator` | Circulator condition/noise | check | standard | action |
 | `blr.zones` | Zone valves/manifolds noted | note | standard | evidence |
@@ -451,14 +496,17 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `wm.type` | Valve type | choice (ball\|gate\|other\|unknown) | core | evidence |
 | `wm.tag` | Valve tag installed | check | core | action |
 | `wm.operate` | Operated if safe (ball, good condition); flagged if not | check | core | action |
-| `wm.curbstop` | Curb-stop location noted if known | note | standard | evidence |
+
+*`wm.curbstop` retired in v1.5 — the curb stop is at the street, not at this pin. It is now the `curb-stop` component type. Redefinition, not a move: the id does not carry over.*
 
 ### `sump-pump`
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
+| `sp.unit` | Sump located and photographed wide enough to find it | photo | core | evidence |
 | `sp.pit` | Pit interior photographed | photo | core | evidence |
 | `sp.bucket` | Bucket test run — pumps, discharges, shuts off | check | core | action |
 | `sp.discharge` | Discharge route traced to exterior | check | core | action |
+| `sp.breaker` | Sump breaker located | check | core | action |
 | `sp.backup` | Backup pump/battery status | check | core | action |
 | `sp.alarm` | High-water alarm present/tested | check | standard | action |
 | `sp.lid` | Lid condition | check | standard | action |
@@ -825,8 +873,66 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `rw.photo` | Photographed along its run | photo | core | evidence |
 | `rw.lean` | Lean/bulge and drainage weeps assessed | check | core | action |
 
+### `curb-stop`
+| id | text | satisfy | tier | attest |
+|---|---|---|---|---|
+| `cs.photo` | Located and photographed with a permanent landmark in frame | photo | core | evidence |
+| `cs.access` | Accessible — not paved over, buried, or obstructed | check | core | action |
+| `cs.key` | Whether a curb key is required, and where one is | note | standard | evidence |
+
+*The municipal shutoff, at the street. Distinct from `water-main` (the interior valve) because they are in different places and a homeowner in a flood needs the right one. Recording it as "noted if known" on the interior pin — the v1.4.1 arrangement — put it at the wrong address.*
+
+### `septic-alarm`
+| id | text | satisfy | tier | attest |
+|---|---|---|---|---|
+| `sa.photo` | Alarm panel located and photographed | photo | core | evidence |
+| `sa.test` | Alarm tested (test button) | check | core | action |
+| `sa.silence` | Silence/reset control located | check | core | action |
+| `sa.breaker` | Pump breaker located | check | core | action |
+| `sa.meaning` | What the alarm indicates, recorded for the emergency sheet | note | standard | evidence |
+
+*Separate from `septic-lid`: the panel is typically at or in the house, the lids are in the yard. Two positions, two pins — the §2 test.*
+
+### `solar-inverter`
+| id | text | satisfy | tier | attest |
+|---|---|---|---|---|
+| `sol.unit` | Inverter photographed in place | photo | core | evidence |
+| `sol.nameplate` | Nameplate photographed | photo | core | evidence |
+| `sol.dc-disconnect` | DC disconnect located | check | core | action |
+| `sol.ac-disconnect` | AC disconnect located | check | core | action |
+| `sol.rapid-shutdown` | Rapid-shutdown device and label present | check | standard | action |
+| `sol.storage` | Battery storage present | choice (none\|battery storage present\|unknown) | standard | evidence |
+| `sol.esa` | ESA/inspection documentation noted | note | standard | evidence |
+
+*Both disconnects are core because §1 needs them and because a first responder needs them. Solar is the one system where cutting the main does not de-energize everything.*
+
+### `pool-equipment`
+| id | text | satisfy | tier | attest |
+|---|---|---|---|---|
+| `pol.unit` | Equipment pad photographed | photo | core | evidence |
+| `pol.disconnect` | Electrical disconnect located | check | core | action |
+| `pol.barrier` | Barrier and self-closing, self-latching gate operate | check | core | action |
+| `pol.pump` | Pump nameplate photographed | photo | standard | evidence |
+| `pol.heater` | Heater type | choice (natural gas\|propane\|electric\|heat pump\|none\|unknown) | standard | evidence |
+| `pol.season` | Current seasonal state | choice (open/operating\|closed/winterized\|unknown) | standard | evidence |
+
+*`pol.barrier` is core and is `action`: it is a life-safety test, and pool barrier requirements are municipal. **Confirmed present and operating — never assessed as compliant.** Compliance is an inspector's determination.*
+
+### `irrigation-backflow`
+| id | text | satisfy | tier | attest |
+|---|---|---|---|---|
+| `irr.unit` | Backflow device photographed | photo | core | evidence |
+| `irr.shutoff` | Irrigation shutoff located | check | core | action |
+| `irr.type` | Device type | choice (RPZ\|double check\|pressure vacuum breaker\|atmospheric vacuum breaker\|none observed\|unknown) | standard | evidence |
+| `irr.test-record` | Last certification/test date if documented | note | standard | evidence |
+| `irr.blowout` | Winterization/blow-out evidence noted | note | standard | evidence |
+
+*Many jurisdictions require annual backflow certification. We record the date if documented; we never certify.*
+
 ### Stubs (ids reserved; items TBD in a later content pass)
-`ev-charger` · `solar-inverter` · `pool-equipment` · `irrigation-backflow` · `cistern` · `elevator-lift` · `dock` · `outbuilding` · `radon-fan` · `backflow-preventer` · `boiler-zone-valve` · `appliance-freezer` · `iron-filter`
+`ev-charger` · `cistern` · `elevator-lift` · `dock` · `outbuilding` · `radon-fan` · `backflow-preventer` · `boiler-zone-valve` · `appliance-freezer` · `iron-filter`
+
+*Three stubs filled in v1.5 (`solar-inverter`, `pool-equipment`, `irrigation-backflow`) — all three carried a §1 shutoff the library could not record. The remaining ten carry none, which is why they can wait.*
 
 ---
 
@@ -883,6 +989,45 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 
 **⚠ `issues` and `monitor` are scheduled to break.** Both predicates read a pin flag that the Object/Concern model retires. They are **left unchanged here deliberately** — they work today, and rewriting them now would empty two layers for an entity that doesn't exist yet. They must be rewritten in the same pass that lands the concern entity: `issues` becomes "entity = concern", `monitor` becomes "concern severity = monitor". Failing to do so empties both silently, with no error. See §9.4.
 
+## E. Component aliases (v1.5)
+
+Search-only synonyms. An alias resolves to a canonical type in the type picker. **Aliases never create a component type, never appear in the manifest, and never carry items.**
+
+| alias | resolves to |
+|---|---|
+| air-conditioner | `heat-pump` |
+| ac | `heat-pump` |
+| ac-condenser | `heat-pump` |
+| condenser | `heat-pump` |
+| air handler | `furnace` |
+| hot water tank | `water-heater` |
+| hot water heater | `water-heater` |
+| breaker panel | `electrical-panel` |
+| fuse box | `electrical-panel` |
+| service panel | `electrical-panel` |
+| main shutoff | `water-main` |
+| water shutoff | `water-main` |
+| curb valve | `curb-stop` |
+| municipal shutoff | `curb-stop` |
+| stove | `appliance-range` |
+| oven | `appliance-range` |
+| cooktop | `appliance-range` |
+| fridge | `appliance-refrigerator` |
+| exhaust fan | `appliance-range-hood` |
+| softener | `water-softener` |
+| UV | `uv-sterilizer` |
+| RO | `reverse-osmosis` |
+| WC | `toilet` |
+| lavatory | `sink` |
+| vanity | `sink` |
+| tub | `bathtub` |
+| eavestrough | `downspout` |
+| outdoor tap | `hose-bib` |
+| spigot | `hose-bib` |
+| sillcock | `hose-bib` |
+
+*Rationale (G7): the dry run reported "no `air-conditioner` type." There is none because `heat-pump` serves AC condensers — but a concierge who searches "air conditioner" and finds nothing will freeform-enter it, which is precisely the telemetry noise the taxonomy work removed. An alias costs one row and prevents the wrong lesson being learned from the data. **New aliases are cheap; new types are not. When freeform telemetry shows a repeated term, check whether an alias fixes it before adding a type.**
+
 ---
 
 ## 8. Deferred content passes
@@ -902,8 +1047,10 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 3. **Choice vs. multi-select** — everything here is single-select. If a genuine multi case appears, it's a new type, not a widened `choice`.
 4. **Table D layer rewrite** — must land with the concern entity, not before (see Table D note).
 5. **Pin nicknames** — v1.4 removes most of the reason they existed: nicknames were covering for missing component types. Recommend keeping them through the next field walk, then reviewing whether they still earn their place. Don't retire them in the same pass that adds the types, or you remove the workaround and the gap together and can't tell which mattered.
-6. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
+6. **§1 emergency-sheet coverage is now the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+
+7. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
 
 ---
 
-**Status:** v1.4 — 16 new component types (5 plumbing fixtures, 7 appliance sub-types, 4 water-treatment sub-types), component inheritance added to the schema, 14 whole-unit photo items, zone items re-pointed to fixtures, Table D layer break flagged. Generator note: dialect gains heading-declared component inheritance. Expected item count change: roughly +75.
+**Status:** v1.5 — closes Master Spec §1 (the emergency shutoff map) against gaps G1–G8. 5 new component types (3 stubs filled, 2 split out by the pin-vs-item test), 4 new items on existing components, 2 new zone items, 1 item retired (`wm.curbstop`), new Table E aliases, and the pin-vs-item rule written into §2. Generator note: dialect gains Table E parsing (alias → canonical type, search-only, no items). Expected item count change: roughly +35, plus 30 alias rows that are not items.

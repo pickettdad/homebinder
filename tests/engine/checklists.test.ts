@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import { parseMaster, emitModule } from "../../scripts/lib/genChecklists";
 import { componentItemsFor } from "../../src/engine/v2/checklist";
+import { normalizeAlias } from "../../src/engine/schema/checklistConfig";
 import { checklistsBaseline } from "../../src/config/checklists.generated";
 import {
   parseChecklistConfig,
@@ -461,5 +462,83 @@ describe("id stability", () => {
     };
     walk(cfg);
     expect([...counts.entries()].filter(([, n]) => n > 1)).toEqual([]);
+  });
+});
+
+/**
+ * Table E component aliases (master v1.5). Search-only synonyms: they never create a type,
+ * never appear in the manifest, never carry items. Their whole purpose is that a concierge
+ * searching "air conditioner" finds `heat-pump` — because finding NOTHING is what drives a
+ * freeform entry, and freeform entries are the telemetry the taxonomy work depends on.
+ */
+describe("component aliases (master v1.5)", () => {
+  const cfg = validConfig();
+  const types = new Set(cfg.componentLists.flatMap((c) => c.types));
+
+  it("every alias resolves to a real component type", () => {
+    expect(cfg.componentAliases.length).toBeGreaterThan(0);
+    for (const a of cfg.componentAliases)
+      expect(types.has(a.type), `alias "${a.alias}" -> unknown ${a.type}`).toBe(true);
+  });
+
+  it("aliases never become component types themselves", () => {
+    // The manifest and the picker both enumerate componentLists; an alias leaking in as a
+    // type would create a phantom pin type carrying no items.
+    for (const a of cfg.componentAliases)
+      expect(types.has(normalizeAlias(a.alias)), `alias "${a.alias}" leaked in as a type`).toBe(false);
+  });
+
+  it("no duplicate aliases after normalisation", () => {
+    const keys = cfg.componentAliases.map((a) => normalizeAlias(a.alias));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("preserves authored spacing and case rather than forcing an id shape", () => {
+    // "hot water tank" / "UV" / "WC" are search terms, not ids — coercing them to
+    // kebab-case would make them unmatchable against what a person actually types.
+    const raw = cfg.componentAliases.map((a) => a.alias);
+    expect(raw.some((a) => a.includes(" "))).toBe(true);
+    expect(raw.some((a) => a !== a.toLowerCase())).toBe(true);
+  });
+
+  it("resolves G7 — 'air conditioner' finds heat-pump", () => {
+    const q = "air conditioner";
+    const hit = cfg.componentAliases.find((a) => normalizeAlias(a.alias).includes(normalizeAlias(q)));
+    expect(hit?.type).toBe("heat-pump");
+    expect(types.has("air-conditioner")).toBe(false); // no phantom type was added
+  });
+});
+
+/**
+ * Master Spec §1 acceptance (v1.5): every emergency shutoff/control the binder's §1 page
+ * must render has somewhere in the library to land. This is the gap class G1-G8 all shared.
+ */
+describe("§1 shutoff map coverage (master v1.5)", () => {
+  const cfg = validConfig();
+  const ids = new Set<string>();
+  const walk = (o: unknown): void => {
+    if (Array.isArray(o)) return o.forEach(walk);
+    if (o && typeof o === "object") {
+      const r = o as Record<string, unknown>;
+      if (typeof r.id === "string" && typeof r.satisfy === "string") ids.add(r.id);
+      Object.values(r).forEach(walk);
+    }
+  };
+  walk(cfg);
+  const types = new Set(cfg.componentLists.filter((c) => !c.stub).flatMap((c) => c.types));
+
+  it("carries the shutoff items the dry run found missing", () => {
+    for (const id of ["wh.shutoff", "blr.switch", "fur.switch", "sp.breaker", "sp.unit"])
+      expect(ids.has(id), `${id} missing`).toBe(true);
+  });
+
+  it("carries the shutoff-bearing component types as real (non-stub) types", () => {
+    for (const t of ["curb-stop", "septic-alarm", "solar-inverter", "pool-equipment", "irrigation-backflow"])
+      expect(types.has(t), `${t} missing or still a stub`).toBe(true);
+  });
+
+  it("wm.curbstop is retired, not reissued — the curb stop became a pin", () => {
+    expect(ids.has("wm.curbstop")).toBe(false);
+    expect(types.has("curb-stop")).toBe(true);
   });
 });

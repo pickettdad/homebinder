@@ -493,12 +493,21 @@ describe("component aliases (master v1.5)", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("preserves authored spacing and case rather than forcing an id shape", () => {
-    // "hot water tank" / "UV" / "WC" are search terms, not ids — coercing them to
-    // kebab-case would make them unmatchable against what a person actually types.
-    const raw = cfg.componentAliases.map((a) => a.alias);
-    expect(raw.some((a) => a.includes(" "))).toBe(true);
-    expect(raw.some((a) => a !== a.toLowerCase())).toBe(true);
+  it("preserves authored spacing rather than forcing an id shape", () => {
+    // "hot water tank" is a search term, not an id — coercing it to kebab-case would make
+    // it unmatchable against what a person actually types.
+    expect(cfg.componentAliases.some((a) => a.alias.includes(" "))).toBe(true);
+  });
+
+  it("no alias is authored in id style — the rule G7 recurrence earned", () => {
+    // v1.5 authored `air-conditioner`, so typing "air conditioner" with a space STILL found
+    // nothing — G7 reappearing inside its own fix. normalizeAlias now makes hyphen and space
+    // equivalent at match time, so a kebab alias would still work; this guards the authoring
+    // rule the master states (v1.5.1 §E): write aliases the way a person speaks, not the way
+    // an id looks. A kebab alias is a signal someone was thinking in ids again, and the next
+    // one may differ by a whole word — which no normaliser can reach.
+    const kebab = cfg.componentAliases.filter((a) => /^[a-z0-9]+(-[a-z0-9]+)+$/.test(a.alias));
+    expect(kebab.map((a) => a.alias), "aliases authored id-style").toEqual([]);
   });
 
   it("resolves G7 — 'air conditioner' finds heat-pump", () => {

@@ -1,11 +1,17 @@
-# HouseSteady Field Assistant — Checklist Master (v1.5)
+# HouseSteady Field Assistant — Checklist Master (v1.5.1)
 
-**Version:** v1.5 · **Date:** 2026-07-27 · **Supersedes:** v1.4.1 (2026-07-26)
+**Version:** v1.5.1 · **Date:** 2026-07-27 · **Supersedes:** v1.5 (2026-07-27)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
-**Authored from:** the v1.3.1 repo copy, per the whole-file transfer rule.
 
 
-**Authored from:** the v1.4.1 repo copy, per the whole-file transfer rule.
+**Authored from:** the v1.5 repo copy returned by the field session, per the whole-file transfer rule.
+
+
+**Changelog v1.5 → v1.5.1** (housekeeping + alias content, applied 2026-07-27):
+- **Removed a duplicate `Authored from:` line.** v1.5 carried both a stale `v1.3.1` (inherited from v1.4) and the correct `v1.4.1`. That field exists to prevent version confusion, so contradicting itself is the one defect it cannot have. Authoring by script caused it.
+- §0 title and vocabulary-table range corrected (`A–D` → `A–E`).
+- **Table E authoring rule added, and 24 aliases rewritten or added.** Prompted by a defect the field session found *inside v1.5's own fix*: `air-conditioner` was authored id-style, so a person typing "air conditioner" with a space still found nothing — the exact failure G7 reported, reappearing one layer down. Separators are now solved in code (hyphen, underscore and space normalize to one thing); what code cannot solve is a **genuinely different word**, which is what the new rows address.
+
 
 **Why v1.5 exists — the emergency shutoff map is incomplete.**
 
@@ -76,7 +82,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.4)
+## 0. Table dialect (for the generator — v1.5.1)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
@@ -86,7 +92,7 @@ Both are the same defect: the library was built from mechanical systems outward 
   - measure units in parens — `measure (psi)`, `measure (year)`
   - choice options in parens, pipe-separated — `choice (ball|gate|other|unknown)`
 - **Trigger cells:** `|` means anyOf; ids after the first inherit the prefix of the first (`property.gas|propane` ⇒ `property.gas` OR `property.propane`).
-- Vocabulary tables (A–D at end): columns as declared per table.
+- Vocabulary tables (A–E at end): columns as declared per table. **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
 - Malformed rows fail closed.
 
 ---
@@ -989,19 +995,24 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 
 **⚠ `issues` and `monitor` are scheduled to break.** Both predicates read a pin flag that the Object/Concern model retires. They are **left unchanged here deliberately** — they work today, and rewriting them now would empty two layers for an entity that doesn't exist yet. They must be rewritten in the same pass that lands the concern entity: `issues` becomes "entity = concern", `monitor` becomes "concern severity = monitor". Failing to do so empties both silently, with no error. See §9.4.
 
-## E. Component aliases (v1.5)
+## E. Component aliases (v1.5, expanded v1.5.1)
 
 Search-only synonyms. An alias resolves to a canonical type in the type picker. **Aliases never create a component type, never appear in the manifest, and never carry items.**
 
+**Authoring rule (v1.5.1) — write the alias the way a person says it out loud, not the way an id looks.** Separators are handled in code: hyphen, underscore and space all normalize to the same thing, so `heat-pump` is found by "heat pump" without an alias row. What code cannot do is guess a **different word** — "gutter" will never resolve to `downspout`, and "smoke detector" will never resolve to `smoke-alarm`, however the separators are treated. Those are the rows worth writing. Capitals and punctuation are also normalized, so `A/C` and `a/c` need only one row.
+
+*This rule was earned: v1.5 authored `air-conditioner` in id style, so the one thing G7 asked for — that typing "air conditioner" finds something — still failed. The fix that recreates the bug it fixes is worth a written rule.*
+
 | alias | resolves to |
 |---|---|
-| air-conditioner | `heat-pump` |
-| ac | `heat-pump` |
-| ac-condenser | `heat-pump` |
+| air conditioner | `heat-pump` |
+| a/c | `heat-pump` |
+| ac condenser | `heat-pump` |
 | condenser | `heat-pump` |
 | air handler | `furnace` |
 | hot water tank | `water-heater` |
 | hot water heater | `water-heater` |
+| hwt | `water-heater` |
 | breaker panel | `electrical-panel` |
 | fuse box | `electrical-panel` |
 | service panel | `electrical-panel` |
@@ -1009,24 +1020,49 @@ Search-only synonyms. An alias resolves to a canonical type in the type picker. 
 | water shutoff | `water-main` |
 | curb valve | `curb-stop` |
 | municipal shutoff | `curb-stop` |
+| smoke detector | `smoke-alarm` |
+| carbon monoxide detector | `co-alarm` |
+| co detector | `co-alarm` |
+| outlet | `receptacle-gfci` |
+| plug | `receptacle-gfci` |
+| gfi | `receptacle-gfci` |
+| gutter | `downspout` |
+| eavestrough | `downspout` |
+| outdoor tap | `hose-bib` |
+| garden tap | `hose-bib` |
+| spigot | `hose-bib` |
+| sillcock | `hose-bib` |
+| propane tank | `fuel-tank` |
+| oil tank | `fuel-tank` |
+| septic tank | `septic-lid` |
+| sprinkler | `irrigation-backflow` |
+| sprinkler system | `irrigation-backflow` |
+| hot tub | `pool-equipment` |
+| spa | `pool-equipment` |
+| solar panel | `solar-inverter` |
+| pv | `solar-inverter` |
+| genset | `generator` |
+| transfer switch | `generator` |
 | stove | `appliance-range` |
 | oven | `appliance-range` |
 | cooktop | `appliance-range` |
 | fridge | `appliance-refrigerator` |
+| washing machine | `appliance-washer` |
 | exhaust fan | `appliance-range-hood` |
+| hood fan | `appliance-range-hood` |
 | softener | `water-softener` |
-| UV | `uv-sterilizer` |
-| RO | `reverse-osmosis` |
-| WC | `toilet` |
+| uv | `uv-sterilizer` |
+| ro | `reverse-osmosis` |
+| wc | `toilet` |
+| commode | `toilet` |
 | lavatory | `sink` |
 | vanity | `sink` |
+| basin | `sink` |
 | tub | `bathtub` |
-| eavestrough | `downspout` |
-| outdoor tap | `hose-bib` |
-| spigot | `hose-bib` |
-| sillcock | `hose-bib` |
+| porch | `deck` |
+| flue | `chimney` |
 
-*Rationale (G7): the dry run reported "no `air-conditioner` type." There is none because `heat-pump` serves AC condensers — but a concierge who searches "air conditioner" and finds nothing will freeform-enter it, which is precisely the telemetry noise the taxonomy work removed. An alias costs one row and prevents the wrong lesson being learned from the data. **New aliases are cheap; new types are not. When freeform telemetry shows a repeated term, check whether an alias fixes it before adding a type.**
+*New aliases are cheap; new types are not. **When freeform telemetry shows a repeated term, check whether an alias fixes it before adding a type** — a type carries items, appears in the manifest, and becomes a permanent vocabulary commitment. An alias is one row.*
 
 ---
 

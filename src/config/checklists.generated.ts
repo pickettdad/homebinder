@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.5.0",
+  "configVersion": "1.5.1",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -5029,15 +5029,15 @@ export const checklistsBaseline: ChecklistConfigInput = {
   ],
   "componentAliases": [
     {
-      "alias": "air-conditioner",
+      "alias": "air conditioner",
       "type": "heat-pump"
     },
     {
-      "alias": "ac",
+      "alias": "a/c",
       "type": "heat-pump"
     },
     {
-      "alias": "ac-condenser",
+      "alias": "ac condenser",
       "type": "heat-pump"
     },
     {
@@ -5054,6 +5054,10 @@ export const checklistsBaseline: ChecklistConfigInput = {
     },
     {
       "alias": "hot water heater",
+      "type": "water-heater"
+    },
+    {
+      "alias": "hwt",
       "type": "water-heater"
     },
     {
@@ -5085,6 +5089,98 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "type": "curb-stop"
     },
     {
+      "alias": "smoke detector",
+      "type": "smoke-alarm"
+    },
+    {
+      "alias": "carbon monoxide detector",
+      "type": "co-alarm"
+    },
+    {
+      "alias": "co detector",
+      "type": "co-alarm"
+    },
+    {
+      "alias": "outlet",
+      "type": "receptacle-gfci"
+    },
+    {
+      "alias": "plug",
+      "type": "receptacle-gfci"
+    },
+    {
+      "alias": "gfi",
+      "type": "receptacle-gfci"
+    },
+    {
+      "alias": "gutter",
+      "type": "downspout"
+    },
+    {
+      "alias": "eavestrough",
+      "type": "downspout"
+    },
+    {
+      "alias": "outdoor tap",
+      "type": "hose-bib"
+    },
+    {
+      "alias": "garden tap",
+      "type": "hose-bib"
+    },
+    {
+      "alias": "spigot",
+      "type": "hose-bib"
+    },
+    {
+      "alias": "sillcock",
+      "type": "hose-bib"
+    },
+    {
+      "alias": "propane tank",
+      "type": "fuel-tank"
+    },
+    {
+      "alias": "oil tank",
+      "type": "fuel-tank"
+    },
+    {
+      "alias": "septic tank",
+      "type": "septic-lid"
+    },
+    {
+      "alias": "sprinkler",
+      "type": "irrigation-backflow"
+    },
+    {
+      "alias": "sprinkler system",
+      "type": "irrigation-backflow"
+    },
+    {
+      "alias": "hot tub",
+      "type": "pool-equipment"
+    },
+    {
+      "alias": "spa",
+      "type": "pool-equipment"
+    },
+    {
+      "alias": "solar panel",
+      "type": "solar-inverter"
+    },
+    {
+      "alias": "pv",
+      "type": "solar-inverter"
+    },
+    {
+      "alias": "genset",
+      "type": "generator"
+    },
+    {
+      "alias": "transfer switch",
+      "type": "generator"
+    },
+    {
       "alias": "stove",
       "type": "appliance-range"
     },
@@ -5101,7 +5197,15 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "type": "appliance-refrigerator"
     },
     {
+      "alias": "washing machine",
+      "type": "appliance-washer"
+    },
+    {
       "alias": "exhaust fan",
+      "type": "appliance-range-hood"
+    },
+    {
+      "alias": "hood fan",
       "type": "appliance-range-hood"
     },
     {
@@ -5109,15 +5213,19 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "type": "water-softener"
     },
     {
-      "alias": "UV",
+      "alias": "uv",
       "type": "uv-sterilizer"
     },
     {
-      "alias": "RO",
+      "alias": "ro",
       "type": "reverse-osmosis"
     },
     {
-      "alias": "WC",
+      "alias": "wc",
+      "type": "toilet"
+    },
+    {
+      "alias": "commode",
       "type": "toilet"
     },
     {
@@ -5129,24 +5237,20 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "type": "sink"
     },
     {
+      "alias": "basin",
+      "type": "sink"
+    },
+    {
       "alias": "tub",
       "type": "bathtub"
     },
     {
-      "alias": "eavestrough",
-      "type": "downspout"
+      "alias": "porch",
+      "type": "deck"
     },
     {
-      "alias": "outdoor tap",
-      "type": "hose-bib"
-    },
-    {
-      "alias": "spigot",
-      "type": "hose-bib"
-    },
-    {
-      "alias": "sillcock",
-      "type": "hose-bib"
+      "alias": "flue",
+      "type": "chimney"
     }
   ],
   "naReasons": [

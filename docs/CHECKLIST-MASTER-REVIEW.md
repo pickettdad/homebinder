@@ -760,3 +760,43 @@ Left verbatim per the never-edited-downstream rule; none affects generation:
    `v1.4.1`. Worth deleting, since that line exists specifically to prevent version confusion.
 2. §0 is still titled "(for the generator — **v1.4**)".
 3. §0 still says "Vocabulary tables (**A–D** at end)" — now A–E.
+
+---
+
+## 15. v1.5.1 intake (2026-07-27)
+
+**Accepted as authored.** Three cosmetic fixes plus the substantive half my §14.2 finding
+actually called for. 377 items unchanged; aliases **30 → 56**.
+
+### 15.1 The alias rewrite is the right response, and it goes further than my fix
+
+My separator normaliser was the correct layer for *spelling* — "air conditioner" vs
+`air-conditioner` vs "AC". It cannot reach a **different word**, and that is where the real
+misses live. v1.5.1 rewrites the table on exactly that principle: `gutter` → downspout ·
+`smoke detector` → smoke-alarm · `carbon monoxide detector` → co-alarm · `outlet`/`plug`/`gfi`
+→ receptacle-gfci · `propane tank`/`oil tank` → fuel-tank · `septic tank` → septic-lid ·
+`sprinkler` → irrigation-backflow · `hot tub`/`spa` → pool-equipment · `washing machine` →
+appliance-washer · `porch` → deck · `flue` → chimney.
+
+Twenty-six words a person would actually say that no normaliser will ever reach. All 56
+verified resolving to real types. The id-style entries are gone — `air-conditioner` is now
+`air conditioner`, which was the whole point.
+
+### 15.2 One of my tests was over-specified — replaced
+
+`preserves authored spacing and case` asserted that *some* alias carries capitals. That was
+never a rule; it was a fact about v1.5's data ("UV", "RO", "WC"). v1.5.1 lowercased the table,
+correctly, and my test failed for no good reason. **A test that pins incidental data rather
+than a rule is a false alarm waiting to happen**, and it cost a build failure here.
+
+Replaced with the rule the master now states: **no alias is authored in id style.** A kebab
+alias would still *work* — `normalizeAlias` makes hyphen and space equivalent at match time —
+but it signals someone thinking in ids again, and the next one may differ by a whole word,
+which no normaliser can reach. Verified by mutating `air conditioner` back to
+`air-conditioner`: the test fails.
+
+### 15.3 The three cosmetic fixes, confirmed
+
+Duplicate `Authored from:` gone (one line, naming v1.5) · §0 retitled v1.5.1 · vocabulary
+tables now "A–E", with the Table E row shape declared in the dialect. All three verified in
+the installed file.

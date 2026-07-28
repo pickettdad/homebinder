@@ -972,3 +972,65 @@ decoration for humans and a hazard for machines.**
 A §0 dialect line — *no markdown emphasis in parsed cells* — belongs in the next pass. Not
 worth a version bump on its own. The `id fidelity` tests defend the specific failure now, so
 it cannot recur silently, but the rule removes the class rather than the instance.
+
+---
+
+## 18. v1.7 / v1.7.1 intake (2026-07-28)
+
+**Accepted.** §10 Governance ratified; four generator-visible changes built; three B5 component
+types land. **401 items** (384 → 401), 70 component lists, 5 declared units, 32 reserved-class
+items. Table G parsed and empty, as authored.
+
+**Confirmation requested and given: the master was untouched during #53/#54/#55.** `git log`
+on `docs/CHECKLIST-MASTER.md` since v1.6.2 landed is empty. v1.7's "authored from v1.6.2" is
+clean.
+
+### 18.1 The new §0 emphasis ban caught its own file on first contact
+
+v1.7 §0 bans markdown emphasis in parsed cells. **v1.7's own §4 carried `**mechanical-base**`
+in all thirteen Inherits cells**, so it could not build:
+
+```
+CHECKLIST-MASTER.md:281: no markdown emphasis in parsed cells (v1.7 §0)
+```
+
+This is the rule working exactly as designed. The generator now **fails closed** rather than
+stripping — and a stripper would have swallowed this silently, precisely as it swallowed the
+underscores in `has_stairs`. Applied as **v1.7.1**: thirteen cells, emphasis removed, values
+otherwise identical.
+
+Emphasis remaining in *label*, *intake source*, *askAtCreation* and Table G prose cells is
+untouched — those are read as free text, never as ids. The ban is on **parsed** cells, and
+scoping it that way is what makes it enforceable rather than a style preference.
+
+### 18.2 My own first attempt at the ban reproduced the bug it bans
+
+Worth recording, because it is the same failure a third time. My first `stripTicks` rewrite
+rejected emphasis only when a line number was passed — and still ran `.replace(/[*_]/g, "")`
+on the other path. So `has_stairs` became `hasstairs` again.
+
+It surfaced only because Table B's ids then failed to resolve against `mechanical-base`'s
+**gate** — again the cross-reference check, not any self-consistency check. Fixed: emphasis is
+rejected unconditionally, and underscores are never touched.
+
+The lesson compounds: *a consistency check cannot catch a transformation applied uniformly*,
+and **a fix for that class must be tested on the class, not on the instance.** I tested that
+the ban rejected emphasis; I did not re-test that ids survived it.
+
+### 18.3 Counts and the §9 question
+
+- **Master untouched during #53–#55** — confirmed by git history.
+- **Five unitless `measure` items, not six**: `int.moisture-suspect`, `rgh.moisture`,
+  `wet.surround-moisture`, `liv.egress`, `sit.measurements`. The five named in §9 are exactly
+  the five that exist; the count "six" is the only slip.
+- Table H's prose says *"Every `measure` item declares its unit inline."* **Five do not** — so
+  that sentence is, today, a structural claim the tables contradict. Not enforced as a rule
+  (it would fail the build on the owner's own open question); recorded here instead. Once §9
+  is answered it becomes enforceable, and **should** be: it is exactly the check Table H was
+  created to make possible.
+
+**The §9 question is not mine to answer.** What a moisture meter reads — %WME, %MC, or a
+relative 0–100 scale — depends on the instrument in the owner's hand, and guessing would
+corrupt the comparison series in the precise way Table H exists to prevent. Routed to the
+owner. `liv.egress` and `sit.measurements` are separate and simpler: both are lengths, and
+`in` is already declared.

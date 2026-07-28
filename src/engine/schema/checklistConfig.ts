@@ -173,6 +173,27 @@ export type ComponentAlias = z.output<typeof componentAliasSchema>;
 export const normalizeAlias = (s: string): string =>
   s.trim().toLowerCase().replace(/[\s_-]+/g, " ");
 
+/** Table G (v1.7) — a retired choice option value and what replaced it. Option values follow
+ *  the item-id lifecycle: never renamed, only retired and replaced. */
+const retiredOptionSchema = z.object({
+  itemId: idSchema,
+  value: z.string().min(1),
+  version: z.string().min(1),
+  replacement: z.string().optional(),
+  reason: z.string().optional(),
+});
+export type RetiredOption = z.output<typeof retiredOptionSchema>;
+
+/** Table H (v1.7) — the CLOSED set of measure units. A unit is part of an item's identity;
+ *  changing it is a breaking change, not a content edit. */
+const measureUnitSchema = z.object({ unit: z.string().min(1), means: z.string().min(1) });
+export type MeasureUnit = z.output<typeof measureUnitSchema>;
+
+/** Reserved item-id suffixes (v1.7 §2) — DECLARED classes, not naming conventions, because
+ *  downstream consumers bind to them. `.unit` = condition baseline · `.wide` = locating photo.
+ *  Both are always photo + evidence. */
+export const RESERVED_ITEM_CLASSES = [".unit", ".wide"] as const;
+
 const propertyFlagSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_]*$/, "property flag ids are lowercase snake"),
   label: z.string().min(1),
@@ -233,6 +254,10 @@ const checklistConfigObject = z.object({
   componentLists: z.array(componentListSchema).min(1),
   /** Table E (v1.5). Optional so a pre-v1.5 config still validates. */
   componentAliases: z.array(componentAliasSchema).default([]),
+  /** Table G (v1.7). Empty until the first option retirement. */
+  retiredOptions: z.array(retiredOptionSchema).default([]),
+  /** Table H (v1.7). Closed set; empty means "not declared" (pre-v1.7 config). */
+  measureUnits: z.array(measureUnitSchema).default([]),
   naReasons: z.array(naReasonSchema).min(1),
   layers: z.array(layerSchema).min(1),
 });
@@ -262,6 +287,25 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
       if (!declaredZoneTypes.has(zt)) issue(`zone attribute ${a.id} defaults true for unknown zone type ${zt}`);
 
   // Table E aliases (v1.5): must resolve to a real type, must not shadow one, no duplicates.
+  // Table G: retirement lineage must reference a real choice item, and a retired value must
+  // NOT still be live — retirement means gone, not deprecated-but-present.
+  const choiceItems = new Map<string, string[]>();
+  const collectChoices = (items: ChecklistItem[]) => {
+    for (const i of items) if (i.satisfy === "choice" && i.options) choiceItems.set(i.id, i.options);
+  };
+  for (const b of cfg.baseLists) collectChoices(b.items);
+  for (const z of cfg.zoneLists) collectChoices(z.items);
+  for (const c of cfg.componentLists) collectChoices(c.items);
+  collectChoices(cfg.sessionItems);
+  for (const r of cfg.retiredOptions) {
+    const live = choiceItems.get(r.itemId);
+    if (!live) issue(`Table G: retired option '${r.value}' names unknown choice item ${r.itemId}`);
+    else if (live.includes(r.value))
+      issue(`Table G: '${r.value}' is listed as retired on ${r.itemId} but is still a live option`);
+    if (r.replacement && live && !live.includes(r.replacement))
+      issue(`Table G: replacement '${r.replacement}' for ${r.itemId} is not a live option`);
+  }
+
   const seenAliases = new Set<string>();
   // Compare against NORMALISED type ids: `air-conditioner` and "air conditioner" are the
   // same term, so a raw kebab comparison would miss the collision it exists to catch.
@@ -337,6 +381,15 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
     }
     if (item.unit && item.satisfy !== "measure")
       issue(`${where}: ${item.id} carries a unit but satisfy is ${item.satisfy}`);
+    // Reserved item classes (v1.7 §2): the builder binds to these suffixes, so they must
+    // mean exactly one thing. A `.unit` that is a check would silently break the condition
+    // baseline the binder renders year over year.
+    for (const suffix of RESERVED_ITEM_CLASSES)
+      if (item.id.endsWith(suffix) && !(item.satisfy === "photo" && item.attest === "evidence"))
+        issue(`${where}: ${item.id} uses the reserved '${suffix}' class but is ${item.satisfy}/${item.attest}, not photo/evidence`);
+    // Table H (v1.7): units are a closed set. Declared units only, once the table exists.
+    if (item.unit && cfg.measureUnits.length && !cfg.measureUnits.some((u) => u.unit === item.unit))
+      issue(`${where}: ${item.id} uses unit '${item.unit}', which Table H does not declare`);
     if (item.satisfy === "choice") {
       const opts = item.options ?? [];
       if (opts.length < 2) issue(`${where}: ${item.id} is satisfy:choice but names fewer than 2 options`);

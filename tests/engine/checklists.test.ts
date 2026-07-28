@@ -814,3 +814,109 @@ describe("zone-type attribute defaults (master v1.6.1 Table B col 4)", () => {
     expect(eff.finished).toBe(false); // explicit → untouched
   });
 });
+
+/**
+ * v1.7 declared structure: Table G (option lifecycle), Table H (closed unit set), and the
+ * `.unit`/`.wide` reserved item classes. All three exist because a downstream consumer binds
+ * to them, so all three are now enforced rather than conventional.
+ */
+describe("v1.7 declared structure", () => {
+  const cfg = validConfig();
+
+  it("Table H is the closed set, and every declared unit is used by a real item", () => {
+    const declared = new Set(cfg.measureUnits.map((u) => u.unit));
+    expect(declared).toEqual(new Set(["in", "psi", "%RH", "year", "mm"]));
+    const used = new Set<string>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (r.satisfy === "measure" && typeof r.unit === "string") used.add(r.unit);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    for (const u of used) expect(declared, `unit '${u}' is not in Table H`).toContain(u);
+  });
+
+  it("rejects a measure unit Table H does not declare", () => {
+    const bad = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+    const item = (bad.baseLists as { items: { unit?: string; satisfy: string }[] }[])
+      .flatMap((b) => b.items)
+      .find((i) => i.satisfy === "measure" && i.unit)!;
+    item.unit = "cm"; // the exact drift Table H exists to prevent: mm on visit one, cm on visit five
+    const r = validateChecklistConfig(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/unit 'cm', which Table H does not declare/);
+  });
+
+  it("reserved .unit / .wide classes are always photo + evidence", () => {
+    const walk = (o: unknown, out: { id: string; satisfy: string; attest: string }[] = []) => {
+      const rec = (x: unknown): void => {
+        if (Array.isArray(x)) return x.forEach(rec);
+        if (x && typeof x === "object") {
+          const r = x as Record<string, unknown>;
+          if (typeof r.id === "string" && typeof r.satisfy === "string")
+            out.push(r as unknown as { id: string; satisfy: string; attest: string });
+          Object.values(r).forEach(rec);
+        }
+      };
+      rec(o);
+      return out;
+    };
+    const reserved = walk(cfg).filter((i) => i.id.endsWith(".unit") || i.id.endsWith(".wide"));
+    expect(reserved.length).toBeGreaterThan(20);
+    for (const i of reserved) {
+      expect(i.satisfy, `${i.id}`).toBe("photo");
+      expect(i.attest, `${i.id}`).toBe("evidence");
+    }
+  });
+
+  it("rejects a .unit item that is not photo/evidence", () => {
+    const bad = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+    const items = (bad.componentLists as { items: { id: string; satisfy: string }[] }[]).flatMap((c) => c.items);
+    const unit = items.find((i) => i.id.endsWith(".unit"))!;
+    unit.satisfy = "check";
+    expect(validateChecklistConfig(bad).ok).toBe(false);
+  });
+
+  it("Table G is empty but parsed, and a retired value may not still be live", () => {
+    expect(cfg.retiredOptions).toEqual([]);
+    const bad = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+    // Claim a still-live option is retired — retirement means gone, not deprecated-in-place.
+    (bad as { retiredOptions: unknown[] }).retiredOptions = [
+      { itemId: "wm.type", value: "ball", version: "v1.8" },
+    ];
+    const r = validateChecklistConfig(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/still a live option/);
+  });
+
+  it("the B5 component types exist so house.* conditions can resolve", () => {
+    const types = new Set(cfg.componentLists.flatMap((c) => c.types));
+    for (const t of ["leak-sensor", "humidifier", "dehumidifier"]) expect(types).toContain(t);
+  });
+});
+
+/**
+ * The v1.7 §0 emphasis ban, enforced by FAILING CLOSED rather than stripping. v1.7 itself
+ * carried `**mechanical-base**` in all thirteen §4 Inherits cells and could not build until
+ * v1.7.1 removed it — the rule catching its own file on first contact.
+ */
+describe("no markdown emphasis in parsed cells (master v1.7 §0)", () => {
+  it("rejects emphasis in an id-bearing cell instead of silently stripping it", () => {
+    const row = "| `utility` | mechanical room, furnace room | interior-base, rough-base, mechanical-base |";
+    expect(masterText).toContain(row); // guard: if §4 is reworded, fail loudly
+    expect(() =>
+      parseMaster(masterText.replace(row, "| `utility` | mechanical room, furnace room | interior-base, rough-base, **mechanical-base** |")),
+    ).toThrow(/no markdown emphasis in parsed cells/);
+  });
+
+  it("leaves snake_case ids alone — the corruption the ban replaces", () => {
+    // The stripper this ban removed ate `_`, renaming has_stairs to hasstairs. Both the id
+    // and every reference were corrupted identically, so nothing downstream disagreed.
+    const cfg = parseMaster(masterText);
+    expect(cfg.zoneAttributes!.map((a) => a.id)).toContain("has_stairs");
+    expect(cfg.zoneAttributes!.map((a) => a.id)).toContain("has_mechanicals");
+  });
+});

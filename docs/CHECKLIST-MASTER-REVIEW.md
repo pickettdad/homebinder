@@ -1193,3 +1193,60 @@ Agreed that it lands more on the authoring side, but it is not only there: I pro
 items *and* their tier without stating their grouping. **Any proposal that adds core items
 states where they render, or it is incomplete** — I will treat that as binding on my
 recommendations, not just on the file.
+
+---
+
+## 22. v1.9 intake — Table I, derived-value provenance (2026-07-28)
+
+**Accepted and installed.** 404 → 406 items. All three change-requests applied:
+`ft.nameplate` (core — it is the source of a core value), `apw.hose-label` (standard), and the
+rule promoted to **Table I**, parser-enforced.
+
+### 22.1 The `wsf.age` warning was right, and it changed the check
+
+The flag — *"it passes by inheritance, which your check would need to resolve"* — is correct
+and was worth stating. It also pushed the check further than the warning asked.
+
+My first implementation tested **global existence**: does `wt.nameplate` exist anywhere in the
+config? `wsf.age` passes that trivially, so the warning would have looked satisfied. But global
+existence is the **wrong check**. Provenance means the photo is captured **on the same pin**;
+a source living on an unrelated component would pass existence and still never be taken.
+
+The check is now **co-visibility with the inheritance chain composed**: the source must be
+reachable from the item's own list, walking `inherits`. Pinned by two tests —
+`wsf.age → wt.nameplate` resolves *because* the chain is walked (`water-softener`'s own list
+does not contain it), and `wh.age → fur.nameplate` is **rejected**: it exists, it is a photo,
+and it is on the wrong object.
+
+### 22.2 The N/A `none-present` semantics are right, and the distinction is the point
+
+*"Where the source resolves N/A `none-present` — no legible date code, no readable plate — the
+derived value is legitimately unverifiable, and recording that is real data."*
+
+Agreed, and it is the same principle as *confirmed absent is a finding*. The failure mode is
+not the unverifiable value; it is the **silently** unverifiable one. A declared "plate
+illegible" is a fact a reviewer can act on. An age with no photograph and no explanation is
+indistinguishable from a verified one, which is precisely what the registry cannot detect.
+
+No code needed today: this is derivation-time behaviour, and `none-present` already carries
+`recordsFinding`. Worth confirming when the registry consumes it that an N/A source is
+propagated alongside the value rather than dropped — otherwise the declaration is lost in
+exactly the layer that needed it.
+
+### 22.3 On the §9.8 sweep — my read, with the items in hand
+
+**`pnl.service` and `pnl.brand` are real.** Both are transcribed from a panel label; the only
+photo on `electrical-panel` is `pnl.wide` (declared a *locating* class, v1.7 §2) and
+`pnl.directory` (the circuit directory, a different artifact). Service size and panel brand are
+both insurance-relevant — a known-issue brand is the reason `pnl.brand` exists — and both are
+currently unverifiable. **Recommend a `pnl.label` photo item and two Table I rows.**
+
+**`wt.consumables` I would leave.** "Consumable size and last change recorded" is part
+transcription (a filter size off a housing) and part testimony (when it was last changed —
+often what the owner says, which no photograph can verify). Table I would half-apply, and a
+provenance row implying the whole value is verifiable would be worse than none. If it is
+split later — size from the artifact, last-change as testimony — the size half earns a row.
+
+**The general test I would apply:** *is there a single artifact a photograph could capture that
+would let someone else reach the same value?* Yes → Table I. Partly, or the value includes
+testimony → do not claim provenance for it.

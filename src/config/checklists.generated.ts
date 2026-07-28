@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.8.0",
+  "configVersion": "1.9.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -3267,6 +3267,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "ft.nameplate",
+          "text": "Data plate photographed legibly",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "ft.type",
           "text": "Tank configuration",
           "satisfy": "choice",
@@ -3285,7 +3295,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
         },
         {
           "id": "ft.age",
-          "text": "Manufacture year from data plate",
+          "text": "Manufacture year from the data plate",
           "satisfy": "measure",
           "unit": "year",
           "tier": "core",
@@ -4598,8 +4608,18 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "apw.hose-label",
+          "text": "Hose date code photographed where legible",
+          "satisfy": "photo",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "apw.hose-age",
-          "text": "Hose year if marked",
+          "text": "Hose year, from the date code",
           "satisfy": "measure",
           "unit": "year",
           "tier": "standard",
@@ -5671,6 +5691,28 @@ export const checklistsBaseline: ChecklistConfigInput = {
     {
       "unit": "in",
       "means": "inches (lengths)"
+    }
+  ],
+  "provenance": [
+    {
+      "itemId": "wh.age",
+      "derivedFrom": "Serial number, manufacturer-decoded",
+      "sourceItemId": "wh.nameplate"
+    },
+    {
+      "itemId": "ft.age",
+      "derivedFrom": "Tank data plate",
+      "sourceItemId": "ft.nameplate"
+    },
+    {
+      "itemId": "apw.hose-age",
+      "derivedFrom": "Hose date code",
+      "sourceItemId": "apw.hose-label"
+    },
+    {
+      "itemId": "wsf.age",
+      "derivedFrom": "Nameplate or unit label",
+      "sourceItemId": "wt.nameplate"
     }
   ],
   "naReasons": [

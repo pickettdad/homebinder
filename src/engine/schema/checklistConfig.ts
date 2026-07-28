@@ -173,6 +173,21 @@ export type ComponentAlias = z.output<typeof componentAliasSchema>;
 export const normalizeAlias = (s: string): string =>
   s.trim().toLowerCase().replace(/[\s_-]+/g, " ");
 
+/**
+ * Table I (v1.9) — derived-value provenance. An item recording a value transcribed or decoded
+ * from a physical artifact names the `photo` item capturing that artifact, so the value can be
+ * re-checked. Parser-enforced: the entry exists, the source exists, the source is a photo.
+ *
+ * An unverifiable value is indistinguishable from a verified one, and the equipment registry —
+ * the consumer with no session and no vote — has no way to notice the difference.
+ */
+const provenanceSchema = z.object({
+  itemId: idSchema,
+  derivedFrom: z.string().min(1),
+  sourceItemId: idSchema,
+});
+export type DerivedProvenance = z.output<typeof provenanceSchema>;
+
 /** Table G (v1.7) — a retired choice option value and what replaced it. Option values follow
  *  the item-id lifecycle: never renamed, only retired and replaced. */
 const retiredOptionSchema = z.object({
@@ -258,6 +273,8 @@ const checklistConfigObject = z.object({
   retiredOptions: z.array(retiredOptionSchema).default([]),
   /** Table H (v1.7). Closed set; empty means "not declared" (pre-v1.7 config). */
   measureUnits: z.array(measureUnitSchema).default([]),
+  /** Table I (v1.9). Empty means "not declared" (pre-v1.9 config). */
+  provenance: z.array(provenanceSchema).default([]),
   naReasons: z.array(naReasonSchema).min(1),
   layers: z.array(layerSchema).min(1),
 });
@@ -304,6 +321,61 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
       issue(`Table G: '${r.value}' is listed as retired on ${r.itemId} but is still a live option`);
     if (r.replacement && live && !live.includes(r.replacement))
       issue(`Table G: replacement '${r.replacement}' for ${r.itemId} is not a live option`);
+  }
+
+  // Table I (v1.9). Resolution MUST compose component inheritance: `wsf.age` names
+  // `wt.nameplate`, which lives on the parent `water-treatment` list. Checking only a list's
+  // own items would report a false gap on exactly the row that proves the rule works.
+  const allItems = new Map<string, ChecklistItem>();
+  const addAll = (items: ChecklistItem[]) => { for (const i of items) allItems.set(i.id, i); };
+  for (const b of cfg.baseLists) addAll(b.items);
+  for (const z of cfg.zoneLists) addAll(z.items);
+  for (const c of cfg.componentLists) addAll(c.items);
+  addAll(cfg.sessionItems);
+
+  /**
+   * Items visible together with `id` — its own list, plus the inherited chain for a component.
+   * Global existence is NOT enough: provenance means the photo is captured on the SAME pin,
+   * so a source item living on an unrelated component would pass an existence check while
+   * never actually being taken. `wsf.age` names `wt.nameplate`, which lives on the parent
+   * `water-treatment` list — so the chain must be composed before testing, exactly as flagged.
+   */
+  const provListByType = new Map<string, (typeof cfg.componentLists)[number]>();
+  for (const c of cfg.componentLists) for (const t of c.types) provListByType.set(t, c);
+  const coVisible = (id: string): Set<string> => {
+    const out = new Set<string>();
+    for (const b of cfg.baseLists) if (b.items.some((i) => i.id === id)) b.items.forEach((i) => out.add(i.id));
+    for (const z of cfg.zoneLists) if (z.items.some((i) => i.id === id)) z.items.forEach((i) => out.add(i.id));
+    if (cfg.sessionItems.some((i) => i.id === id)) cfg.sessionItems.forEach((i) => out.add(i.id));
+    for (const c of cfg.componentLists) {
+      if (!c.items.some((i) => i.id === id)) continue;
+      const seen = new Set<string>();
+      let cursor: string | undefined = c.types[0];
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        const l = provListByType.get(cursor);
+        if (!l) break;
+        l.items.forEach((i) => out.add(i.id));
+        cursor = l.inherits;
+      }
+    }
+    return out;
+  };
+
+  for (const p of cfg.provenance) {
+    if (!allItems.has(p.itemId)) {
+      issue(`Table I: provenance names unknown item ${p.itemId}`);
+      continue;
+    }
+    const src = allItems.get(p.sourceItemId);
+    if (!src) issue(`Table I: ${p.itemId} names unknown source item ${p.sourceItemId}`);
+    else if (src.satisfy !== "photo")
+      issue(`Table I: ${p.itemId} names source ${p.sourceItemId}, which is ${src.satisfy}, not photo`);
+    else if (!coVisible(p.itemId).has(p.sourceItemId))
+      issue(
+        `Table I: ${p.itemId} names source ${p.sourceItemId}, which is not reachable from the same list ` +
+          `(inheritance included) — the photo would never be captured alongside the value`,
+      );
   }
 
   const seenAliases = new Set<string>();

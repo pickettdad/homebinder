@@ -972,3 +972,79 @@ describe("egress split (master v1.8)", () => {
     expect(byGroup.get("Egress (sleeping rooms)")).toBe(4);
   });
 });
+
+/**
+ * Table I — derived-value provenance (master v1.9). An item recording a value transcribed or
+ * decoded from a physical artifact names the photo item capturing that artifact, so the value
+ * can be re-checked. An unverifiable value is indistinguishable from a verified one, and the
+ * equipment registry — the consumer with no session and no vote — cannot notice the difference.
+ */
+describe("derived-value provenance (master v1.9)", () => {
+  const cfg = validConfig();
+  const clone = () => JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
+
+  it("declares provenance for every artifact-derived value, and each source is a photo", () => {
+    expect(cfg.provenance.map((p) => p.itemId).sort()).toEqual(
+      ["apw.hose-age", "ft.age", "wh.age", "wsf.age"],
+    );
+    const all = new Map<string, { satisfy: string }>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (typeof r.id === "string" && typeof r.satisfy === "string")
+          all.set(r.id, r as unknown as { satisfy: string });
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    for (const p of cfg.provenance) expect(all.get(p.sourceItemId)?.satisfy, p.itemId).toBe("photo");
+  });
+
+  it("resolves wsf.age's source ACROSS INHERITANCE — the false-gap case", () => {
+    // wsf.age lives on `water-softener`; wt.nameplate lives on its parent `water-treatment`.
+    // A validator that checked only the item's own list would report a gap that isn't there.
+    const row = cfg.provenance.find((p) => p.itemId === "wsf.age")!;
+    expect(row.sourceItemId).toBe("wt.nameplate");
+    const softener = cfg.componentLists.find((c) => c.types.includes("water-softener"))!;
+    expect(softener.items.map((i) => i.id)).not.toContain("wt.nameplate"); // not in its own list
+    expect(componentItemsFor(cfg, "water-softener").map((i) => i.id)).toContain("wt.nameplate");
+    expect(validateChecklistConfig(cfg as unknown as Record<string, unknown>).ok).toBe(true);
+  });
+
+  it("rejects a source that is not a photo", () => {
+    const bad = clone();
+    (bad as { provenance: { itemId: string; derivedFrom: string; sourceItemId: string }[] }).provenance = [
+      { itemId: "wh.age", derivedFrom: "x", sourceItemId: "wh.tpr" }, // a check, not a photo
+    ];
+    const r = validateChecklistConfig(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/which is check, not photo/);
+  });
+
+  it("rejects a source photo that lives on an UNRELATED component", () => {
+    // Global existence is not enough: provenance means the photo is taken on the same pin.
+    const bad = clone();
+    (bad as { provenance: { itemId: string; derivedFrom: string; sourceItemId: string }[] }).provenance = [
+      { itemId: "wh.age", derivedFrom: "x", sourceItemId: "fur.nameplate" }, // exists, wrong object
+    ];
+    const r = validateChecklistConfig(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/not reachable from the same list/);
+  });
+
+  it("the two v1.9 source items exist and are photos", () => {
+    const all = new Map<string, string>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (typeof r.id === "string" && typeof r.satisfy === "string") all.set(r.id, r.satisfy);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    expect(all.get("ft.nameplate")).toBe("photo");
+    expect(all.get("apw.hose-label")).toBe("photo");
+  });
+});

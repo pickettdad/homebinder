@@ -1137,3 +1137,59 @@ Three tests referenced `liv.egress` directly. They assert *trigger placement* �
 surfaces in sleeping zones only — which is unchanged; only the id moved. Repointed to
 `liv.egress-width`. `liv.egress` is added to the `id stability` no-reuse list, so it can never
 be reissued for anything else.
+
+---
+
+## 21. The derived-value rule, corrected — and what it surfaces (2026-07-28)
+
+**My rule was too broad and would have flagged `wh.age` as a defect.** The correction is right,
+and the qualifier is the whole rule:
+
+> **Derivable from other values in the same record → must NOT be recorded.** Openable area is
+> width × height; recording it creates a number that can contradict its own inputs.
+>
+> **Derived from an artifact by applying expertise → SHOULD be recorded**, because the
+> derivation is not reproducible downstream (serial-decoding schemes are manufacturer-specific)
+> — *and the source artifact is captured alongside it as the check.*
+
+Recorded here rather than in the master, since the rule is not in the file. **If it ever enters
+§2 it needs the qualifier**, or it flags `wh.age`.
+
+### 21.1 The second half is an invariant, and it does not currently hold
+
+The clause *"the source artifact is captured alongside it as the check"* is what makes
+recording an expertise-derived value safe. That is checkable, so I checked it — inheritance
+included. Three items in the config derive a value by reading an artifact:
+
+| item | text | source artifact captured? |
+|---|---|---|
+| `wh.age` | "decoded from serial" | ✅ `wh.nameplate` — "Nameplate photographed legibly" |
+| `ft.age` | "Manufacture year from **data plate**" | ⚠️ only `ft.wide`, a *locating* shot. `fuel-tank` has **no nameplate/data-plate item at all** |
+| `apw.hose-age` | "**Hose** year if marked" | ⚠️ `app.unit` and `app.nameplate` photograph the *washer*, not the hose marking |
+
+So the safeguard holds for one of three. Nobody's data is wrong today — but an age with no
+photograph of the thing it was read from **cannot be re-checked**, by a reviewer, by a later
+visit, or by anyone questioning it.
+
+**This matters most to the consumer that cannot argue for itself.** §10 names the equipment
+registry as the third consumer, whose blast radius is permanent corruption of longitudinal
+series. An unverifiable install year is exactly that failure mode: it enters the fleet
+aggregate looking identical to a verified one, and nothing downstream can tell them apart.
+
+### 21.2 Change-request for the next master pass
+
+1. **`fuel-tank` needs a data-plate photo item** (`ft.nameplate`, photo/evidence) — `ft.wide`
+   is declared a *locating* class (v1.7 §2) and cannot double as the legibility record.
+2. **`apw.hose-age`**: either add a hose-marking photo, or accept the year as unverifiable and
+   say so in the text. Recording it silently as if it were verifiable is the option to avoid.
+3. **Consider the general form as an authored rule:** *any item deriving a value from an
+   artifact must name the item that photographs that artifact.* That would be enforceable —
+   the parser could require the pairing — and would have caught both of these at authoring
+   time rather than two years into a comparison series.
+
+### 21.3 On the cap lesson
+
+Agreed that it lands more on the authoring side, but it is not only there: I proposed the four
+items *and* their tier without stating their grouping. **Any proposal that adds core items
+states where they render, or it is incomplete** — I will treat that as binding on my
+recommendations, not just on the file.

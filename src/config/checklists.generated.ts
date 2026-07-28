@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.7.1",
+  "configVersion": "1.7.2",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -404,6 +404,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "id": "liv.egress",
           "text": "Sleeping-room window egress: opens fully; size and sill height measured",
           "satisfy": "measure",
+          "unit": "in",
           "tier": "core",
           "attest": "action",
           "scope": [
@@ -1713,6 +1714,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "id": "sit.measurements",
           "text": "Driveway/walkway dimensions captured",
           "satisfy": "measure",
+          "unit": "in",
           "tier": "standard",
           "attest": "action",
           "scope": [
@@ -5614,6 +5616,10 @@ export const checklistsBaseline: ChecklistConfigInput = {
     {
       "unit": "mm",
       "means": "millimetres"
+    },
+    {
+      "unit": "in",
+      "means": "inches (lengths)"
     }
   ],
   "naReasons": [

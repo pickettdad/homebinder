@@ -24,6 +24,15 @@ on drift. The master itself is edited by the owner's side, never unilaterally he
 defects become change-requests in `docs/CHECKLIST-MASTER-REVIEW.md`. Same rule as
 `route.baseline.ts`: config is data, ids are never renamed or reused.
 
+**Tests state the invariant, not the inventory (2026-07-28).** A test that enumerates what
+currently exists fires on every legitimate addition; a test that states what must hold does
+not. This has cost two builds: the alias test asserted *some alias carries capitals* (never a
+rule — just a fact about that version's data), and the provenance test asserted the *exact*
+four Table I rows, so adding two correct ones failed CI. Write `every transcribed value has a
+row, and every row's source is a photo capturable on the same pin` — which holds at seven rows
+and at seventy. Where a floor is genuinely wanted (a retired id must never return, a known row
+must not vanish), assert *containment*, never equality.
+
 **Move keeps the id; redefine retires it (owner rule 2026-07-26).** An item that *moves* to a
 different list but asks the same question — same text, same `attest` — keeps its id; the
 prefix goes historical and that is fine, ids are opaque (`liv.egress`, `bsm.finished-behind`).

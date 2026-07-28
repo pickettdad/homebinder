@@ -1,6 +1,6 @@
-# HouseSteady Field Assistant — Checklist Master (v1.10)
+# HouseSteady Field Assistant — Checklist Master (v1.11)
 
-**Version:** v1.10 · **Date:** 2026-07-28 · **Supersedes:** v1.9 (2026-07-28)
+**Version:** v1.11 · **Date:** 2026-07-28 · **Supersedes:** v1.10 (2026-07-28)
 **Governance:** this file is a **governed cross-app contract** — see §10. Field is custodian; the binder builder and the equipment registry are consumers with ratifying interest on named surfaces.
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
@@ -37,6 +37,26 @@ Also corrected: §6's prose claimed *"that attribute, not the zone type, is what
 
 
 
+
+
+**Changelog v1.10 → v1.11 — the last two provenance candidates, and the distinction that resolved them.**
+
+v1.10 deferred `fp.sweep` and `irr.test-record` pending a judgment: *is the record the tag, or the reading of it?* **The deferral dissolves, because v1.9's N/A semantics already answer it in both directions:**
+- Tag present → photograph it; the provenance row is honest.
+- No tag, owner's word only → the source resolves N/A `none-present`, and the value is **declared** unverifiable.
+
+**Leaving them unsourced is the one option that records "I saw the tag" and "the owner told me" in the same field with no way to separate them** — precisely what Table I exists to stop.
+
+**The distinction that makes this different from `wt.consumables` is worth keeping**, because it is what stops the boundary test collapsing into a coin flip:
+
+| | shape | verdict |
+|---|---|---|
+| `wt.consumables` | An artifact value **and** testimony bundled in **one field** — "size and last change." No single photograph reaches the whole value. | **Excluded.** A row would assert a check nobody can perform. |
+| `fp.sweep`, `irr.test-record` | **One** value that is **sometimes** evidenced. | **Included.** That is a resolution state, not a split — and the N/A path already models it. |
+
+**Added:** `fp.sweep-tag` and `irr.test-tag` (photo, standard), with Table I rows. Both source items resolve N/A `none-present` when no tag exists, which is real data: the date came from the owner, and the record says so.
+
+**Table I is now complete for the current library.** The §9.8 sweep opened in v1.9 is closed: seven values sourced, one deliberately excluded and recorded as such, none deferred.
 
 **Changelog v1.9 → v1.10 — the §9.8 provenance sweep, resolved, plus the boundary test that made it resolvable.**
 
@@ -228,7 +248,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.10)
+## 0. Table dialect (for the generator — v1.11)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
@@ -309,7 +329,9 @@ water-treatment ┬── water-softener · sediment-filter
 - **Derivable from other values in the same record → do not record it.** Openable area is width × height; recording it creates a number that can contradict its own inputs, with no way to tell which side is wrong. The consumer computes it.
 - **Derived from a physical artifact by applying expertise → record it, and name the artifact.** A serial-decoded install year is not reproducible downstream — decoding schemes are manufacturer-specific — so the field is the right place to record it. **What makes that safe is that the source artifact is captured alongside as the check**, and that is an invariant, not an assumption: **every item recording a value transcribed or decoded from an artifact must have a Table I entry naming the `photo` item that captures it.**
 
-**Boundary test for Table I (v1.10):** *is there a **single artifact** a photograph could capture that would let someone else reach the same value?* **Yes → an entry is required. Partly, or the value includes testimony → do not claim provenance.** A row on a partly-verifiable value is worse than no row, because it asserts a check nobody can perform. `wt.consumables` ("last change") is the exclusion case: usually what the owner says, and no photograph verifies testimony.
+**Boundary test for Table I (v1.10):** *is there a **single artifact** a photograph could capture that would let someone else reach the same value?* **Yes → an entry is required. Partly, or the value includes testimony → do not claim provenance.** A row on a partly-verifiable value is worse than no row, because it asserts a check nobody can perform. Two shapes are easily confused and resolve oppositely:
+- **An artifact value *and* testimony bundled in one field** — `wt.consumables` records size *and* last change; no single photograph reaches the whole value. **Excluded.**
+- **One value that is *sometimes* evidenced** — `fp.sweep` reads a tag when a tag exists and the owner otherwise. **Included**, because that is a resolution state, not a split: the source resolves N/A `none-present` when no artifact exists, and the value is then *declared* unverifiable rather than silently so.
 
 **Provenance is co-visibility on the same pin, not global existence (v1.10).** The source item must be capturable **on the same object**, resolved across component inheritance. A source item sitting on an unrelated component satisfies "exists" and still never gets photographed — under an existence-only check, a furnace nameplate would prove a water heater's age.
 
@@ -875,7 +897,8 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `fp.wett` | Wood: WETT-class inspection flag recorded — never cleared by us | check | core | action |
 | `fp.gas-valve` | Gas: valve located | check | core | action |
 | `fp.chimney` | Associated chimney/flue pinned | pin `chimney` | standard | evidence |
-| `fp.sweep` | Last-sweep evidence noted | note | standard | evidence |
+| `fp.sweep-tag` | Sweep/service tag photographed if present | photo | standard | evidence |
+| `fp.sweep` | Last sweep/service date recorded | note | standard | evidence |
 
 ### `dryer-duct`
 | id | text | satisfy | tier | attest |
@@ -1196,7 +1219,8 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `irr.unit` | Backflow device photographed | photo | core | evidence |
 | `irr.shutoff` | Irrigation shutoff located | check | core | action |
 | `irr.type` | Device type | choice (RPZ\|double check\|pressure vacuum breaker\|atmospheric vacuum breaker\|none observed\|unknown) | standard | evidence |
-| `irr.test-record` | Last certification/test date if documented | note | standard | evidence |
+| `irr.test-tag` | Backflow test/certification tag photographed if present | photo | standard | evidence |
+| `irr.test-record` | Last certification/test date recorded | note | standard | evidence |
 | `irr.blowout` | Winterization/blow-out evidence noted | note | standard | evidence |
 
 *Many jurisdictions require annual backflow certification. We record the date if documented; we never certify.*
@@ -1390,6 +1414,8 @@ Every item recording a value **transcribed or decoded from a physical artifact**
 | `wsf.age` | Nameplate or unit label | `wt.nameplate` *(inherited — resolves across the chain)* |
 | `pnl.service` | Main breaker amp marking / rating label | `pnl.label` |
 | `pnl.brand` | Panel manufacturer label | `pnl.label` |
+| `fp.sweep` | Sweep/service tag date | `fp.sweep-tag` |
+| `irr.test-record` | Backflow test tag date | `irr.test-tag` |
 
 *Where the source item resolves N/A `none-present` — no legible date code on the hose, no readable plate — **the derived value is legitimately unverifiable, and recording that is real data.** It is the silent unverified value, not the declared one, that corrupts a series.*
 
@@ -1418,7 +1444,9 @@ Every item recording a value **transcribed or decoded from a physical artifact**
 
 7. **The moisture-meter decision — a purchase with a permanent schema consequence.** Three items (`int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`) record a meter reading and stay unitless until an instrument exists. **The scale is set by the meter, and it is set once:** readings taken in %WME cannot be compared to readings in %MC or on a relative 0–100 scale, so switching instruments later corrupts every series retroactively. Decide the meter deliberately, declare its unit in Table H, and treat replacing it as a breaking change requiring a new item rather than a changed unit. *(A pinned meter reading %WME is the common inspection convention, but the choice is the owner's and the declaration follows the instrument, not the other way round.)*
 
-8. **Table I sweep — resolved, with two candidates left open.** `pnl.service` and `pnl.brand` are **in** (v1.10, sourced to `pnl.label`). **`wt.consumables` is deliberately excluded** — "last change" is usually testimony, and no photograph verifies testimony; recorded here so it is not re-swept later as an oversight. **Two candidates remain open for a judgment made with the items in hand:** `fp.sweep` ("last-sweep evidence noted") and `irr.test-record` ("last certification date if documented"). Both read a physical tag and look like the `pnl.service` class — but both are phrased as *evidence noted*, and whether the tag or the concierge's reading of it is the record is a call best made at the object. Apply the §2 boundary test.
+8. **Table I sweep — closed (v1.11).** Seven values sourced. **One deliberate exclusion, on the record so it is never re-swept as an oversight:** `wt.consumables` bundles an artifact value and testimony in one field, so no single photograph reaches the whole value. `fp.sweep` and `irr.test-record`, deferred in v1.10, resolved into the table — they are one value *sometimes* evidenced, which the N/A path already models. **The invariant for any future item: if a recorded value can be read off something, name the photo of that something; if it can only sometimes be read off something, still name it and let N/A carry the honest case.**
+
+*Note for whoever validates this: a check that enumerates the current provenance set fires on every legitimate addition. **State the invariant, not the inventory** — every item whose value is transcribed from an artifact has a row, and every row's source is a `photo` capturable on the same pin. That holds at seven rows and at seventy.*
 
 9. **Sub-heading gates would remove a small duplication.** The four egress items each repeat `zone.sleeping` in their trigger cell. A list-level gate (§0) attaches to a `###` list, not to a bold sub-heading, so there is no way to gate a group. Four duplicated cells is tolerable; the pattern is worth watching if another sub-headed conditional group appears. Not worth new dialect for one case.
 
@@ -1470,6 +1498,6 @@ The registry reads component types (the fleet dimension), option values (the pre
 
 ---
 
-**Status:** v1.10 — resolves the §9.8 provenance sweep: `pnl.service` and `pnl.brand` gain a source (`pnl.label`), `wt.consumables` is deliberately excluded as testimony, two candidates stay open. Adds the **boundary test** and the **co-visibility invariant** to §2. Carries v1.9's Table I, v1.8's egress split, v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
+**Status:** v1.11 — **closes the Table I provenance sweep.** Seven values sourced (`wh.age`, `ft.age`, `apw.hose-age`, `wsf.age`, `pnl.service`, `pnl.brand`, `fp.sweep`, `irr.test-record`), one deliberately excluded and recorded as such, none deferred. Adds `fp.sweep-tag` and `irr.test-tag`. Carries v1.10's boundary test and co-visibility invariant, v1.9's Table I, v1.8's egress split, v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
 
-*Four stability rules share one cause — **a consistency check cannot catch a transformation applied uniformly.** Item ids, option values, measure units and derived-value provenance each needed a check against something external: the master's literal text, or a captured artifact. Corollaries earned across this run: **a fix for that class must be tested on the class, not the instance** · **a number carries false precision** — a wrong pass/fail is visibly a category error, a wrong number just looks like a measurement · **an unverifiable value is indistinguishable from a verified one**, which is why provenance is an invariant and why the unverifiable declaration must travel to the consumer · **existence is not provenance** — the artifact must be capturable on the same object · and **proposing items is not separable from proposing where they render**, because the core cap is per rendered group.*
+*Five stability rules share one cause — **a consistency check cannot catch a transformation applied uniformly.** Item ids, option values, measure units and derived-value provenance each needed a check against something external: the master's literal text, or a captured artifact. Corollaries earned across this run, each from a real failure: **a fix for that class must be tested on the class, not the instance** · **a number carries false precision** — a wrong pass/fail is visibly a category error, a wrong number just looks like a measurement · **an unverifiable value is indistinguishable from a verified one**, which is why provenance is an invariant and why the unverifiable declaration must survive aggregation · **existence is not provenance** — the artifact must be capturable on the same object · **proposing items is not separable from proposing where they render**, because the core cap is per rendered group · and **state the invariant, not the inventory** — a check that enumerates what exists fires on every legitimate addition.*

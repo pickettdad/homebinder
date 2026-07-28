@@ -1325,3 +1325,106 @@ guards the invariant.
 
 Twice now the same failure has cost a build. The pattern to watch: **a test that enumerates
 what exists will fire on every addition; a test that states what must hold will not.**
+
+---
+
+## 24. Is the master churn blocking the binder? Measured, 2026-07-28
+
+The owner asked whether nine master versions in four days were warranted, given the binder
+build is waiting. Straight answer, with the data.
+
+### 24.1 The binder's actual contract has not moved once
+
+`src/engine/export/manifestV3.ts` — the file that *is* the binder contract — has been touched
+**twice in its life**:
+
+| commit | what |
+|---|---|
+| `06696bb` | original build (Stage 1 §7) |
+| `94f7dbe` | video as a media kind (capture-screen work) |
+
+**Zero commits during the entire v1.3 → v1.10 master sequence.** Nine master versions, ~140
+items added, three new tables, and the manifest shape the binder consumes did not change.
+
+**Conclusion: the binder was not blocked by master churn — unless it hardcodes item ids.**
+Everything version-dependent (item ids, Table D layers, Table I provenance, units) ships
+*inside* the config snapshot the manifest already carries. A binder that reads the snapshot is
+immune to master versions; a binder that hardcodes `wh.age` is not, and would break on the next
+retirement regardless of how long we wait.
+
+**That is the unblock, and it is worth sending:** build against manifest v3 + the config
+snapshot now. Do not wait for the master to settle, because it will not — it is content, and
+content grows.
+
+### 24.2 Which rounds earned their keep — honest split
+
+**Field-driven, clearly necessary (4):** v1.3 `choice` (prose answers unqueryable — proven by
+a field export), v1.4 sub-types (freeform fixtures, proven by the owner's own entries), v1.5 §1
+shutoff coverage (the emergency map could not be populated), v1.6.x `mechanical-base` (a
+bungalow's shutoff map was empty).
+
+**Guardrails — cheaper now than later, but not field-driven (4):** v1.7 Tables G/H + item
+classes + emphasis ban, v1.9–v1.10 Table I provenance.
+
+**Rework caused by defects, not by content (4):** v1.3.1, v1.4.1, v1.6.1, v1.7.1. Every one
+was a fix to the previous version, and three of the four were the same root cause — a
+structural fact stated in prose that the tables did not carry.
+
+So roughly a third of the versions were rework. The guardrails added since v1.7 exist
+specifically to convert that class into build failures, and they have already caught four
+defects (the emphasis ban caught its own file, the gate validation caught my underscore
+regression, the co-visibility check caught a wrong-object source, Table H caught nothing yet
+but would catch a unit change).
+
+### 24.3 Recommendation
+
+**The content work is done for now.** What remains on the list — `fp.sweep-tag`,
+`irr.test-tag` — is a refinement worth one more small version, not a blocker for anything.
+
+**The next genuinely blocking item is manifest v4** for the object/concern model. That is a
+shape change to the binder's contract, it is bigger than everything since v1.5 combined, and it
+has not started. It is also sequenced behind the five-zone field test by the design record.
+
+**So: freeze the master, run the walk, and unblock the binder with the v3 contract it already
+has.** Master versions after that should be driven by what the walk finds, which is how v1.3
+through v1.6 earned their place.
+
+---
+
+## 25. v1.11 intake — §9.8 closed (2026-07-28)
+
+**Accepted and installed.** 407 → 409 items. `fp.sweep-tag` and `irr.test-tag` added
+(photo/standard) with Table I rows. **Eight values sourced, one deliberately excluded and on
+the record, none deferred.**
+
+All eight resolve under the co-visibility check, inheritance composed. The two new rows are the
+straightforward case — source and value on the same component — so they exercise the rule
+rather than its edges.
+
+### 25.1 The boundary distinction is now testable, which is the point
+
+§2 carries both shapes, and they are the reason the test is a rule rather than a coin flip:
+
+| shape | example | verdict | why |
+|---|---|---|---|
+| one value, sometimes evidenced | `fp.sweep` | **included** | the N/A path already models the unevidenced case |
+| artifact value **and** testimony in one field | `wt.consumables` | **excluded** | no single photograph reaches the whole value |
+
+Pinned by test. The exclusion is asserted explicitly, so `wt.consumables` remaining unsourced
+is a recorded decision rather than a gap someone re-discovers.
+
+### 25.2 Test written to the new rule
+
+The floor now names eight items and asserts **containment**; the invariant — *every provenance
+source is a photo reachable on the same object* — is asserted separately and once. Adding a
+ninth row passes; removing one fails. That is the shape CLAUDE.md now requires, applied to the
+test that taught the lesson.
+
+### 25.3 Status
+
+Master content is **complete for this cycle**. Nothing is deferred, nothing is flagged, and the
+guardrails that would catch the next authoring defect are in place and have each fired at least
+once on real content.
+
+Per §24: the binder is unblocked by the manifest v3 contract it already has. The next
+blocking work is manifest v4 for the object/concern model, sequenced behind the field test.

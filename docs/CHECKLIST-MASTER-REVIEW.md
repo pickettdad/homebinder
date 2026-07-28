@@ -1093,3 +1093,47 @@ carries more than one number — so the fix does not generalise into a wave of s
 The every-measure-declares-a-unit rule remains **recorded, not enforced** (§18.3), now for a
 better-stated reason: the instrument does not exist yet. When it does, three cells and one
 validator rule close it.
+
+---
+
+## 20. v1.8 intake — the egress split (2026-07-28)
+
+**Accepted and installed.** 401 → 404 items (one retired, four added). `liv.egress` retired
+with a Table F entry naming all four successors; the four are `action`, `zone.sleeping`-gated,
+and grouped under the authored sub-heading *Egress (sleeping rooms)*.
+
+### 20.1 Two corrections to my recommendation, both right
+
+**(1) I listed four thresholds and proposed four items, and the mapping is not 1:1.**
+Openable area is **derived** — width × height — so recording it would create a value that can
+disagree with its own inputs. My phrasing ("egress thresholds are per dimension: minimum
+width, minimum height, minimum openable area, maximum sill height") invited exactly the wrong
+inference. The principle is worth keeping general: **a derived value must be computed by the
+consumer, never recorded by the field**, or the record can contradict itself and there is no
+way to tell which side is wrong.
+
+**(2) I did not check the cap impact of my own proposal — a real miss.** `interior-base`
+carried 5 core; retiring one and adding four takes it to **8, exactly the §2 limit with zero
+headroom.** v1.8 solves it with a bold sub-heading, so the four render as their own group and
+the main group drops to four. Measured: max core per rendered group is now **4**.
+
+That machinery is the base-list sub-heading support I built in v1.6.1 — and I still failed to
+apply it as a lens to my own recommendation. Proposing items is not separable from proposing
+where they render; the cap is per rendered group, so any multi-item proposal has to state its
+grouping or it is incomplete.
+
+### 20.2 On the `zone.sleeping` duplication (§9.8) — agree, do nothing
+
+Four cells repeat `zone.sleeping` because list gates attach to `###` lists, not to bold
+sub-headings. Extending gates to sub-headings for a single case would be new dialect earning
+its keep once. The judgement to tolerate it at four and watch for a second conditional
+sub-headed group is correct — and if that second case appears, the right fix is a
+sub-heading-level gate reusing the existing `allOf(gate, trigger)` semantics, not a new
+mechanism.
+
+### 20.3 Test fixtures updated
+
+Three tests referenced `liv.egress` directly. They assert *trigger placement* — egress
+surfaces in sleeping zones only — which is unchanged; only the id moved. Repointed to
+`liv.egress-width`. `liv.egress` is added to the `id stability` no-reuse list, so it can never
+be reissued for anything else.

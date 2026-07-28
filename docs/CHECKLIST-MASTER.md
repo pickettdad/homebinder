@@ -1,6 +1,6 @@
-# HouseSteady Field Assistant — Checklist Master (v1.7.2)
+# HouseSteady Field Assistant — Checklist Master (v1.8)
 
-**Version:** v1.7.2 · **Date:** 2026-07-28 · **Supersedes:** v1.7.1 (2026-07-28)
+**Version:** v1.8 · **Date:** 2026-07-28 · **Supersedes:** v1.7.2 (2026-07-28)
 **Governance:** this file is a **governed cross-app contract** — see §10. Field is custodian; the binder builder and the equipment registry are consumers with ratifying interest on named surfaces.
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
@@ -34,6 +34,28 @@ Also corrected: §6's prose claimed *"that attribute, not the zone type, is what
 
 
 
+
+
+**Changelog v1.7.2 → v1.8 — the egress split. One item retired, four added.**
+
+`liv.egress` read *"opens fully; size and sill height measured"* and recorded **one number**. A year later nobody knows which dimension it was. Split into four:
+
+| new id | records |
+|---|---|
+| `liv.egress-opens` | check — window opens fully and stays open unheld |
+| `liv.egress-width` | measure (in) — clear opening width |
+| `liv.egress-height` | measure (in) — clear opening height |
+| `liv.egress-sill` | measure (in) — sill height above finished floor |
+
+**Why four and not three:** *"opens fully"* is a check, not a measurement, and folding it into a number leaves it homeless. **Why splitting matters beyond tidiness:** egress thresholds are **per dimension** — a minimum width, a minimum height, a minimum openable area and a maximum sill height are four different limits. One number cannot be tested against four, and the binder cannot report *which* dimension failed. That is the real argument, and it is stronger than "three numbers beat one."
+
+**Openable area is deliberately NOT a fifth item.** It is derived from width × height. Recording a derived value creates a number that can disagree with its own inputs, and the binder can compute it from two measurements that cannot.
+
+**`liv.egress` retires; it does not carry over to any of the four.** By §2's move-vs-redefine rule this is a redefinition, and it is a **worse case than `bth.toilet-secure`**: that id carried a pass/fail, and a pass/fail rendering against the wrong question is visibly a category error. This one carries a **number**, of now-unknown provenance — nobody can say which dimension a past reading measured. **A number carries false precision: it looks like data, so nothing about it invites doubt.** Recorded in Table F.
+
+**Rendered under a sub-heading, so the cap holds.** Four core items added to `interior-base` would take its group from five core to eight — at the §2 cap, with no headroom. Under the authored sub-heading **Egress (sleeping rooms)** they form their own group of four, and interior-base's main group drops to four. Uses the base-list sub-heading machinery added in v1.6.1.
+
+**Cost, stated plainly:** one tap becomes four, at one window per sleeping room. Proportionate for a life-safety item — and `liv.egress` was the **only** item in the master where a single `measure` carried more than one number, so this does not generalise into a wave of splits.
 
 **Changelog v1.7.1 → v1.7.2 — Table H made honest, two units assigned, the meter decision deferred deliberately.**
 
@@ -164,7 +186,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.7.2)
+## 0. Table dialect (for the generator — v1.8)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
@@ -316,8 +338,18 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `int.lighting` | Switches and fixtures function | check | standard | action | baseline | — |
 | `int.registers` | Supply/return registers unblocked, airflow confirmed — pin problem registers | check | standard | action | baseline | — |
 | `int.alarms` | Smoke/CO alarms in this zone pinned (manufacture dates photographed) | pin `smoke-alarm\|co-alarm` | standard | evidence | baseline, monthly | — |
-| `liv.egress` | Sleeping-room window egress: opens fully; size and sill height measured | measure (in) | core | action | baseline | `zone.sleeping` |
 | `int.owner-quirks` | Anything the owner flagged in this room verified and captured | note | standard | action | baseline | — |
+
+**Egress (sleeping rooms)**
+
+| id | text | satisfy | tier | attest | scope | trigger |
+|---|---|---|---|---|---|---|
+| `liv.egress-opens` | Window opens fully and stays open without being held | check | core | action | baseline | `zone.sleeping` |
+| `liv.egress-width` | Clear opening width | measure (in) | core | action | baseline | `zone.sleeping` |
+| `liv.egress-height` | Clear opening height | measure (in) | core | action | baseline | `zone.sleeping` |
+| `liv.egress-sill` | Sill height above finished floor | measure (in) | core | action | baseline | `zone.sleeping` |
+
+*Four separate values because egress limits are per dimension. **Openable area is not recorded** — it is width × height, and a derived value that can disagree with its inputs is worse than no value. The binder computes it.*
 
 ### `wet-base`
 
@@ -1261,9 +1293,10 @@ Where a retired item's content went. **Software must not use this to join a seri
 | `kit.fridge-line` | v1.4 | `apr.water-line` | Content moved to `appliance-refrigerator` |
 | `kit.fuel-range` | v1.4 | `apg.fuel`, `apg.shutoff`, `apg.connector` | Content moved to `appliance-range` |
 | `lnd.hoses` | v1.4 | `apw.hoses`, `apw.hose-age` | Content moved to `appliance-washer` |
+| `liv.egress` | v1.8 | `liv.egress-opens`, `liv.egress-width`, `liv.egress-height`, `liv.egress-sill` | Redefined: one item recording one number for four different questions. Past readings are of unknown provenance — no successor may inherit the id |
 | `wm.curbstop` | v1.5 | `cs.photo`, `cs.access`, `cs.key` | Redefined: an item became the `curb-stop` component type (pin-vs-item test — the curb stop is at the street) |
 
-*No retirements in v1.6. The `utl.*` mechanical items **moved** to `mechanical-base` and keep their ids, so none appear here.*
+*One retirement in v1.8 (`liv.egress`). No retirements in v1.6. The `utl.*` mechanical items **moved** to `mechanical-base` and keep their ids, so none appear here.*
 
 ## G. Retired choice option values (v1.7)
 
@@ -1313,7 +1346,7 @@ Units are declared inline on the item — `measure (psi)` — and this table is 
 
 7. **The moisture-meter decision — a purchase with a permanent schema consequence.** Three items (`int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`) record a meter reading and stay unitless until an instrument exists. **The scale is set by the meter, and it is set once:** readings taken in %WME cannot be compared to readings in %MC or on a relative 0–100 scale, so switching instruments later corrupts every series retroactively. Decide the meter deliberately, declare its unit in Table H, and treat replacing it as a breaking change requiring a new item rather than a changed unit. *(A pinned meter reading %WME is the common inspection convention, but the choice is the owner's and the declaration follows the instrument, not the other way round.)*
 
-8. **`measure` holds one number; two items want several.** `liv.egress` asks for width, height and sill height; `sit.measurements` asks for driveway and walkway dimensions. Both now declare `in`, which is correct for whatever single value is recorded — but the multi-value shape is unmodelled. Either split into separate items (`liv.egress-width`, `liv.egress-height`, `liv.egress-sill`) or add a multi-value measure kind. **Splitting is the safer answer** — three declared numbers beat one ambiguous one, and each becomes independently comparable across visits.
+8. **Sub-heading gates would remove a small duplication.** The four egress items each repeat `zone.sleeping` in their trigger cell. A list-level gate (§0) attaches to a `###` list, not to a bold sub-heading, so there is no way to gate a group. Four duplicated cells is tolerable; the pattern is worth watching if another sub-headed conditional group appears. Not worth new dialect for one case.
 
 9. **Sweep for remaining prose-only structural claims.** v1.6.2 moved the last known one (the `mechanical-base` gate) into the dialect. **Anything else in this file that states a structural fact only in a sentence is an undetected instance of the same class.** Worth a deliberate pass by whoever next parses the file end to end — the generator sees the tables, so only a human reading the prose can find them, and only the parser can confirm they're absent from the config.
 
@@ -1363,6 +1396,6 @@ The registry reads component types (the fleet dimension), option values (the pre
 
 ---
 
-**Status:** v1.7.2 — carries v1.7's governance (§10) and stability rules, with Table H made honest, `in` assigned to the two length items, and the three moisture items left deliberately unitless pending an instrument. Emphasis removed from the thirteen §4 Inherits cells (v1.7.1). **No item ids retired or renamed since v1.5; no option values retired ever.**
+**Status:** v1.8 — splits `liv.egress` into four items (`-opens`, `-width`, `-height`, `-sill`) under an authored sub-heading so the core cap holds; retires `liv.egress` with a Table F entry. Carries v1.7's governance (§10), Tables A–H, the option-value lifecycle, reserved item classes, and the emphasis ban. **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
 
-*Three stability rules now share one cause — **a consistency check cannot catch a transformation applied uniformly.** The drift gate, schema validator and round-trip test all compare the config to itself, so a uniform corruption satisfies all three. Item ids, option values and measure units each needed a check against something external: the master's literal text. The field session's corollary, earned twice in one session: **a fix for that class must be tested on the class, not the instance** — an emphasis ban that rejects emphasis but still eats underscores has not been tested on the class.*
+*Three stability rules share one cause — **a consistency check cannot catch a transformation applied uniformly.** The drift gate, schema validator and round-trip test all compare the config to itself, so a uniform corruption satisfies all three. Item ids, option values and measure units each needed a check against something external: the master's literal text. Corollary earned twice in one session: **a fix for that class must be tested on the class, not the instance.** And from v1.8: **a number carries false precision** — a wrong pass/fail is visibly a category error, while a wrong number just looks like a measurement, which is why an id carrying a measure must never be reused for a different question.*

@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.7.2",
+  "configVersion": "1.8.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -401,8 +401,34 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
-          "id": "liv.egress",
-          "text": "Sleeping-room window egress: opens fully; size and sill height measured",
+          "id": "int.owner-quirks",
+          "text": "Anything the owner flagged in this room verified and captured",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "liv.egress-opens",
+          "text": "Window opens fully and stays open without being held",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ],
+          "trigger": {
+            "anyOf": [
+              "zone.sleeping"
+            ]
+          },
+          "group": "Egress (sleeping rooms)"
+        },
+        {
+          "id": "liv.egress-width",
+          "text": "Clear opening width",
           "satisfy": "measure",
           "unit": "in",
           "tier": "core",
@@ -414,17 +440,42 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "anyOf": [
               "zone.sleeping"
             ]
-          }
+          },
+          "group": "Egress (sleeping rooms)"
         },
         {
-          "id": "int.owner-quirks",
-          "text": "Anything the owner flagged in this room verified and captured",
-          "satisfy": "note",
-          "tier": "standard",
+          "id": "liv.egress-height",
+          "text": "Clear opening height",
+          "satisfy": "measure",
+          "unit": "in",
+          "tier": "core",
           "attest": "action",
           "scope": [
             "baseline"
-          ]
+          ],
+          "trigger": {
+            "anyOf": [
+              "zone.sleeping"
+            ]
+          },
+          "group": "Egress (sleeping rooms)"
+        },
+        {
+          "id": "liv.egress-sill",
+          "text": "Sill height above finished floor",
+          "satisfy": "measure",
+          "unit": "in",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ],
+          "trigger": {
+            "anyOf": [
+              "zone.sleeping"
+            ]
+          },
+          "group": "Egress (sleeping rooms)"
         }
       ]
     },

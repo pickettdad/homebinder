@@ -938,3 +938,37 @@ the feature, not a defect.
 Also updated: the core-cap test now groups **base** lists by authored sub-heading (it reported
 `mechanical-base` at 20 core against a cap of 8), and the `utl.*` assertions moved from the
 `utility` zone list to `mechanical-base`, where those ids now live.
+
+### 17.4 Correction — zone-type defaults now resolve at derivation, not at creation
+
+**Owner pushback, and it was right.** I wired `defaultsTrueFor` into the zone-creation UI
+only. Every *other* creation path bypasses it — and the session-plan import is exactly such a
+path. An imported `utility` zone arriving without `has_mechanicals` would have hidden the
+entire mechanical checklist on **visit two, silently**: the v1.6 bug returning through a
+different door, in the one place nobody would be watching for it.
+
+Moved to `activeRefs` via `effectiveAttributes(config, zone)` — the single choke point every
+derivation path already runs through, so no creation path can bypass it. Verified by mutation:
+reverting to raw `zone.attributes` fails the import test.
+
+**ABSENT is not FALSE**, and the distinction is load-bearing. An explicit `false` is the
+inspector's decision — a utility room whose mechanicals were moved out — and it is honoured.
+Only an *unset* attribute falls back to the zone-type default. The creation UI still pre-ticks
+the default so it is visible and untickable; because it writes an explicit value, the two
+never disagree.
+
+The tell the owner named is worth recording: **their fixtures failing was the signal.** Three
+tests broke because they created `utility` zones with `attributes: {}` — which is precisely
+the shape an importer produces. I read that as fixtures needing updating; it was also the bug
+reporting itself.
+
+### 17.5 Change-request for the next master pass — no markdown emphasis in parsed cells
+
+Owner's own diagnosis, recorded so it lands in a version rather than a chat log: `**bold**`
+inside the Inherits cells is what forced emphasis-stripping into the generator, and that
+stripper is what ate the underscores in `has_stairs`. **Emphasis inside a parsed cell is
+decoration for humans and a hazard for machines.**
+
+A §0 dialect line — *no markdown emphasis in parsed cells* — belongs in the next pass. Not
+worth a version bump on its own. The `id fidelity` tests defend the specific failure now, so
+it cannot recur silently, but the rule removes the class rather than the instance.

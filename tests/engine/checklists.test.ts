@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseMaster, emitModule } from "../../scripts/lib/genChecklists";
-import { componentItemsFor, deriveZoneItems } from "../../src/engine/v2/checklist";
+import { componentItemsFor, deriveZoneItems, effectiveAttributes } from "../../src/engine/v2/checklist";
 import { foldV2 } from "../../src/engine/v2/fold";
 import type { Source } from "../../src/engine/schema/events";
 import type { V2EventPayload, V2SessionEvent } from "../../src/engine/v2/events";
@@ -766,5 +766,51 @@ describe("list gates (master v1.6.2)", () => {
     expect(zone(["gas"], true)).toContain("utl.gas-shutoff");
     expect(zone([], true)).not.toContain("utl.gas-shutoff");
     expect(zone(["gas"], false)).not.toContain("utl.gas-shutoff");
+  });
+});
+
+/**
+ * Zone-type attribute defaults resolve at DERIVATION, not at zone creation.
+ *
+ * The creation UI pre-ticks the default too, but a UI-only default is bypassed by every
+ * other creation path — and the session-plan import is exactly such a path. An imported
+ * `utility` zone arriving without `has_mechanicals` would hide the whole mechanical
+ * checklist on visit two, silently: the v1.6 bug returning through a different door.
+ */
+describe("zone-type attribute defaults (master v1.6.1 Table B col 4)", () => {
+  const cfg = validConfig();
+  const zoneEvents = (attributes: Record<string, boolean>) =>
+    mkEvents([
+      { type: "SessionInitialized", configId: "cfg", configVersion: "1.6.2", configHash: "h", propertyFlags: [], propertyLabel: "H" },
+      { type: "ZoneCreated", zoneId: "z", zoneType: "utility", label: "Utility", attributes, level: "basement" },
+    ]);
+  const idsFor = (attributes: Record<string, boolean>) =>
+    deriveZoneItems(cfg, foldV2(zoneEvents(attributes)), "z").map((d) => d.item.id);
+
+  it("a utility zone created WITHOUT the attribute still renders mechanicals (the import path)", () => {
+    expect(idsFor({})).toContain("utl.heat-source");
+  });
+
+  it("an explicit false is honoured — absent is not the same as false", () => {
+    // The inspector's decision: a utility room whose mechanicals were moved out.
+    expect(idsFor({ has_mechanicals: false })).not.toContain("utl.heat-source");
+  });
+
+  it("an explicit true works, and no default leaks into other zone types", () => {
+    expect(idsFor({ has_mechanicals: true })).toContain("utl.heat-source");
+    const bed = foldV2(
+      mkEvents([
+        { type: "SessionInitialized", configId: "cfg", configVersion: "1.6.2", configHash: "h", propertyFlags: [], propertyLabel: "H" },
+        { type: "ZoneCreated", zoneId: "b", zoneType: "living-space", label: "Bed", attributes: {}, level: "main" },
+      ]),
+    );
+    expect(deriveZoneItems(cfg, bed, "b").map((d) => d.item.id)).not.toContain("utl.heat-source");
+  });
+
+  it("effectiveAttributes fills only unset defaults, leaving everything else alone", () => {
+    const zone = foldV2(zoneEvents({ finished: false })).zones[0]!;
+    const eff = effectiveAttributes(cfg, zone);
+    expect(eff.has_mechanicals).toBe(true); // unset → default
+    expect(eff.finished).toBe(false); // explicit → untouched
   });
 });

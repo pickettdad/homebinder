@@ -98,7 +98,24 @@ function checkItemHeader(table: Table): void {
  * the config stayed self-consistent and drift stayed clean. Only the literal id was wrong.
  * Underscore emphasis (`_like this_`) is therefore not supported in id cells; asterisks are.
  */
-const stripTicks = (s: string) => s.replace(/[`*]/g, "").trim();
+/**
+ * Read a parsed cell literally: strip backticks only.
+ *
+ * v1.7 §0 BANS markdown emphasis in parsed cells, so emphasis is now REJECTED rather than
+ * stripped. The history is the argument: v1.6.1 authored `**mechanical-base**`, which forced
+ * a stripper into this function, and a stripper broad enough to remove `**` was broad enough
+ * to remove `_` — which silently renamed `has_stairs` to `hasstairs` and shipped. Failing
+ * closed on emphasis removes the reason the stripper existed.
+ */
+function stripTicks(s: string, line = 0): string {
+  const bare = s.replace(/`/g, "").trim();
+  // Rejected UNCONDITIONALLY, and underscores are never stripped: `has_stairs` is a real id.
+  // The first version of this ban still stripped `_` on the no-line path, which reproduced
+  // the exact corruption the ban exists to prevent — caught only because Table B's ids became
+  // unresolvable to a gate. Emphasis is an error; snake_case is data.
+  if (/\*/.test(bare)) throw new MasterParseError(line, `no markdown emphasis in parsed cells (v1.7 §0): '${s.trim()}'`);
+  return bare;
+}
 
 function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "pinTypes" | "unit" | "options"> {
   const pin = cell.match(/^pin `([^`]+)`$/);
@@ -134,7 +151,7 @@ function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "
  */
 function parseTrigger(cell: string, line: number): ItemInput["trigger"] {
   if (cell === "—" || cell === "-" || cell === "") return undefined;
-  const inner = stripTicks(cell);
+  const inner = stripTicks(cell, line);
   const parts = inner.split("|").map((p) => p.trim());
   if (parts.some((p) => !p)) throw new MasterParseError(line, `empty trigger alternative in: ${cell}`);
   const first = parts[0]!;
@@ -159,7 +176,7 @@ function parseItemRow(table: Table, row: { cells: string[]; line: number }, grou
     const idx = table.header.indexOf(name);
     return idx === -1 ? undefined : cells[idx];
   };
-  const id = stripTicks(col("id") ?? "");
+  const id = stripTicks(col("id") ?? "", line);
   if (!id) throw new MasterParseError(line, "empty id cell");
   const text = (col("text") ?? "").trim();
   if (!text) throw new MasterParseError(line, `item ${id}: empty text cell`);
@@ -247,13 +264,15 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     sessionItems: [],
     componentLists: [],
     componentAliases: [],
+    retiredOptions: [],
+    measureUnits: [],
     naReasons: [],
     layers: [],
   };
 
   type Section =
     | "none" | "taxonomy" | "base" | "zone" | "session" | "component" | "stubs"
-    | "flags" | "attrs" | "na" | "layers" | "aliases";
+    | "flags" | "attrs" | "na" | "layers" | "aliases" | "retired-options" | "units";
   let section: Section = "none";
   let currentList: { ids: string[]; note?: string; inherits?: string; gate?: string } | null = null;
   let currentGroup: string | undefined;
@@ -275,6 +294,8 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
         : /^## C\./.test(line) ? "na"
         : /^## D\./.test(line) ? "layers"
         : /^## E\./.test(line) ? "aliases"
+        : /^## G\./.test(line) ? "retired-options"
+        : /^## H\./.test(line) ? "units"
         : "none";
       currentList = null;
       currentGroup = undefined;
@@ -330,9 +351,9 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           throw new MasterParseError(table.line, `unexpected taxonomy header: ${table.header.join(" | ")}`);
         for (const row of table.rows)
           cfg.zoneTypes!.push({
-            id: stripTicks(row.cells[0] ?? ""),
+            id: stripTicks(row.cells[0] ?? "", row.line),
             typicalLabels: (row.cells[1] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
-            inherits: (row.cells[2] ?? "").split(",").map((s) => stripTicks(s)).filter(Boolean),
+            inherits: (row.cells[2] ?? "").split(",").map((s) => stripTicks(s, row.line)).filter(Boolean),
           });
       } else if (section === "base" || section === "zone" || section === "component" || section === "session") {
         checkItemHeader(table);
@@ -377,7 +398,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           throw new MasterParseError(table.line, `unexpected property-flags header: ${table.header.join(" | ")}`);
         for (const row of table.rows)
           cfg.propertyFlags!.push({
-            id: stripTicks(row.cells[0] ?? ""),
+            id: stripTicks(row.cells[0] ?? "", row.line),
             label: (row.cells[1] ?? "").trim(),
             intakeSource: (row.cells[2] ?? "").trim(),
           });
@@ -397,7 +418,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
               ? []
               : defCell.split(",").map((t) => stripTicks(t)).filter(Boolean);
           cfg.zoneAttributes!.push({
-            id: stripTicks(row.cells[0] ?? ""),
+            id: stripTicks(row.cells[0] ?? "", row.line),
             label: (row.cells[1] ?? "").trim(),
             askAtCreation: ask.startsWith("yes"),
             defaultsTrueFor,
@@ -412,7 +433,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
             throw new MasterParseError(row.line, `N/A note must be optional/recommended: '${note}'`);
           const effect = (row.cells[3] ?? "").trim();
           cfg.naReasons!.push({
-            id: stripTicks(row.cells[0] ?? ""),
+            id: stripTicks(row.cells[0] ?? "", row.line),
             label: (row.cells[1] ?? "").trim(),
             note,
             feedsGapList: /gap list/i.test(effect),
@@ -440,10 +461,36 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
             throw new MasterParseError(row.line, `unparseable layer predicate: '${pred}'`);
           }
           cfg.layers!.push({
-            id: stripTicks(row.cells[0] ?? ""),
+            id: stripTicks(row.cells[0] ?? "", row.line),
             label: (row.cells[1] ?? "").trim(),
             predicate,
           });
+        }
+      } else if (section === "retired-options") {
+        if (table.header.join("|") !== "item|retired value|version|replacement|reason")
+          throw new MasterParseError(table.line, `unexpected Table G header: ${table.header.join(" | ")}`);
+        for (const row of table.rows) {
+          const itemId = stripTicks(row.cells[0] ?? "", row.line);
+          // The seeded placeholder row exists so the first retirement has a home; skip it.
+          if (!itemId || itemId === "—" || itemId === "-") continue;
+          const value = (row.cells[1] ?? "").trim();
+          const replacement = (row.cells[3] ?? "").trim();
+          const reason = (row.cells[4] ?? "").trim();
+          cfg.retiredOptions!.push({
+            itemId,
+            value,
+            version: (row.cells[2] ?? "").trim(),
+            ...(replacement && replacement !== "—" ? { replacement } : {}),
+            ...(reason && reason !== "—" ? { reason } : {}),
+          });
+        }
+      } else if (section === "units") {
+        if (table.header.join("|") !== "unit|means|used by")
+          throw new MasterParseError(table.line, `unexpected Table H header: ${table.header.join(" | ")}`);
+        for (const row of table.rows) {
+          const unit = stripTicks(row.cells[0] ?? "", row.line);
+          if (!unit || unit === "—") continue;
+          cfg.measureUnits!.push({ unit, means: (row.cells[1] ?? "").trim() });
         }
       } else if (section === "aliases") {
         // Table E (v1.5): search-only synonyms. The alias cell is free text — the authored

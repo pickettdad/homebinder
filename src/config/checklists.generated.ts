@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.6.2",
+  "configVersion": "1.7.1",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -4742,6 +4742,221 @@ export const checklistsBaseline: ChecklistConfigInput = {
     },
     {
       "types": [
+        "leak-sensor"
+      ],
+      "items": [
+        {
+          "id": "lks.unit",
+          "text": "Sensor photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "lks.covers",
+          "text": "What it protects recorded (which fixture or appliance)",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "lks.type",
+          "text": "Sensor type",
+          "satisfy": "choice",
+          "options": [
+            "standalone alarm",
+            "hub-connected",
+            "integrated with automatic shutoff",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "lks.power",
+          "text": "Power source and battery state",
+          "satisfy": "choice",
+          "options": [
+            "battery",
+            "plug-in",
+            "hardwired",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "lks.test",
+          "text": "Tested (per manufacturer method)",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "humidifier"
+      ],
+      "items": [
+        {
+          "id": "hum.unit",
+          "text": "Unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "hum.nameplate",
+          "text": "Nameplate photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "hum.pad",
+          "text": "Pad/filter size recorded",
+          "satisfy": "note",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "hum.water",
+          "text": "Supply line and drain condition",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "hum.setting",
+          "text": "Humidistat setting recorded",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "hum.season",
+          "text": "Damper/bypass seasonal position",
+          "satisfy": "choice",
+          "options": [
+            "winter/open",
+            "summer/closed",
+            "no damper",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
+        "dehumidifier"
+      ],
+      "items": [
+        {
+          "id": "deh.unit",
+          "text": "Unit photographed in place",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "deh.nameplate",
+          "text": "Nameplate photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "deh.drainage",
+          "text": "Drainage method",
+          "satisfy": "choice",
+          "options": [
+            "gravity to drain",
+            "condensate pump",
+            "bucket — manual",
+            "unknown"
+          ],
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "deh.draining",
+          "text": "Draining correctly; no standing water at the unit",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "deh.setting",
+          "text": "Humidistat setting recorded",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "deh.filter",
+          "text": "Filter condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
         "retaining-wall"
       ],
       "items": [
@@ -5376,6 +5591,29 @@ export const checklistsBaseline: ChecklistConfigInput = {
     {
       "alias": "flue",
       "type": "chimney"
+    }
+  ],
+  "retiredOptions": [],
+  "measureUnits": [
+    {
+      "unit": "in",
+      "means": "inches"
+    },
+    {
+      "unit": "psi",
+      "means": "pounds per square inch"
+    },
+    {
+      "unit": "%RH",
+      "means": "relative humidity, percent"
+    },
+    {
+      "unit": "year",
+      "means": "four-digit calendar year (gated 1900–current)"
+    },
+    {
+      "unit": "mm",
+      "means": "millimetres"
     }
   ],
   "naReasons": [

@@ -371,6 +371,53 @@ binder builder exists:**
   deferred gaps and a monitor due for re-measure. Design the import shape now so step 7's
   manifest is the matching half of the contract.
 
+### 7a-ii. The plan must carry INSPECTOR DECISIONS, not just identity (owner, 2026-07-28)
+
+**Requirement, for when the import is built. Nothing to change today — the import does not
+exist yet — but the reasoning is recorded here while it is fresh, because the failure it
+prevents is silent and lands on visit two.**
+
+> **The session plan must replay explicit zone attribute values, not just zone identity.**
+
+**The case.** A bungalow with the furnace in a basement corner — the exact house
+`mechanical-base` was built for. Visit one: the inspector creates a `basement` zone and ticks
+`has_mechanicals`, an explicit `true`. Visit two: the plan recreates that zone. If it carries
+identity but not attributes, the attribute arrives **absent**, falls through to the zone-type
+default — and `basement` has none. **The mechanical checklist is empty on visit two.**
+
+**Verified, not assumed:** `defaultsTrueFor` is `has_mechanicals → utility` and nothing else.
+**Twelve of thirteen zone types have no default at all** — `basement`, `crawlspace`, `garage`,
+`site`, and the rest. The derivation-level default (§17.4 of CHECKLIST-MASTER-REVIEW) rescues
+`utility` zones only; it cannot rescue the case the feature exists for.
+
+**Why this is worse than the visit-one version of the same bug.** On visit one an empty
+mechanical list is visibly wrong. On visit two it reads as *"already handled last time."*
+An empty list is indistinguishable from a completed one at a glance.
+
+**Good news on scope: the export already carries both halves.** This is an obligation on the
+*importer*, not a gap in the manifest.
+- Zone attributes: `manifestV3` exports `zones[].attributes` verbatim (v3 §217).
+- N/A reasons: `resolutions[]` carries the full `ItemResolution`, including
+  `{kind:"na", reasonId}`. `no-access` and `deferred` are the two reasons with
+  `feedsGapList: true`, and both survive the export intact.
+
+So the plan builder has the data. The requirement is that it **replays** it.
+
+**The general form, which will recur across the whole round trip:**
+
+> **Anything the inspector decided that is not re-derivable from observation must survive the
+> session plan, or it silently reverts to a default.**
+
+Re-derivable state is safe to drop and recompute — pin proposals, audit counts, trigger
+evaluation. *Decisions* are not: a zone attribute the inspector ticked, an N/A with a reason,
+a deliberate `false` where a default would say true. The test for any field crossing the round
+trip is simply: *could the app work this out again by looking at the house?* If no, it must be
+carried explicitly.
+
+**Acceptance test to write alongside the importer:** a `basement` zone with
+`has_mechanicals: true` and an item resolved `na`/`deferred`, exported and re-imported, must
+produce a mechanical checklist and a gap-list entry identical to the originating visit.
+
 ### 7b. Equipment-registry guarantees (future third product: regional equipment analytics)
 
 Cross-client regional equipment analytics is a future product; the manifest is its data

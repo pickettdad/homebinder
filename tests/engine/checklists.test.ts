@@ -984,9 +984,13 @@ describe("derived-value provenance (master v1.9)", () => {
   const clone = () => JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
 
   it("declares provenance for every artifact-derived value, and each source is a photo", () => {
-    expect(cfg.provenance.map((p) => p.itemId).sort()).toEqual(
-      ["apw.hose-age", "ft.age", "wh.age", "wsf.age"],
-    );
+    // A FLOOR, not an exact set. The first version of this test asserted the exact four rows,
+    // so v1.10 adding pnl.service and pnl.brand — an improvement — failed it. Same mistake as
+    // the alias-capitals test: pinning incidental membership rather than the rule. Removing a
+    // row still fails (a value silently losing its provenance), adding one is free.
+    const declared = cfg.provenance.map((p) => p.itemId);
+    for (const id of ["apw.hose-age", "ft.age", "wh.age", "wsf.age", "pnl.service", "pnl.brand"])
+      expect(declared, `${id} lost its provenance`).toContain(id);
     const all = new Map<string, { satisfy: string }>();
     const walk = (o: unknown): void => {
       if (Array.isArray(o)) return o.forEach(walk);

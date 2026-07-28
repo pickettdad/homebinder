@@ -266,13 +266,14 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     componentAliases: [],
     retiredOptions: [],
     measureUnits: [],
+    provenance: [],
     naReasons: [],
     layers: [],
   };
 
   type Section =
     | "none" | "taxonomy" | "base" | "zone" | "session" | "component" | "stubs"
-    | "flags" | "attrs" | "na" | "layers" | "aliases" | "retired-options" | "units";
+    | "flags" | "attrs" | "na" | "layers" | "aliases" | "retired-options" | "units" | "provenance";
   let section: Section = "none";
   let currentList: { ids: string[]; note?: string; inherits?: string; gate?: string } | null = null;
   let currentGroup: string | undefined;
@@ -296,6 +297,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
         : /^## E\./.test(line) ? "aliases"
         : /^## G\./.test(line) ? "retired-options"
         : /^## H\./.test(line) ? "units"
+        : /^## I\./.test(line) ? "provenance"
         : "none";
       currentList = null;
       currentGroup = undefined;
@@ -483,6 +485,18 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
             ...(replacement && replacement !== "—" ? { replacement } : {}),
             ...(reason && reason !== "—" ? { reason } : {}),
           });
+        }
+      } else if (section === "provenance") {
+        if (table.header.join("|") !== "item|value derived from|source artifact item")
+          throw new MasterParseError(table.line, `unexpected Table I header: ${table.header.join(" | ")}`);
+        for (const row of table.rows) {
+          const itemId = stripTicks(row.cells[0] ?? "", row.line);
+          if (!itemId || itemId === "—") continue;
+          // The source cell may carry a parenthetical note — "`wt.nameplate` *(inherited)*" —
+          // so read the backticked id rather than the whole cell.
+          const src = (row.cells[2] ?? "").match(/`([^`]+)`/)?.[1]?.trim() ?? "";
+          if (!src) throw new MasterParseError(row.line, `Table I: ${itemId} names no source item`);
+          cfg.provenance!.push({ itemId, derivedFrom: (row.cells[1] ?? "").trim(), sourceItemId: src });
         }
       } else if (section === "units") {
         if (table.header.join("|") !== "unit|means|used by")

@@ -1,6 +1,6 @@
-# HouseSteady Field Assistant — Checklist Master (v1.8)
+# HouseSteady Field Assistant — Checklist Master (v1.9)
 
-**Version:** v1.8 · **Date:** 2026-07-28 · **Supersedes:** v1.7.2 (2026-07-28)
+**Version:** v1.9 · **Date:** 2026-07-28 · **Supersedes:** v1.8 (2026-07-28)
 **Governance:** this file is a **governed cross-app contract** — see §10. Field is custodian; the binder builder and the equipment registry are consumers with ratifying interest on named surfaces.
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
@@ -35,6 +35,30 @@ Also corrected: §6's prose claimed *"that attribute, not the zone type, is what
 
 
 
+
+
+**Changelog v1.8 → v1.9 — derived-value provenance, and the two gaps it immediately found.**
+
+v1.8's discussion produced a rule about derived values, stated in prose:
+
+> A value derivable from **other values in the same record** must not be recorded — it can contradict its own inputs. A value derived from an **artifact by applying expertise** should be recorded, **because the source artifact is captured alongside it as the check.**
+
+That last clause is an invariant, and the field session checked it. **It held for one of three items:**
+
+| item | source artifact captured? |
+|---|---|
+| `wh.age` — decoded from serial | ✅ `wh.nameplate` |
+| `ft.age` — "from data plate" | ❌ `fuel-tank` had **no plate item at all** — only `ft.wide`, a locating shot |
+| `apw.hose-age` — "hose year if marked" | ❌ `app.nameplate` photographs the washer, not the hose |
+
+**Nobody's data is wrong today, and that is the problem.** Those ages cannot be re-checked by anyone — not next year, not by a specialist, not by the homeowner. And it lands hardest on the consumer §10 names as unable to argue for itself: **an unverifiable install year enters the fleet aggregate looking identical to a verified one, and nothing downstream can distinguish them.** That is the permanent-corruption case, arriving quietly rather than as a visible break.
+
+**Fixed three ways:**
+1. **`ft.nameplate`** added to `fuel-tank` — data plate photographed. Core, because it is the source of a core value.
+2. **`apw.hose-label`** added to `appliance-washer` — hose date code photographed where legible. Standard, and resolves N/A `none-present` when no date exists, which is itself real data: *the age is unverifiable* rather than silently unverified.
+3. **New Table I — derived-value provenance.** The prose rule becomes a declaration site, per §2. **Any item recording a value transcribed or decoded from a physical artifact must have a Table I entry naming the item that photographs that artifact.** Parser-enforceable: the entry must exist, the source item must exist, and the source item must be a `photo`. That check would have caught both gaps at authoring time rather than two years into a series.
+
+*Scope note:* v1.9 applies the rule to the three age items — the unambiguous cases. **Other candidates exist** (`pnl.service` and `pnl.brand` are read off a panel label; `wt.consumables` off the unit) and are recorded in §9 rather than swept in blind, because whether a choice or a note counts as "transcribed from an artifact" is a judgment the field should make with the items in front of it.
 
 **Changelog v1.7.2 → v1.8 — the egress split. One item retired, four added.**
 
@@ -186,7 +210,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.8)
+## 0. Table dialect (for the generator — v1.9)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
@@ -199,7 +223,7 @@ Both are the same defect: the library was built from mechanical systems outward 
   - measure units in parens — `measure (psi)`, `measure (year)`
   - choice options in parens, pipe-separated — `choice (ball|gate|other|unknown)`
 - **Trigger cells:** `|` means anyOf; ids after the first inherit the prefix of the first (`property.gas|propane` ⇒ `property.gas` OR `property.propane`).
-- Vocabulary tables (A–H at end): columns as declared per table. **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
+- Vocabulary tables (A–I at end): columns as declared per table. **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
 - Malformed rows fail closed.
 
 ---
@@ -262,6 +286,12 @@ water-treatment ┬── water-softener · sediment-filter
 **Id lifecycle — move keeps the id, redefine retires it (v1.4.1).** An item that *moves* to a different list but asks the same question, with the same text and the same `attest`, **keeps its id**; the prefix simply goes historical, and ids are opaque (`liv.egress`, `bsm.finished-behind`). An item that is *redefined* — a different question, or a different `attest`, even in the same slot — **retires**, and the replacement takes a new id. A retired id is never reissued for anything else. The reason is record continuity: a resolution recorded against a retired id becoming attached to a differently-meaning item is false continuity, and a stale test result silently vouching for something nobody checked is worse than an honest orphan.
 
 **The pin-vs-item test (v1.5):** **does the thing need its own position on the map?** If someone must walk somewhere else to reach it, it is a **pin**. If it is on or immediately at another object, it is an **item** on that object's list. A curb stop is at the street while the main shutoff is in the basement — two positions, two pins. A water heater's shutoff is on the water heater — one position, so an item. Getting this wrong puts a thing on the emergency map at the wrong address, which is worse than omitting it.
+
+**Derived values and their provenance (v1.9).** Two kinds of derived value, opposite rules:
+- **Derivable from other values in the same record → do not record it.** Openable area is width × height; recording it creates a number that can contradict its own inputs, with no way to tell which side is wrong. The consumer computes it.
+- **Derived from a physical artifact by applying expertise → record it, and name the artifact.** A serial-decoded install year is not reproducible downstream — decoding schemes are manufacturer-specific — so the field is the right place to record it. **What makes that safe is that the source artifact is captured alongside as the check**, and that is an invariant, not an assumption: **every item recording a value transcribed or decoded from an artifact must have a Table I entry naming the `photo` item that captures it.**
+
+Without the entry the value is unverifiable forever — by the next visit, by a specialist, by the homeowner — while looking exactly as solid as a verified one. That is worst for the equipment registry (§10.3), which cannot distinguish the two and has no session to notice.
 
 **Choice option values carry the id lifecycle (v1.7).** An option value is not display text — it is a **vocabulary another repo binds to.** The builder reads option values as its `answer.*` condition predicates; the equipment registry queries on them. So they follow the same rule as item ids: **never renamed, only retired and replaced**, with retirements recorded in **Table G**. Renaming `poly-B` to `polybutylene` would silently break every downstream condition matching the old string, with no error anywhere — the same shape as an id rename silently breaking a cross-visit series. Adding a new option is safe and needs no ceremony; changing or removing an existing one is a breaking change.
 
@@ -804,8 +834,9 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `ft.wide` | Tank photographed wide | photo | core | evidence |
+| `ft.nameplate` | Data plate photographed legibly | photo | core | evidence |
 | `ft.type` | Tank configuration | choice (above-ground indoor\|above-ground outdoor\|underground\|propane cylinder\|unknown) | core | evidence |
-| `ft.age` | Manufacture year from data plate | measure (year) | core | evidence |
+| `ft.age` | Manufacture year from the data plate | measure (year) | core | evidence |
 | `ft.lines` | Lines and regulator condition | check | core | action |
 | `ft.base` | Base/support condition | check | standard | action |
 | `ft.fill` | Fill/vent configuration noted | note | standard | evidence |
@@ -1026,7 +1057,8 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `apw.hoses` | Supply hose type | choice (braided stainless\|rubber\|unknown) | core | evidence |
-| `apw.hose-age` | Hose year if marked | measure (year) | standard | evidence |
+| `apw.hose-label` | Hose date code photographed where legible | photo | standard | evidence |
+| `apw.hose-age` | Hose year, from the date code | measure (year) | standard | evidence |
 | `apw.stops` | Shutoffs present and accessible | check | core | action |
 | `apw.pan` | Drain pan present if above living space | check | standard | action |
 
@@ -1323,6 +1355,19 @@ Units are declared inline on the item — `measure (psi)` — and this table is 
 
 
 
+## I. Derived-value provenance (v1.9)
+
+Every item recording a value **transcribed or decoded from a physical artifact** names the `photo` item that captures that artifact. **Parser-enforceable:** the entry must exist, the source item must exist, and the source item must be a `photo`. Without it, a recorded value can never be re-checked by anyone.
+
+| item | value derived from | source artifact item |
+|---|---|---|
+| `wh.age` | Serial number, manufacturer-decoded | `wh.nameplate` |
+| `ft.age` | Tank data plate | `ft.nameplate` |
+| `apw.hose-age` | Hose date code | `apw.hose-label` |
+| `wsf.age` | Nameplate or unit label | `wt.nameplate` *(inherited)* |
+
+*Where the source item resolves N/A `none-present` — no legible date code on the hose, no readable plate — **the derived value is legitimately unverifiable, and recording that is real data.** It is the silent unverified value, not the declared one, that corrupts a series.*
+
 ---
 
 ## 8. Deferred content passes
@@ -1346,17 +1391,19 @@ Units are declared inline on the item — `measure (psi)` — and this table is 
 
 7. **The moisture-meter decision — a purchase with a permanent schema consequence.** Three items (`int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`) record a meter reading and stay unitless until an instrument exists. **The scale is set by the meter, and it is set once:** readings taken in %WME cannot be compared to readings in %MC or on a relative 0–100 scale, so switching instruments later corrupts every series retroactively. Decide the meter deliberately, declare its unit in Table H, and treat replacing it as a breaking change requiring a new item rather than a changed unit. *(A pinned meter reading %WME is the common inspection convention, but the choice is the owner's and the declaration follows the instrument, not the other way round.)*
 
-8. **Sub-heading gates would remove a small duplication.** The four egress items each repeat `zone.sleeping` in their trigger cell. A list-level gate (§0) attaches to a `###` list, not to a bold sub-heading, so there is no way to gate a group. Four duplicated cells is tolerable; the pattern is worth watching if another sub-headed conditional group appears. Not worth new dialect for one case.
+8. **Table I sweep — other transcribed values.** v1.9 covers the four age items, which are unambiguous. Other items record values read off a label without a declared source: **`pnl.service`** and **`pnl.brand`** (from the panel label — `pnl.wide` locates the panel but does not read it), and **`wt.consumables`** (size read off the unit). Whether a `choice` or a `note` counts as "transcribed from an artifact" is a judgment worth making with the items in hand rather than swept in blind — but the panel ones look like real candidates, since service size and panel brand are both insurance-relevant and both currently unverifiable.
 
-9. **Sweep for remaining prose-only structural claims.** v1.6.2 moved the last known one (the `mechanical-base` gate) into the dialect. **Anything else in this file that states a structural fact only in a sentence is an undetected instance of the same class.** Worth a deliberate pass by whoever next parses the file end to end — the generator sees the tables, so only a human reading the prose can find them, and only the parser can confirm they're absent from the config.
+9. **Sub-heading gates would remove a small duplication.** The four egress items each repeat `zone.sleeping` in their trigger cell. A list-level gate (§0) attaches to a `###` list, not to a bold sub-heading, so there is no way to gate a group. Four duplicated cells is tolerable; the pattern is worth watching if another sub-headed conditional group appears. Not worth new dialect for one case.
 
-10. **Item-count reconciliation between sessions.** Component types (58) and `.unit` items (23) match exactly across both parses. The item total does not: 345 table rows vs 377 unique ids. Likely rows-in-§5/§6/§7 versus unique ids across base + zone + session + component lists. **The two sessions should reconcile directly with a per-section breakdown** rather than either adopting the other's number — a count that disagrees for an unexamined reason is a count neither should cite.
+10. **Sweep for remaining prose-only structural claims.** v1.6.2 moved the last known one (the `mechanical-base` gate) into the dialect. **Anything else in this file that states a structural fact only in a sentence is an undetected instance of the same class.** Worth a deliberate pass by whoever next parses the file end to end — the generator sees the tables, so only a human reading the prose can find them, and only the parser can confirm they're absent from the config.
 
-11. **The `answer.*` class is the binder's, and the binder must own its vocabulary too.** Conditions on recorded values are out of this file by design (§3). The builder reads this master's `choice` option values as its condition vocabulary — so **renaming or removing an option value is a breaking change for the builder**, not just a content edit. Worth the same care as an item id.
+11. **Item-count reconciliation between sessions.** Component types (58) and `.unit` items (23) match exactly across both parses. The item total does not: 345 table rows vs 377 unique ids. Likely rows-in-§5/§6/§7 versus unique ids across base + zone + session + component lists. **The two sessions should reconcile directly with a per-section breakdown** rather than either adopting the other's number — a count that disagrees for an unexamined reason is a count neither should cite.
 
-12. **§1 emergency-sheet coverage is the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+12. **The `answer.*` class is the binder's, and the binder must own its vocabulary too.** Conditions on recorded values are out of this file by design (§3). The builder reads this master's `choice` option values as its condition vocabulary — so **renaming or removing an option value is a breaking change for the builder**, not just a content edit. Worth the same care as an item id.
 
-13. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
+13. **§1 emergency-sheet coverage is the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+
+14. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
 
 ## 10. Governance (v1.7)
 
@@ -1396,6 +1443,6 @@ The registry reads component types (the fleet dimension), option values (the pre
 
 ---
 
-**Status:** v1.8 — splits `liv.egress` into four items (`-opens`, `-width`, `-height`, `-sill`) under an authored sub-heading so the core cap holds; retires `liv.egress` with a Table F entry. Carries v1.7's governance (§10), Tables A–H, the option-value lifecycle, reserved item classes, and the emphasis ban. **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
+**Status:** v1.9 — adds **Table I derived-value provenance** and the §2 rule behind it, closing two gaps where a recorded value had no capturable source (`ft.age`, `apw.hose-age`). Adds `ft.nameplate` and `apw.hose-label`. Carries v1.8's egress split and v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
 
-*Three stability rules share one cause — **a consistency check cannot catch a transformation applied uniformly.** The drift gate, schema validator and round-trip test all compare the config to itself, so a uniform corruption satisfies all three. Item ids, option values and measure units each needed a check against something external: the master's literal text. Corollary earned twice in one session: **a fix for that class must be tested on the class, not the instance.** And from v1.8: **a number carries false precision** — a wrong pass/fail is visibly a category error, while a wrong number just looks like a measurement, which is why an id carrying a measure must never be reused for a different question.*
+*Four stability rules now share one cause — **a consistency check cannot catch a transformation applied uniformly.** Item ids, option values, measure units and now derived-value provenance each needed a check against something external: the master's literal text, or a captured artifact. Corollaries earned across this run: **a fix for that class must be tested on the class, not the instance** · **a number carries false precision** — a wrong pass/fail is visibly a category error, a wrong number just looks like a measurement · **an unverifiable value is indistinguishable from a verified one**, which is why provenance is an invariant rather than good practice · and **proposing items is not separable from proposing where they render**, because the core cap is per rendered group.*

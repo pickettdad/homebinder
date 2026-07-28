@@ -60,6 +60,7 @@ const componentTypesOf = (pins: PinStateV2[]): Set<string> => {
  * partway through a walk. That is intended — it is stable by manifest time.
  */
 export function activeRefs(
+  config: ChecklistConfig,
   state: SessionStateV2,
   zone: ZoneStateV2 | undefined,
 ): Set<string> {
@@ -67,10 +68,31 @@ export function activeRefs(
   for (const f of state.propertyFlags) refs.add(`property.${f}`);
   for (const t of componentTypesOf(state.pins.filter((p) => !p.retired))) refs.add(`house.${t}`);
   if (zone) {
-    for (const [attr, on] of Object.entries(zone.attributes)) if (on) refs.add(`zone.${attr}`);
+    for (const [attr, on] of Object.entries(effectiveAttributes(config, zone))) if (on) refs.add(`zone.${attr}`);
     for (const t of componentTypesOf(zonePins(state, zone.zoneId))) refs.add(`pin.${t}`);
   }
   return refs;
+}
+
+/**
+ * A zone's attributes with Table B's `defaults true for` applied (master v1.6.1).
+ *
+ * Resolved HERE rather than at zone creation, deliberately. The creation UI also pre-ticks
+ * the default, but a UI-only default is bypassed by every other creation path — and the
+ * session-plan import is exactly such a path. An imported `utility` zone arriving without
+ * `has_mechanicals` would hide the entire mechanical checklist on visit two, silently: the
+ * v1.6 bug returning through a different door. Applying it at derivation means no creation
+ * path can bypass it.
+ *
+ * ABSENT is not the same as FALSE. An explicit `false` is the inspector's decision — a
+ * utility room whose mechanicals were moved out — and it is honoured. Only an unset
+ * attribute falls back to the zone-type default.
+ */
+export function effectiveAttributes(config: ChecklistConfig, zone: ZoneStateV2): Record<string, boolean> {
+  const out: Record<string, boolean> = { ...zone.attributes };
+  for (const attr of config.zoneAttributes)
+    if (!(attr.id in out) && attr.defaultsTrueFor.includes(zone.zoneType)) out[attr.id] = true;
+  return out;
 }
 
 const triggered = (item: ChecklistItem, refs: Set<string>): boolean =>
@@ -121,7 +143,7 @@ export function deriveZoneItems(
   const zone = state.zones.find((z) => z.zoneId === zoneId);
   if (!zone) return [];
   const zoneType = config.zoneTypes.find((t) => t.id === zone.zoneType);
-  const refs = activeRefs(state, zone);
+  const refs = activeRefs(config, state, zone);
   const pins = zonePins(state, zoneId);
   const scope: ItemScope = { kind: "zone", zoneId };
   const out: DerivedItem[] = [];
@@ -182,7 +204,7 @@ export function deriveComponentItems(
   // comparison-position, fp.chimney → chimney) spans the whole session: the evidencing
   // pin legitimately lives in another zone (the chimney pin is on an elevation).
   const allPins = state.pins.filter((p) => !p.retired);
-  const refs = activeRefs(state, state.zones.find((z) => z.zoneId === zoneId));
+  const refs = activeRefs(config, state, state.zones.find((z) => z.zoneId === zoneId));
   for (const p of zonePins(state, zoneId)) {
     if (p.pinType?.kind !== "component") continue;
     const type = p.pinType.componentType;
@@ -232,7 +254,7 @@ export function suggestedPinTypes(config: ChecklistConfig, zoneType: string): st
 
 /** Session items — surface only in the session-close audit (review §3.2). */
 export function deriveSessionItems(config: ChecklistConfig, state: SessionStateV2): DerivedItem[] {
-  const refs = activeRefs(state, undefined);
+  const refs = activeRefs(config, state, undefined);
   const scope: ItemScope = { kind: "session" };
   const allPins = state.pins.filter((p) => !p.retired);
   return config.sessionItems

@@ -468,7 +468,7 @@ describe("checklist derivation (real config)", () => {
     expect(ids).toContain("ses.alarm-coverage");
     expect(ids).toContain("ses.below-recheck");
     expect(ids).not.toContain("ses.wood-heat-pinned"); // property.wood_heat not set
-    expect(activeRefs(state, undefined).has("property.gas")).toBe(true);
+    expect(activeRefs(config, state, undefined).has("property.gas")).toBe(true);
   });
 
   it("audit snapshot counts core/standard/na for the advisory close", () => {

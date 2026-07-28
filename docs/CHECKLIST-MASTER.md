@@ -1,6 +1,6 @@
-# HouseSteady Field Assistant — Checklist Master (v1.9)
+# HouseSteady Field Assistant — Checklist Master (v1.10)
 
-**Version:** v1.9 · **Date:** 2026-07-28 · **Supersedes:** v1.8 (2026-07-28)
+**Version:** v1.10 · **Date:** 2026-07-28 · **Supersedes:** v1.9 (2026-07-28)
 **Governance:** this file is a **governed cross-app contract** — see §10. Field is custodian; the binder builder and the equipment registry are consumers with ratifying interest on named surfaces.
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
@@ -36,6 +36,24 @@ Also corrected: §6's prose claimed *"that attribute, not the zone type, is what
 
 
 
+
+
+**Changelog v1.9 → v1.10 — the §9.8 provenance sweep, resolved, plus the boundary test that made it resolvable.**
+
+**The boundary test (field session, adopted into §2):**
+> **Is there a single artifact a photograph could capture that would let someone else reach the same value?** Yes → Table I entry required. Partly, or the value includes testimony → **do not claim provenance.**
+
+This is what keeps Table I meaning one thing. A provenance row on a value that is *partly* verifiable is worse than no row, because it asserts a check nobody can actually perform.
+
+**Applied to the three §9.8 candidates:**
+- **`pnl.service` and `pnl.brand` — in.** Both come off a panel label. `pnl.wide` locates the panel (a different item class) and `pnl.directory` photographs the circuit directory (a different artifact). Both values are insurance-relevant and both were unverifiable. **`pnl.label` added**, framed for what the dead-front-stays-on policy actually leaves visible: the manufacturer/rating label and the main breaker's amp marking, with the door open.
+- **`wt.consumables` — deliberately out.** "Last change" is usually what the owner says. No photograph verifies testimony, and a provenance row implying the whole value is verifiable would be worse than none. **Recorded as an explicit exclusion in §9 so it is not re-swept later as an oversight.**
+
+**Two further candidates surfaced by the test and left for the field to judge with the items in hand** (§9.8): `fp.sweep` ("last-sweep evidence noted") and `irr.test-record` ("last certification date if documented"). Both read a physical tag, both look like the same class as `pnl.service` — but both are phrased as *evidence noted*, and whether the tag or the concierge's reading of it is the record is a call worth making at the object rather than from here.
+
+**One clarification added to Table I, from the field session's check.** Provenance is **co-visibility on the same pin**, not global existence. Their first implementation verified the source item existed *anywhere* in the config — under which a furnace nameplate would have satisfied a water heater's age. The invariant is that the photograph is taken **of the same object**, resolved across inheritance (`wsf.age → wt.nameplate` passes because the chain is walked, not because the id exists somewhere).
+
+**And the unverifiable declaration must travel.** Where a source item resolves N/A `none-present`, that fact has to reach the consumer through the manifest. Dropped in an aggregation layer, the honesty is lost exactly where it was needed — an unverifiable value re-enters the fleet looking verified.
 
 **Changelog v1.8 → v1.9 — derived-value provenance, and the two gaps it immediately found.**
 
@@ -210,7 +228,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.9)
+## 0. Table dialect (for the generator — v1.10)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
@@ -290,6 +308,10 @@ water-treatment ┬── water-softener · sediment-filter
 **Derived values and their provenance (v1.9).** Two kinds of derived value, opposite rules:
 - **Derivable from other values in the same record → do not record it.** Openable area is width × height; recording it creates a number that can contradict its own inputs, with no way to tell which side is wrong. The consumer computes it.
 - **Derived from a physical artifact by applying expertise → record it, and name the artifact.** A serial-decoded install year is not reproducible downstream — decoding schemes are manufacturer-specific — so the field is the right place to record it. **What makes that safe is that the source artifact is captured alongside as the check**, and that is an invariant, not an assumption: **every item recording a value transcribed or decoded from an artifact must have a Table I entry naming the `photo` item that captures it.**
+
+**Boundary test for Table I (v1.10):** *is there a **single artifact** a photograph could capture that would let someone else reach the same value?* **Yes → an entry is required. Partly, or the value includes testimony → do not claim provenance.** A row on a partly-verifiable value is worse than no row, because it asserts a check nobody can perform. `wt.consumables` ("last change") is the exclusion case: usually what the owner says, and no photograph verifies testimony.
+
+**Provenance is co-visibility on the same pin, not global existence (v1.10).** The source item must be capturable **on the same object**, resolved across component inheritance. A source item sitting on an unrelated component satisfies "exists" and still never gets photographed — under an existence-only check, a furnace nameplate would prove a water heater's age.
 
 Without the entry the value is unverifiable forever — by the next visit, by a specialist, by the homeowner — while looking exactly as solid as a verified one. That is worst for the equipment registry (§10.3), which cannot distinguish the two and has no session to notice.
 
@@ -688,6 +710,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 |---|---|---|---|---|
 | `pnl.wide` | Location photographed wide | photo | core | evidence |
 | `pnl.directory` | Directory photographed | photo | core | evidence |
+| `pnl.label` | Manufacturer/rating label and main breaker amp marking photographed legibly (door open, dead front on) | photo | core | evidence |
 | `pnl.brand` | Make/model recorded; known-issue brands flagged | note | core | evidence |
 | `pnl.service` | Service size | choice (60A\|100A\|125A\|150A\|200A\|400A\|other\|unknown) | core | evidence |
 | `pnl.type` | Overcurrent protection type | choice (breaker\|fuse\|mixed) | core | evidence |
@@ -1357,16 +1380,20 @@ Units are declared inline on the item — `measure (psi)` — and this table is 
 
 ## I. Derived-value provenance (v1.9)
 
-Every item recording a value **transcribed or decoded from a physical artifact** names the `photo` item that captures that artifact. **Parser-enforceable:** the entry must exist, the source item must exist, and the source item must be a `photo`. Without it, a recorded value can never be re-checked by anyone.
+Every item recording a value **transcribed or decoded from a physical artifact** names the `photo` item that captures that artifact. **Parser-enforceable:** the entry must exist, the source item must be a `photo`, and — the invariant that matters — **the source must be capturable on the same pin**, resolved across component inheritance. Global existence is not provenance: a source item on an unrelated component passes "exists" and is never actually taken. Without it, a recorded value can never be re-checked by anyone.
 
 | item | value derived from | source artifact item |
 |---|---|---|
 | `wh.age` | Serial number, manufacturer-decoded | `wh.nameplate` |
 | `ft.age` | Tank data plate | `ft.nameplate` |
 | `apw.hose-age` | Hose date code | `apw.hose-label` |
-| `wsf.age` | Nameplate or unit label | `wt.nameplate` *(inherited)* |
+| `wsf.age` | Nameplate or unit label | `wt.nameplate` *(inherited — resolves across the chain)* |
+| `pnl.service` | Main breaker amp marking / rating label | `pnl.label` |
+| `pnl.brand` | Panel manufacturer label | `pnl.label` |
 
 *Where the source item resolves N/A `none-present` — no legible date code on the hose, no readable plate — **the derived value is legitimately unverifiable, and recording that is real data.** It is the silent unverified value, not the declared one, that corrupts a series.*
+
+***The declaration must travel.*** *An N/A-sourced value has to carry that fact through the manifest to every consumer. Dropped in an aggregation layer, an unverifiable value re-enters the fleet indistinguishable from a verified one — which is the exact failure Table I exists to prevent, reintroduced downstream of the fix.*
 
 ---
 
@@ -1391,7 +1418,7 @@ Every item recording a value **transcribed or decoded from a physical artifact**
 
 7. **The moisture-meter decision — a purchase with a permanent schema consequence.** Three items (`int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`) record a meter reading and stay unitless until an instrument exists. **The scale is set by the meter, and it is set once:** readings taken in %WME cannot be compared to readings in %MC or on a relative 0–100 scale, so switching instruments later corrupts every series retroactively. Decide the meter deliberately, declare its unit in Table H, and treat replacing it as a breaking change requiring a new item rather than a changed unit. *(A pinned meter reading %WME is the common inspection convention, but the choice is the owner's and the declaration follows the instrument, not the other way round.)*
 
-8. **Table I sweep — other transcribed values.** v1.9 covers the four age items, which are unambiguous. Other items record values read off a label without a declared source: **`pnl.service`** and **`pnl.brand`** (from the panel label — `pnl.wide` locates the panel but does not read it), and **`wt.consumables`** (size read off the unit). Whether a `choice` or a `note` counts as "transcribed from an artifact" is a judgment worth making with the items in hand rather than swept in blind — but the panel ones look like real candidates, since service size and panel brand are both insurance-relevant and both currently unverifiable.
+8. **Table I sweep — resolved, with two candidates left open.** `pnl.service` and `pnl.brand` are **in** (v1.10, sourced to `pnl.label`). **`wt.consumables` is deliberately excluded** — "last change" is usually testimony, and no photograph verifies testimony; recorded here so it is not re-swept later as an oversight. **Two candidates remain open for a judgment made with the items in hand:** `fp.sweep` ("last-sweep evidence noted") and `irr.test-record` ("last certification date if documented"). Both read a physical tag and look like the `pnl.service` class — but both are phrased as *evidence noted*, and whether the tag or the concierge's reading of it is the record is a call best made at the object. Apply the §2 boundary test.
 
 9. **Sub-heading gates would remove a small duplication.** The four egress items each repeat `zone.sleeping` in their trigger cell. A list-level gate (§0) attaches to a `###` list, not to a bold sub-heading, so there is no way to gate a group. Four duplicated cells is tolerable; the pattern is worth watching if another sub-headed conditional group appears. Not worth new dialect for one case.
 
@@ -1443,6 +1470,6 @@ The registry reads component types (the fleet dimension), option values (the pre
 
 ---
 
-**Status:** v1.9 — adds **Table I derived-value provenance** and the §2 rule behind it, closing two gaps where a recorded value had no capturable source (`ft.age`, `apw.hose-age`). Adds `ft.nameplate` and `apw.hose-label`. Carries v1.8's egress split and v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
+**Status:** v1.10 — resolves the §9.8 provenance sweep: `pnl.service` and `pnl.brand` gain a source (`pnl.label`), `wt.consumables` is deliberately excluded as testimony, two candidates stay open. Adds the **boundary test** and the **co-visibility invariant** to §2. Carries v1.9's Table I, v1.8's egress split, v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
 
-*Four stability rules now share one cause — **a consistency check cannot catch a transformation applied uniformly.** Item ids, option values, measure units and now derived-value provenance each needed a check against something external: the master's literal text, or a captured artifact. Corollaries earned across this run: **a fix for that class must be tested on the class, not the instance** · **a number carries false precision** — a wrong pass/fail is visibly a category error, a wrong number just looks like a measurement · **an unverifiable value is indistinguishable from a verified one**, which is why provenance is an invariant rather than good practice · and **proposing items is not separable from proposing where they render**, because the core cap is per rendered group.*
+*Four stability rules share one cause — **a consistency check cannot catch a transformation applied uniformly.** Item ids, option values, measure units and derived-value provenance each needed a check against something external: the master's literal text, or a captured artifact. Corollaries earned across this run: **a fix for that class must be tested on the class, not the instance** · **a number carries false precision** — a wrong pass/fail is visibly a category error, a wrong number just looks like a measurement · **an unverifiable value is indistinguishable from a verified one**, which is why provenance is an invariant and why the unverifiable declaration must travel to the consumer · **existence is not provenance** — the artifact must be capturable on the same object · and **proposing items is not separable from proposing where they render**, because the core cap is per rendered group.*

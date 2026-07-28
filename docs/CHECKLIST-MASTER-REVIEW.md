@@ -1250,3 +1250,78 @@ split later — size from the artifact, last-change as testimony — the size ha
 **The general test I would apply:** *is there a single artifact a photograph could capture that
 would let someone else reach the same value?* Yes → Table I. Partly, or the value includes
 testimony → do not claim provenance for it.
+
+---
+
+## 23. v1.10 intake — §9.8 resolved (2026-07-28)
+
+**Accepted and installed.** 406 → 407 items. `pnl.label` added (photo/core) and sourced for
+both `pnl.service` and `pnl.brand`; `wt.consumables` deliberately excluded and **recorded as an
+exclusion**. Six provenance rows, all resolving.
+
+Recording the exclusion is the right call and worth naming: **an explicit exclusion is
+evidence of a decision; a silent absence is indistinguishable from an oversight.** That is the
+same principle as `none-present` being real data, applied one level up — to the master's own
+authoring history rather than to a house.
+
+### 23.1 The downstream requirement is already satisfiable — verified
+
+Table I now says an N/A-sourced value must carry that fact through the manifest. Checked
+whether the export can support that today, since a requirement that needs a schema change is a
+different conversation from one that needs a consumer to do the join:
+
+- **Table I ships in the manifest.** `ExportV2Screen` passes `configSnapshot: v2Config` — the
+  whole config, so `provenance` rides along. Confirmed present in the generated config.
+- **N/A reasons ship too.** `resolutions[]` carries the full `ItemResolution`, including
+  `{kind:"na", reasonId}`, per scope.
+
+So the join is available: for a derived value resolved on pin X, look up its Table I source
+item's resolution on pin X. **No manifest change is needed.** What remains is a consumer
+obligation — and the failure mode if it is skipped is the one Table I exists to prevent,
+reintroduced past the fix, so it is worth an acceptance test on the binder side rather than an
+assumption.
+
+### 23.2 `fp.sweep` and `irr.test-record` — the deferral can be dissolved
+
+Both read as the `pnl.service` class, and both are phrased as *evidence noted*:
+
+| item | text |
+|---|---|
+| `fp.sweep` | Last-sweep evidence noted |
+| `irr.test-record` | Last certification/test date if documented |
+
+The judgment being deferred is *"is the record the tag, or the concierge's reading of it?"*
+**It does not have to be made at authoring time**, because v1.9's own N/A semantics already
+cover both worlds:
+
+- A sweep tag or a backflow test report **exists** → photograph it, and the provenance row is
+  honest.
+- No tag, owner's recollection only → the source item resolves N/A `none-present`, and the
+  value is **declared unverifiable**, which v1.9 established is real data.
+
+So the shape that works is the same one used everywhere else: add the artifact photo item, add
+the Table I row, and let `none-present` carry the testimony case. The alternative — leaving
+them unsourced — silently records testimony and artifact-read values in the same field with no
+way to tell them apart, which is precisely what Table I was built to stop.
+
+This differs from `wt.consumables`, and the difference is the boundary test: `wt.consumables`
+bundles an artifact value (filter size) *and* testimony (last change) **in one field**, so no
+single photograph reaches the whole value. `fp.sweep` and `irr.test-record` are one value each,
+sometimes evidenced and sometimes not — which is a *resolution* state, not a split.
+
+**Recommendation:** `fp.sweep-tag` and `irr.test-tag` (photo/standard), two Table I rows.
+Owner's call, and it is a field judgment about what is actually photographable.
+
+### 23.3 My provenance test was over-specified — same mistake, new place
+
+It asserted the **exact** four provenance rows, so v1.10 adding two — an improvement — failed
+it. Identical in shape to the alias-capitals test in §15.2: pinning incidental membership
+rather than the rule.
+
+Rewritten as a **floor**: the known rows must be present (removing one still fails — a value
+silently losing its provenance), while adding rows is free. The rule itself — every source is a
+photo, co-visible across inheritance — was already asserted separately and is what actually
+guards the invariant.
+
+Twice now the same failure has cost a build. The pattern to watch: **a test that enumerates
+what exists will fire on every addition; a test that states what must hold will not.**

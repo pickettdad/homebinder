@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.9.0",
+  "configVersion": "1.10.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -2317,6 +2317,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
         {
           "id": "pnl.directory",
           "text": "Directory photographed",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "pnl.label",
+          "text": "Manufacturer/rating label and main breaker amp marking photographed legibly (door open, dead front on)",
           "satisfy": "photo",
           "tier": "core",
           "attest": "evidence",
@@ -5713,6 +5723,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "itemId": "wsf.age",
       "derivedFrom": "Nameplate or unit label",
       "sourceItemId": "wt.nameplate"
+    },
+    {
+      "itemId": "pnl.service",
+      "derivedFrom": "Main breaker amp marking / rating label",
+      "sourceItemId": "pnl.label"
+    },
+    {
+      "itemId": "pnl.brand",
+      "derivedFrom": "Panel manufacturer label",
+      "sourceItemId": "pnl.label"
     }
   ],
   "naReasons": [

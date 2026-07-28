@@ -87,12 +87,18 @@ function checkItemHeader(table: Table): void {
 }
 
 /**
- * Strip backticks AND markdown emphasis from a cell before reading it as an id.
- * v1.6.1 authored the new inherits entry as `**mechanical-base**` for emphasis; without
- * this the asterisks became part of the id and thirteen zone types inherited a base list
- * that did not exist. Ids never contain `*` or `_`, so removing them is always safe.
+ * Strip backticks and ASTERISK emphasis from a cell before reading it as an id.
+ * v1.6.1 authored the new inherits entry as `**mechanical-base**`; unstripped, the asterisks
+ * became part of the id and thirteen zone types inherited a base list that did not exist.
+ *
+ * UNDERSCORES ARE NOT STRIPPED. Zone-attribute and property-flag ids are snake_case
+ * (`has_stairs`, `exterior_wall`, `wood_heat`), so stripping `_` silently renamed them to
+ * `hasstairs` / `exteriorwall`. That regression shipped, and no test caught it because the
+ * generator corrupted the Table B id AND the `zone.has_stairs` trigger ref identically —
+ * the config stayed self-consistent and drift stayed clean. Only the literal id was wrong.
+ * Underscore emphasis (`_like this_`) is therefore not supported in id cells; asterisks are.
  */
-const stripTicks = (s: string) => s.replace(/[`*_]/g, "").trim();
+const stripTicks = (s: string) => s.replace(/[`*]/g, "").trim();
 
 function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "pinTypes" | "unit" | "options"> {
   const pin = cell.match(/^pin `([^`]+)`$/);
@@ -179,22 +185,48 @@ function parseItemRow(table: Table, row: { cells: string[]; line: number }, grou
 }
 
 /** `### \`utility\` (renders grouped …)` → { ids: ["utility"], note: "renders grouped …" } */
-function parseTaggedHeading(line: string, n: number): { ids: string[]; note?: string; inherits?: string } {
-  // v1.4 component inheritance: "### `child` — inherits `parent`". The clause MUST be
-  // stripped before ids are collected — otherwise the parent reads as a second id on the
-  // heading, which is the existing syntax for a *shared* list (`smoke-alarm` / `co-alarm`),
-  // and the two types would merge into one list instead of one inheriting the other.
-  // The guard below turns that into a clear error; without it the failure still surfaces,
-  // but as a confusing "duplicate component type" from the validator three steps later.
-  const inheritsMatch = line.match(/[—-]\s*inherits\s+`([^`]+)`\s*$/);
-  const head = inheritsMatch ? line.slice(0, line.indexOf(inheritsMatch[0])) : line;
+/**
+ * Parse a list heading into its id(s) and its modifier clauses.
+ *
+ * Every clause is backticked, and so are the ids — so each clause MUST be removed before
+ * ids are collected. Two ids on a component heading already means a *shared* list
+ * (`smoke-alarm` / `co-alarm`), so a leaked clause silently merges unrelated types rather
+ * than erroring. The guards below turn those into clear failures instead.
+ *
+ *   ### `child` — inherits `parent`                                       (v1.4)
+ *   ### `mechanical-base` — gated on `zone.attr` (renders grouped by …)   (v1.6.2)
+ *
+ * The gate clause is NOT anchored at end-of-line: v1.6.2 authors it before the parenthesised
+ * rendering note.
+ */
+function parseTaggedHeading(
+  line: string,
+  n: number,
+): { ids: string[]; note?: string; inherits?: string; gate?: string } {
+  const clause = (re: RegExp) => {
+    const m = line.match(re);
+    return m ? { text: m[0], value: m[1]!.trim() } : null;
+  };
+  const inheritsC = clause(/[—-]\s*inherits\s+`([^`]+)`/);
+  const gateC = clause(/[—-]\s*gated on\s+`([^`]+)`/);
+
+  let head = line;
+  for (const c of [inheritsC, gateC]) if (c) head = head.replace(c.text, " ");
+
   const ids = [...head.matchAll(/`([^`]+)`/g)].map((m) => m[1]!.trim());
   if (!ids.length) throw new MasterParseError(n, `heading names no backticked id: ${line}`);
   const note = head.match(/\(([^)]+)\)\s*$/)?.[1];
-  const inherits = inheritsMatch?.[1]!.trim();
-  if (inherits && ids.length !== 1)
+  if (inheritsC && ids.length !== 1)
     throw new MasterParseError(n, `an inheriting component heading must name exactly one id: ${line}`);
-  return { ids, ...(note ? { note } : {}), ...(inherits ? { inherits } : {}) };
+  // "A list may carry at most one gate" (§0). Two would need an AND the dialect doesn't declare.
+  if (gateC && /gated on/.test(head))
+    throw new MasterParseError(n, `a list may carry at most one gate: ${line}`);
+  return {
+    ids,
+    ...(note ? { note } : {}),
+    ...(inheritsC ? { inherits: inheritsC.value } : {}),
+    ...(gateC ? { gate: gateC.value } : {}),
+  };
 }
 
 export function parseMaster(markdown: string): ChecklistConfigInput {
@@ -223,7 +255,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     | "none" | "taxonomy" | "base" | "zone" | "session" | "component" | "stubs"
     | "flags" | "attrs" | "na" | "layers" | "aliases";
   let section: Section = "none";
-  let currentList: { ids: string[]; note?: string; inherits?: string } | null = null;
+  let currentList: { ids: string[]; note?: string; inherits?: string; gate?: string } | null = null;
   let currentGroup: string | undefined;
 
   let i = 0;
@@ -322,13 +354,13 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           const baseId = currentList.ids[0]!;
           const existingBase = cfg.baseLists!.find((b) => b.id === baseId);
           if (existingBase) existingBase.items.push(...items);
-          else cfg.baseLists!.push({ id: baseId, items });
+          else cfg.baseLists!.push({ id: baseId, items, ...(currentList.gate ? { gate: currentList.gate } : {}) });
         } else if (section === "zone") {
           // Utility's grouped tables arrive one sub-heading at a time — merge per zone type.
           const zoneType = currentList.ids[0]!;
           const existing = cfg.zoneLists!.find((z) => z.zoneType === zoneType);
           if (existing) existing.items.push(...items);
-          else cfg.zoneLists!.push({ zoneType, items });
+          else cfg.zoneLists!.push({ zoneType, items, ...(currentList.gate ? { gate: currentList.gate } : {}) });
         } else {
           const entry: NonNullable<ChecklistConfigInput["componentLists"]>[number] = {
             types: currentList.ids,
@@ -336,6 +368,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           };
           if (currentList.note) entry.note = currentList.note;
           if (currentList.inherits) entry.inherits = currentList.inherits;
+          if (currentList.gate) entry.gate = currentList.gate;
           cfg.componentLists!.push(entry);
           currentList = null;
         }

@@ -874,3 +874,67 @@ of it — the engine and the content stay reviewable apart.
 The 345-vs-377 item-count reconciliation (now v1.6.1 §9.7) is not addressed here. My figure
 counts **unique item ids across base + zone + session + component lists**. Happy to produce
 the per-section breakdown whenever the binder session wants to run it side by side.
+
+---
+
+## 17. v1.6.2 intake — list gates land, plus a regression I shipped (2026-07-27)
+
+**Accepted and installed.** The list gate is adopted as declared. `mechanical-base` carries
+`gated on zone.has_mechanicals`, is inherited by all 13 zone types, and renders as **6 groups,
+max 7 core** — the §2 cap holds. **384 items**, 59 real component types + 9 stubs, 56 aliases.
+
+Gate semantics implemented exactly as §0 declares: `allOf(list gate, item trigger)`. Verified
+three ways on the Fuel case — gas + mechanicals shows `utl.gas-shutoff`; mechanicals without
+gas hides it; gas without mechanicals hides it. Component lists apply their **own** gate to
+their own items, so a parent's gate never silently conditions a child's.
+
+`defaultsTrueFor` is wired into zone creation: picking `utility` pre-ticks `has_mechanicals`,
+read from config and never hardcoded — one tap to turn off, one tap to turn on anywhere else.
+
+### 17.1 REGRESSION I SHIPPED — snake_case ids were being mangled
+
+The emphasis-stripper added for v1.6.1 (`stripTicks`) stripped `_` as well as `*`. Zone
+attribute and property flag ids are **snake_case**. PR #52 therefore shipped
+`has_stairs → hasstairs`, `has_plumbing → hasplumbing`, `exterior_wall → exteriorwall` into
+main.
+
+**Why nothing caught it.** The generator corrupted *both sides identically* — the Table B id
+**and** the `zone.has_stairs` trigger ref — so the config stayed internally consistent, the
+validator was satisfied, and the drift gate compared a corrupt config against an equally
+corrupt regeneration. Every existing test asked "do these agree?"; none asked "is this the
+id the master actually wrote?"
+
+**Found by v1.6.2's new gate validation**, which failed with *"gate on unknown zone attribute
+has_mechanicals"* — the first check that compared a parsed id against a *different* parsed
+id rather than against itself.
+
+Fixed: underscores are no longer stripped (underscore emphasis is unsupported in id cells;
+asterisks are). New `id fidelity` tests assert the literal ids and that every `zone.*` ref —
+trigger or gate — resolves to a declared attribute. That is the assertion class that was
+missing: **consistency checks cannot catch a transformation applied uniformly.**
+
+Impact was limited: the ids were self-consistent, so no session recorded wrong data. But the
+manifest's zone-attribute vocabulary was wrong, and any future session data would not have
+matched pre-#52 sessions.
+
+### 17.2 Prose sweep (their §9.7 request)
+
+Ran the pass they asked for: every backticked token in non-table lines, checked against the
+generated config — 242 tokens. **Seven do not resolve, and all seven are correct**:
+`bth.toilet-secure`, `bth.tub-surround`, `kit.dw-connection`, `kit.fridge-line`,
+`kit.fuel-range`, `lnd.hoses`, `wm.curbstop` — the deliberately retired ids, named in
+retirement notes.
+
+**No prose-only structural claim survives in v1.6.2.** The sweep is cheap and worth repeating
+at each intake; it is now scripted in this turn's history rather than described.
+
+### 17.3 Test fixtures updated, and why that is the gate working
+
+Three pre-existing tests failed on install because their `utility` zones were created with
+`attributes: {}`. Under v1.6.2 that correctly hides every mechanical item. Fixtures now set
+`has_mechanicals: true`, matching what the app does via `defaultsTrueFor` — the failures were
+the feature, not a defect.
+
+Also updated: the core-cap test now groups **base** lists by authored sub-heading (it reported
+`mechanical-base` at 20 core against a cap of 8), and the `utl.*` assertions moved from the
+`utility` zone list to `mechanical-base`, where those ids now live.

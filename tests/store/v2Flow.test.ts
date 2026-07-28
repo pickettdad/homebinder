@@ -31,7 +31,7 @@ describe("v2 walk flow through the store", () => {
     expect(s().v2Session?.propertyLabel).toBe("41 Birch Lane");
     expect(s().screen).toEqual({ name: "walk" });
 
-    const utl = await s().createZone("utility", "Utility room", {});
+    const utl = await s().createZone("utility", "Utility room", { has_mechanicals: true });
     const bed = await s().createZone("living-space", "Guest room", { sleeping: true });
     expect(s().v2Session?.zones).toHaveLength(2);
 
@@ -85,7 +85,7 @@ describe("v2 walk flow through the store", () => {
     await s().startSessionV2({ propertyFlags: [], propertyLabel: "41 Birch Lane" });
 
     // Storey level rides along at creation and groups the walk screen.
-    const utl = await s().createZone("utility", "Utility", {}, "basement");
+    const utl = await s().createZone("utility", "Utility", { has_mechanicals: true }, "basement");
     expect(s().v2Session?.zones[0]?.level).toBe("basement");
 
     const canvasId = await s().addCanvas(utl, jpeg("panel-wall"));

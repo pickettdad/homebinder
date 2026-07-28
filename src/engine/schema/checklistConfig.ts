@@ -90,6 +90,16 @@ export type ChecklistItem = z.output<typeof itemSchema>;
 
 const baseListSchema = z.object({
   id: idSchema,
+  /**
+   * List-level gate (master v1.6.2 §0): every item in this list is conditioned on this ref.
+   * Where an item ALSO carries its own trigger, the effective condition is
+   * allOf(gate, item.trigger) — the item cell's `|` stays anyOf internally.
+   *
+   * This is the only way to express an AND of two refs: a trigger cell cannot. It is also
+   * the fix for a whole defect class — the gate previously lived in a heading sentence the
+   * generator never read, so 21 of 24 mechanical items shipped ungated.
+   */
+  gate: triggerRefSchema.optional(),
   items: z.array(itemSchema).min(1),
 });
 export type BaseList = z.output<typeof baseListSchema>;
@@ -104,6 +114,7 @@ export type ZoneTypeDef = z.output<typeof zoneTypeSchema>;
 
 const zoneListSchema = z.object({
   zoneType: idSchema,
+  gate: triggerRefSchema.optional(),
   items: z.array(itemSchema).min(1),
 });
 export type ZoneList = z.output<typeof zoneListSchema>;
@@ -128,6 +139,7 @@ const componentListSchema = z.object({
    * inheritance already happens: at derivation.
    */
   inherits: idSchema.optional(),
+  gate: triggerRefSchema.optional(),
   items: z.array(itemSchema).default([]),
 });
 export type ComponentList = z.output<typeof componentListSchema>;
@@ -299,6 +311,19 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
     addUnique(zoneListTypes, zl.zoneType, "zone list");
     if (!zoneTypeIds.has(zl.zoneType)) issue(`zone list references unknown zone type ${zl.zoneType}`);
   }
+
+  // List gates (v1.6.2) resolve against the same closed vocabulary as item triggers.
+  const checkGate = (gate: string | undefined, where: string) => {
+    if (!gate) return;
+    const [ns, rest] = [gate.slice(0, gate.indexOf(".")), gate.slice(gate.indexOf(".") + 1)];
+    if (ns === "property" && !flagIds.has(rest)) issue(`${where}: gate on unknown property flag ${rest}`);
+    if (ns === "zone" && !attrIds.has(rest)) issue(`${where}: gate on unknown zone attribute ${rest}`);
+    if ((ns === "pin" || ns === "house") && !componentTypeIds.has(rest))
+      issue(`${where}: gate on unknown component type ${rest}`);
+  };
+  for (const b of cfg.baseLists) checkGate(b.gate, `base ${b.id}`);
+  for (const z of cfg.zoneLists) checkGate(z.gate, `zone ${z.zoneType}`);
+  for (const c of cfg.componentLists) checkGate(c.gate, `component ${c.types.join("/")}`);
 
   const itemIds = new Set<string>();
   const checkItem = (item: ChecklistItem, where: string, atSessionScope = false) => {

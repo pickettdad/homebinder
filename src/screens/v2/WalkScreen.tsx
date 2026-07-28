@@ -194,6 +194,18 @@ export function WalkScreen() {
                   setTypeId(t.id);
                   if (!label.trim()) setLabel(t.typicalLabels[0] ?? t.id);
                   setLevel(t.id === "basement" || t.id === "crawlspace" ? "basement" : t.id === "attic" ? "attic" : defaultLevelFor(t.inherits));
+                  // Table B `defaults true for` (master v1.6.1): picking `utility` pre-ticks
+                  // has_mechanicals. Read from config, never hardcoded — the whole point of
+                  // the column is that the rule is data. Still one tap to turn off, and any
+                  // other zone is one tap to turn on, which is what makes mechanicals render
+                  // where they physically are rather than where the room got named.
+                  setAttrs(
+                    new Set(
+                      config.zoneAttributes
+                        .filter((a) => a.askAtCreation && a.defaultsTrueFor.includes(t.id))
+                        .map((a) => a.id),
+                    ),
+                  );
                 }}
                 className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${
                   typeId === t.id ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"

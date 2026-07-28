@@ -13,7 +13,7 @@
  *  - action items are NEVER proposed. No matching evidence, pin, tag, or AI output
  *    can move them off "unresolved" — only an explicit human ItemResolved can.
  */
-import type { ChecklistConfig, ChecklistItem, ChecklistWhen } from "../schema/checklistConfig";
+import type { ChecklistConfig, ChecklistItem, ChecklistWhen, ComponentList } from "../schema/checklistConfig";
 import { evaluateTrigger } from "../schema/checklistConfig";
 import type { ItemScope } from "./events";
 import { resolutionKey } from "./fold";
@@ -76,6 +76,16 @@ export function activeRefs(
 const triggered = (item: ChecklistItem, refs: Set<string>): boolean =>
   !item.trigger || evaluateTrigger(item.trigger as ChecklistWhen, refs);
 
+/**
+ * A list gate ANDs with each item's own trigger (master v1.6.2 §0): an item renders only
+ * where allOf(gate, item.trigger) holds. This is the only way to express an AND of two refs
+ * — a trigger cell is anyOf internally — and it is what makes the Fuel case work: a propane
+ * item fires where the zone has mechanicals AND the property has propane.
+ */
+const passesGate = (gate: string | undefined, refs: Set<string>): boolean => !gate || refs.has(gate);
+const shows = (item: ChecklistItem, gate: string | undefined, refs: Set<string>): boolean =>
+  passesGate(gate, refs) && triggered(item, refs);
+
 function statusOf(
   state: SessionStateV2,
   scope: ItemScope,
@@ -119,14 +129,14 @@ export function deriveZoneItems(
   for (const baseId of zoneType?.inherits ?? []) {
     const base = config.baseLists.find((b) => b.id === baseId);
     for (const item of base?.items ?? [])
-      if (triggered(item, refs))
+      if (shows(item, base?.gate, refs))
         // item.group ?? baseId: base lists may now carry authored sub-headings (v1.6.1),
         // and mechanical-base depends on them to stay inside the per-group core cap.
         out.push({ item, scope, group: item.group ?? baseId, status: statusOf(state, scope, item, pins) });
   }
   const own = config.zoneLists.find((zl) => zl.zoneType === zone.zoneType);
   for (const item of own?.items ?? [])
-    if (triggered(item, refs))
+    if (shows(item, own?.gate, refs))
       out.push({
         item,
         scope,
@@ -144,18 +154,22 @@ export function deriveZoneItems(
  * a cycle here would hang the audit rather than fail a build. `validateChecklistConfig`
  * rejects cycles up front; this is the belt to that braces.
  */
-export function componentItemsFor(config: ChecklistConfig, type: string): ChecklistItem[] {
-  const chain: ChecklistItem[][] = [];
+export function componentListChain(config: ChecklistConfig, type: string): ComponentList[] {
+  const chain: ComponentList[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined = type;
   while (cursor && !seen.has(cursor)) {
     seen.add(cursor);
     const list = config.componentLists.find((c) => c.types.includes(cursor!));
     if (!list) break;
-    chain.unshift(list.items); // parent ends up ahead of child
+    chain.unshift(list); // parent ends up ahead of child
     cursor = list.inherits;
   }
-  return chain.flat();
+  return chain;
+}
+
+export function componentItemsFor(config: ChecklistConfig, type: string): ChecklistItem[] {
+  return componentListChain(config, type).flatMap((l) => l.items);
 }
 
 export function deriveComponentItems(
@@ -168,6 +182,7 @@ export function deriveComponentItems(
   // comparison-position, fp.chimney → chimney) spans the whole session: the evidencing
   // pin legitimately lives in another zone (the chimney pin is on an elevation).
   const allPins = state.pins.filter((p) => !p.retired);
+  const refs = activeRefs(state, state.zones.find((z) => z.zoneId === zoneId));
   for (const p of zonePins(state, zoneId)) {
     if (p.pinType?.kind !== "component") continue;
     const type = p.pinType.componentType;
@@ -181,8 +196,12 @@ export function deriveComponentItems(
     // splitting inherited items into their own rendered group would show the inspector two
     // headings for one water softener, which is the fragmentation the zone-vs-object work
     // exists to remove.
-    for (const item of componentItemsFor(config, type))
-      out.push({ item, scope, group, status: statusOf(state, scope, item, allPins) });
+    // Each list in the chain applies its OWN gate to its own items — a parent's gate must
+    // not silently condition a child's items or vice versa.
+    for (const l of componentListChain(config, type))
+      for (const item of l.items)
+        if (shows(item, l.gate, refs))
+          out.push({ item, scope, group, status: statusOf(state, scope, item, allPins) });
   }
   return out;
 }

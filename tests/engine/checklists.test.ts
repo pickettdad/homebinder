@@ -13,7 +13,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parseMaster, emitModule } from "../../scripts/lib/genChecklists";
-import { componentItemsFor } from "../../src/engine/v2/checklist";
+import { componentItemsFor, deriveZoneItems } from "../../src/engine/v2/checklist";
+import { foldV2 } from "../../src/engine/v2/fold";
+import type { Source } from "../../src/engine/schema/events";
+import type { V2EventPayload, V2SessionEvent } from "../../src/engine/v2/events";
+
+const _src: Source = { actor: "human", actorId: "t", device: "t", appVersion: "t" };
+const mkEvents = (payloads: V2EventPayload[]): V2SessionEvent[] =>
+  payloads.map((payload, i) => ({ ...payload, eventId: `e${i}`, sessionId: "s", seq: i + 1, at: new Date(Date.UTC(2026,6,27,0,0,i)).toISOString(), schemaVersion: 2, source: _src }) as V2SessionEvent);
 import { normalizeAlias } from "../../src/engine/schema/checklistConfig";
 import { checklistsBaseline } from "../../src/config/checklists.generated";
 import {
@@ -86,7 +93,16 @@ describe("content invariants (master v1.1 discipline)", () => {
     const groups: { name: string; core: number }[] = [];
     const countCore = (items: ChecklistItem[]) => items.filter((i) => i.tier === "core").length;
 
-    for (const b of cfg.baseLists) groups.push({ name: `base:${b.id}`, core: countCore(b.items) });
+    // Base lists group by authored sub-heading too since v1.6.1 — mechanical-base carries
+    // six. Counting a base list as one group reported it at 20 core against a cap of 8.
+    for (const b of cfg.baseLists) {
+      const byGroup = new Map<string, ChecklistItem[]>();
+      for (const item of b.items) {
+        const key = item.group ?? "(base)";
+        byGroup.set(key, [...(byGroup.get(key) ?? []), item]);
+      }
+      for (const [key, items] of byGroup) groups.push({ name: `base:${b.id}:${key}`, core: countCore(items) });
+    }
     for (const zl of cfg.zoneLists) {
       const byGroup = new Map<string, ChecklistItem[]>();
       for (const item of zl.items) {
@@ -115,8 +131,10 @@ describe("content invariants (master v1.1 discipline)", () => {
     expect(cfg.sessionItems.length).toBeLessThan(10);
   });
 
-  it("utility items carry their sub-heading groups", () => {
-    const utility = cfg.zoneLists.find((z) => z.zoneType === "utility");
+  it("mechanical items carry their sub-heading groups", () => {
+    // v1.6 moved these from the `utility` zone list into `mechanical-base` — same ids, same
+    // sub-headings, now inherited by every zone type and gated on zone.has_mechanicals.
+    const utility = cfg.baseLists.find((b) => b.id === "mechanical-base");
     expect(utility).toBeDefined();
     const heatSource = utility!.items.find((i) => i.id === "utl.heat-source");
     expect(heatSource?.group).toBe("Heating & air");
@@ -124,7 +142,7 @@ describe("content invariants (master v1.1 discipline)", () => {
   });
 
   it("trigger shorthand a|b parses as anyOf with prefix inheritance", () => {
-    const utility = cfg.zoneLists.find((z) => z.zoneType === "utility")!;
+    const utility = cfg.baseLists.find((b) => b.id === "mechanical-base")!;
     const sniffer = utility.items.find((i) => i.id === "utl.sniffer");
     expect(sniffer?.trigger).toEqual({ anyOf: ["property.gas", "property.propane"] });
     const fuelTank = utility.items.find((i) => i.id === "utl.fuel-tank");
@@ -132,14 +150,14 @@ describe("content invariants (master v1.1 discipline)", () => {
   });
 
   it("pin alternatives parse from the satisfy cell", () => {
-    const utility = cfg.zoneLists.find((z) => z.zoneType === "utility")!;
+    const utility = cfg.baseLists.find((b) => b.id === "mechanical-base")!;
     const heat = utility.items.find((i) => i.id === "utl.heat-source");
     expect(heat?.satisfy).toBe("pin");
     expect(heat?.pinTypes).toEqual(["furnace", "boiler", "heat-pump"]);
   });
 
   it("measure units parse from the satisfy cell", () => {
-    const utility = cfg.zoneLists.find((z) => z.zoneType === "utility")!;
+    const utility = cfg.baseLists.find((b) => b.id === "mechanical-base")!;
     expect(utility.items.find((i) => i.id === "utl.pressure")?.unit).toBe("psi");
   });
 
@@ -159,7 +177,7 @@ describe("content invariants (master v1.1 discipline)", () => {
   });
 
   it("v1.2 adjudications hold: test verbs out of evidence items, fp.chimney restored", () => {
-    const utility = cfg.zoneLists.find((z) => z.zoneType === "utility")!;
+    const utility = cfg.baseLists.find((b) => b.id === "mechanical-base")!;
     expect(utility.items.find((i) => i.id === "utl.sump")?.text).not.toMatch(/bucket/i);
     const garage = cfg.zoneLists.find((z) => z.zoneType === "garage")!;
     expect(garage.items.find((i) => i.id === "gar.door-reverse")?.text).not.toMatch(/tested/i);
@@ -173,11 +191,16 @@ describe("content invariants (master v1.1 discipline)", () => {
     expect(chimneyLink?.attest).toBe("evidence");
   });
 
-  it("stub component types are referenceable (dock via sit.shoreline)", () => {
-    const dock = cfg.componentLists.find((c) => c.types.includes("dock"));
-    expect(dock?.stub).toBe(true);
+  it("a satisfy:pin item may reference a stub type (stubs stay referenceable)", () => {
+    // `dock` was the original example; v1.5 filled it because sit.shoreline referenced a
+    // stub with nothing behind it. The invariant is unchanged: every remaining stub is a
+    // legal pin type, and any item naming one still validates.
+    const stubs = cfg.componentLists.filter((c) => c.stub);
+    expect(stubs.length).toBeGreaterThan(0);
+    for (const st of stubs) expect(st.items).toEqual([]);
     const site = cfg.zoneLists.find((z) => z.zoneType === "site")!;
     expect(site.items.find((i) => i.id === "sit.shoreline")?.pinTypes).toContain("dock");
+    expect(cfg.componentLists.find((c) => c.types.includes("dock"))?.stub).toBe(false);
   });
 
   it("shared component tables serve multiple pin types", () => {
@@ -597,24 +620,32 @@ describe("v1.6.1 dialect support", () => {
     // v1.6.1 authored the new inherits entry as **mechanical-base**; unstripped, thirteen
     // zone types inherited a base list that did not exist — and the failure was a
     // validation error three steps from the cause.
-    const cfg = parseMaster(masterText.replace("| `utility` | mechanical room, furnace room | interior-base, rough-base |",
-      "| `utility` | mechanical room, furnace room | **interior-base**, _rough-base_ |"));
+    const cfg = parseMaster(
+      masterText.replace(
+        "| `utility` | mechanical room, furnace room | interior-base, rough-base, **mechanical-base** |",
+        "| `utility` | mechanical room, furnace room | *interior-base*, **rough-base**, `mechanical-base` |",
+      ),
+    );
     const utility = cfg.zoneTypes!.find((z) => z.id === "utility")!;
-    expect(utility.inherits).toEqual(["interior-base", "rough-base"]);
+    // Emphasis stripped from every entry, including the v1.6.1 `**mechanical-base**`.
+    expect(utility.inherits).toEqual(["interior-base", "rough-base", "mechanical-base"]);
   });
 
   it("parses Table B's `defaults true for` column, and tolerates its absence", () => {
-    const withCol = masterText
-      .replace("| id | label | askAtCreation |", "| id | label | askAtCreation | defaults true for |")
-      .replace("|---|---|---|\n| `finished` | Finished space | yes |", "|---|---|---|---|\n| `finished` | Finished space | yes | `utility` |")
-      .replace(/^\| `(sleeping|has_stairs)` \| ([^|]+) \| (yes|no)[^|]*\|$/gm, "| `$1` | $2 | $3 | — |")
-      .replace(/^\| `(has_plumbing|exterior_wall)` \| ([^|]+) \| ([^|]+)\|$/gm, "| `$1` | $2 | $3 | — |");
-    const cfg = parseMaster(withCol);
-    const fin = cfg.zoneAttributes!.find((a) => a.id === "finished")!;
-    expect(fin.defaultsTrueFor).toEqual(["utility"]);
-    // The 3-column form still parses — regenerating an older master must not break.
-    const plain = parseMaster(masterText).zoneAttributes!.find((a) => a.id === "finished")!;
-    expect(plain.defaultsTrueFor ?? []).toEqual([]);
+    const mech = parseMaster(masterText).zoneAttributes!.find((a) => a.id === "has_mechanicals")!;
+    expect(mech.defaultsTrueFor).toEqual(["utility"]);
+
+    // The 3-column form must still parse — regenerating a pre-v1.6.1 master is not a
+    // breaking edit. Drop the 4th column from Table B's rows to prove it.
+    const i = masterText.indexOf("## B. Zone attributes");
+    const j = masterText.indexOf("## C.");
+    const threeCol = masterText
+      .slice(i, j)
+      .replace("| id | label | askAtCreation | defaults true for |", "| id | label | askAtCreation |")
+      .replace("|---|---|---|---|", "|---|---|---|")
+      .replace(/^\|([^|]*)\|([^|]*)\|([^|]*)\|[^|]*\|$/gm, "|$1|$2|$3|");
+    const plain = parseMaster(masterText.slice(0, i) + threeCol + masterText.slice(j));
+    expect(plain.zoneAttributes!.find((a) => a.id === "has_mechanicals")!.defaultsTrueFor ?? []).toEqual([]);
   });
 });
 
@@ -639,5 +670,101 @@ describe("house.* trigger namespace (master v1.6.1)", () => {
     const bad = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
     (bad.sessionItems as { trigger?: unknown }[])[0]!.trigger = { anyOf: ["house.no-such-thing"] };
     expect(validateChecklistConfig(bad).ok).toBe(false);
+  });
+});
+
+/**
+ * Snake_case ids survive cell cleaning. REGRESSION: the emphasis-stripper added for v1.6.1
+ * stripped `_` as well as `*`, silently renaming `has_stairs` → `hasstairs`,
+ * `has_plumbing` → `hasplumbing`, `exterior_wall` → `exteriorwall`. It shipped to main.
+ *
+ * Nothing caught it because the generator corrupted BOTH sides identically — the Table B id
+ * and the `zone.has_stairs` trigger ref — so the config stayed internally consistent, the
+ * validator was satisfied, and the drift gate compared a corrupt config against an equally
+ * corrupt regeneration. Only the literal id was wrong, so only a literal assertion finds it.
+ */
+describe("id fidelity", () => {
+  const cfg = validConfig();
+
+  it("zone attribute ids keep their underscores", () => {
+    const ids = cfg.zoneAttributes.map((a) => a.id);
+    for (const expected of ["has_stairs", "has_plumbing", "exterior_wall"])
+      expect(ids, `${expected} was mangled`).toContain(expected);
+  });
+
+  it("property flag ids keep their underscores", () => {
+    const ids = cfg.propertyFlags.map((f) => f.id);
+    for (const expected of ["wood_heat", "municipal_water", "pre_1990"])
+      expect(ids, `${expected} was mangled`).toContain(expected);
+  });
+
+  it("every zone.* trigger ref resolves to a declared attribute", () => {
+    const attrs = new Set(cfg.zoneAttributes.map((a) => a.id));
+    const refs = new Set<string>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        for (const k of ["allOf", "anyOf", "not"])
+          for (const ref of (Array.isArray(r[k]) ? r[k] : []) as string[])
+            if (ref.startsWith("zone.")) refs.add(ref);
+        if (typeof r.gate === "string" && r.gate.startsWith("zone.")) refs.add(r.gate);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    for (const ref of refs) expect(attrs, `${ref} unresolvable`).toContain(ref.slice(5));
+  });
+});
+
+/**
+ * List gates (master v1.6.2 §0): every item in a gated list is conditioned on the gate, and
+ * where an item carries its own trigger the effective condition is allOf(gate, trigger).
+ */
+describe("list gates (master v1.6.2)", () => {
+  const cfg = validConfig();
+  const mech = cfg.baseLists.find((b) => b.id === "mechanical-base")!;
+
+  it("mechanical-base is gated on zone.has_mechanicals and inherited by every zone type", () => {
+    expect(mech.gate).toBe("zone.has_mechanicals");
+    expect(cfg.zoneTypes.every((z) => z.inherits.includes("mechanical-base"))).toBe(true);
+  });
+
+  it("a zone WITHOUT the attribute renders no mechanical items", () => {
+    const state = foldV2(mkEvents([
+      { type: "SessionInitialized", configId: "cfg", configVersion: "1.6.2", configHash: "h", propertyFlags: ["gas"], propertyLabel: "H" },
+      { type: "ZoneCreated", zoneId: "bed", zoneType: "living-space", label: "Bedroom", attributes: {}, level: "main" },
+    ]));
+    const ids = deriveZoneItems(cfg, state, "bed").map((d) => d.item.id);
+    expect(ids.filter((i) => i.startsWith("utl."))).toEqual([]);
+    expect(ids).toContain("int.surfaces"); // ungated base list still renders
+  });
+
+  it("a zone WITH the attribute renders them — regardless of zone type", () => {
+    const state = foldV2(mkEvents([
+      { type: "SessionInitialized", configId: "cfg", configVersion: "1.6.2", configHash: "h", propertyFlags: ["gas"], propertyLabel: "H" },
+      // A basement corner, not a utility room — the whole point of v1.6.
+      { type: "ZoneCreated", zoneId: "bsm", zoneType: "basement", label: "Basement", attributes: { has_mechanicals: true }, level: "basement" },
+    ]));
+    const ids = deriveZoneItems(cfg, state, "bsm").map((d) => d.item.id);
+    expect(ids).toContain("utl.heat-source");
+    expect(ids).toContain("utl.main-shutoff");
+  });
+
+  it("ANDs the gate with an item's own trigger — the Fuel case", () => {
+    const zone = (flags: string[], mech: boolean) =>
+      deriveZoneItems(
+        cfg,
+        foldV2(mkEvents([
+          { type: "SessionInitialized", configId: "cfg", configVersion: "1.6.2", configHash: "h", propertyFlags: flags, propertyLabel: "H" },
+          { type: "ZoneCreated", zoneId: "z", zoneType: "basement", label: "B", attributes: mech ? { has_mechanicals: true } : {}, level: "basement" },
+        ])),
+        "z",
+      ).map((d) => d.item.id);
+
+    // gas + mechanicals => shows · mechanicals but no gas => hidden · gas but no mechanicals => hidden
+    expect(zone(["gas"], true)).toContain("utl.gas-shutoff");
+    expect(zone([], true)).not.toContain("utl.gas-shutoff");
+    expect(zone(["gas"], false)).not.toContain("utl.gas-shutoff");
   });
 });

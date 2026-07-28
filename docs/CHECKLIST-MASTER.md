@@ -1,10 +1,10 @@
-# HouseSteady Field Assistant — Checklist Master (v1.5.1)
+# HouseSteady Field Assistant — Checklist Master (v1.6.2)
 
-**Version:** v1.5.1 · **Date:** 2026-07-27 · **Supersedes:** v1.5 (2026-07-27)
+**Version:** v1.6.2 · **Date:** 2026-07-27 · **Supersedes:** v1.6.1 (2026-07-27, never built)
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
 
-**Authored from:** the v1.5 repo copy returned by the field session, per the whole-file transfer rule.
+**Authored from:** v1.5.1, per the whole-file transfer rule.
 
 
 **Changelog v1.5 → v1.5.1** (housekeeping + alias content, applied 2026-07-27):
@@ -12,6 +12,62 @@
 - §0 title and vocabulary-table range corrected (`A–D` → `A–E`).
 - **Table E authoring rule added, and 24 aliases rewritten or added.** Prompted by a defect the field session found *inside v1.5's own fix*: `air-conditioner` was authored id-style, so a person typing "air conditioner" with a space still found nothing — the exact failure G7 reported, reappearing one layer down. Separators are now solved in code (hyphen, underscore and space normalize to one thing); what code cannot solve is a **genuinely different word**, which is what the new rows address.
 
+
+
+
+**Changelog v1.6 → v1.6.1 — v1.6 was never built. It carried three defects, all in the same class.**
+
+The field session reviewed v1.6 before building and found that **every one of its three problems was a case of the prose asserting something the machine-read tables did not say.** That is worth naming as a class, because it is not a typo class — it is the authoring failure this file is most prone to.
+
+**1. `mechanical-base` was inherited by nothing.** §1's diagram said "inherited by every zone type." The list's own header said it. **§4's Inherits column — the only place the generator reads — was byte-identical to v1.5.1.** Zero of thirteen zone types listed it, while §6's `utility` had been emptied. Result: mechanical items render **nowhere**, in every house, with no build error. That is the v1.6 bug made universal instead of basement-only. **Fixed: `mechanical-base` added to all thirteen Inherits cells.**
+
+Also corrected: §6's prose claimed *"that attribute, not the zone type, is what brings `mechanical-base` in."* That is not how the engine works. **Inheritance attaches the list; the attribute gates the items inside it.** Both are needed, and describing one as replacing the other is what produced the defect.
+
+**2. Base lists could not carry sub-headings.** `mechanical-base` arrived with 24 items under six authored sub-headings (Heating & air / Water / Drainage / Electrical / Fuel / Close-out) — but the generator only parsed bold sub-headings inside §6 zone sections. In a base list they would be dropped, collapsing 24 items into one rendered group with **20 core — 2.5× the ≤8 cap §2 sets for itself**, and destroying the accordion grouping that made the checklist tolerable in the first place. **Fixed in code by the field session** (sub-headings allowed in base lists; group key falls back to the base id). §0 now documents the dialect so it is not re-broken.
+
+**3. `defaults true for utility` had nowhere to live.** Table B carried one boolean per attribute, so the note parsed as plain `yes` and the default silently vanished — every zone including `utility` would start unchecked. **Fixed: Table B gains a fourth column, `defaults true for`.** Data-driven; the alternative was hardcoding "utility" in app code, which breaks config-is-data.
+
+**4. `pin.*` is now rejected at session scope.** The field session found that `pin.*` evaluated at session scope *already* means house-wide, so adding `house.*` would have left one namespace meaning two things depending on where it was evaluated — the exact ambiguity §3 exists to prevent. **No session item uses `pin.*` today, so the restriction is free now and would not be later.** `pin.*` is zone-only and the validator rejects it at session scope; `house.*` is the house-wide form.
+
+**Count reconciliation:** component types **58** and `.unit` items **23** match exactly across both sessions' parses — same file, same reading. Items differ (345 rows vs 377 unique ids) and the two sessions should reconcile directly rather than either guessing; the likely difference is table rows in §5/§6/§7 versus unique ids across base + zone + session + component lists. Recorded in §9.
+
+
+**Changelog v1.6.1 → v1.6.2 — one defect, and a rule change to stop its class.**
+
+**The defect:** `mechanical-base`'s heading said *"Every item below is gated on `zone.has_mechanicals`."* Five of its six tables carry no trigger column. Measured on a generated config: **21 of 24 items ungated, 17 of them core.** With inheritance now universal (v1.6.1), every bedroom, hallway and bathroom would render all 24 mechanical items — a bedroom checklist demanding a furnace and a main water shutoff. v1.6 made the shutoff map vanish; v1.6.1 would have made it appear everywhere. Equally wrong, and it is the wall-of-items problem the accordion exists to prevent, reproduced in every room.
+
+**The fix — a list-level gate, declared in the heading (§0).** `### mechanical-base — gated on zone.has_mechanicals`. Chosen over 21 identical trigger cells for three reasons, the third decisive:
+1. Twenty-one duplicated cells are noise and drift row by row.
+2. The gate is a property of the *list*, and the heading is where the master already states it.
+3. **The Fuel items need `zone.has_mechanicals` AND `property.gas`. Trigger cells are `anyOf` only — an `allOf` of two refs is not expressible in a cell.** A list gate ANDs cleanly with each item's own trigger, so per-row gating could not have worked at all.
+
+**The rule change, which matters more than the fix.** This was the **fourth** occurrence of one class: *the prose asserting something the machine-read tables did not say.* v1.6.1's status line named that class and then reproduced it twice inside the same revision. Naming a failure mode has demonstrably not prevented it.
+
+So the rule is restated in a form that can be acted on rather than merely remembered:
+
+> **When a structural fact ends up stated in prose, that is a signal the dialect is missing a place to declare it.** Prose is the symptom, not the cause. The response is not to write the fact more carefully in prose, nor to duplicate it into cells — it is to **add a declaration site** and move the fact there. Every structural claim must have exactly one parsed home.
+
+The list gate is that response applied to this case: the gate lived in a sentence because the dialect had nowhere for a list-level condition to live. It does now.
+
+**Changelog v1.5.1 → v1.6** — five changes, four of them from the binder session's reconciliation review.
+
+**1. The §1 hole (their Q1) — the biggest defect found since G1.** Every mechanical item lived in the `utility` **zone type's** list. `basement` inherits none of them. So a bungalow with the furnace, panel and main shutoff in an open basement corner — most of the regional housing stock — produced an **empty emergency shutoff map**, silently, because the concierge sensibly created a `basement` zone rather than a `utility` one. Convention ("always make a utility zone") fails the first time mechanicals sit in the corner of a finished rec room.
+
+Fixed two ways, belt and braces:
+- **`mechanical-base`** — a new base list carrying every mechanical item, gated on the new attribute **`zone.has_mechanicals`** and inheritable by *any* zone type. `utility` sets the attribute true by default; a basement, garage, crawlspace or site zone sets it with one tap. **All ids are preserved** — this is a move, not a redefinition (§2), so the `utl.` prefix is now historical exactly as `liv.` is inside `interior-base`. Downstream bindings by item id are unaffected. This was the binder session's explicit confirm question; the answer is yes, ids carry.
+- **`ses.shutoff-map`** — a session item asserting the §1 map is complete, evaluated house-wide at close regardless of how zones were named. Precedent: `ses.alarm-coverage` does exactly this for alarms.
+
+*Consequence worth stating:* **zone type is now a labelling convenience and the attribute drives content.** That is the more honest model regardless of this bug.
+
+**2. New `house.*` trigger namespace (their Q2).** `pin.*` is and remains strictly zone-scoped — "a pin of this type exists *in this zone*." The maintenance schedule needs "*this house* has a sump," which is a different question, and roughly a dozen of its conditions were written against the wrong one. `house.<pin-type>` = a pin of this type exists anywhere in this visit. Both are kept; both are real. **Not Table A** — those flags come from intake, declared before the visit, and sump presence is usually discovered during it.
+
+**3. Two Table A flags added (their Q5), plus one flagged as incomplete.** `seasonal_vacancy` and `secondary_suite` are both already *asked on the intake form* and were never given a flag — the question was collected and the vocabulary never received the answer. Worth a sweep for others in that state. `flat_roof` is added because Master Spec §15's trigger table carries it, but **the intake form does not ask it** — recorded in §9 as an open item rather than shipped as a flag nothing can set.
+
+**4. `dock` stub filled.** It was a stub *actively referenced* by `sit.shoreline`, so a waterfront property could produce a `dock` pin with no items behind it. Caught by their stub-exclusion question.
+
+**5. New Table F — retirement lineage, structured.** §2 already requires a retirement to record where its content went; that was prose. The binder correctly treats a retired id as a **discontinuity** — the cross-visit series ends and never joins its replacement, because a false join is worse than an honest break. Structured lineage lets it show the thread without joining it: *"this series ends at v1.5 — the master records the content continuing as `wc.secure`."* Software still refuses the join; the human still gets the thread.
+
+*Not added: `answer.*` triggers.* See §3.
 
 **Why v1.5 exists — the emergency shutoff map is incomplete.**
 
@@ -82,17 +138,19 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.5.1)
+## 0. Table dialect (for the generator — v1.6.2)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
+- **List-level gate (v1.6.2).** A list heading may carry `— gated on <ref>`: `` ### `mechanical-base` — gated on `zone.has_mechanicals` ``. **Every item in that list is conditioned on that ref.** Where an item also carries a trigger cell, the effective condition is **`allOf(list gate, item trigger)`** — the cell's own `|` remains `anyOf` internally. This is the only way to express an AND of two refs; trigger cells cannot. Applies to base lists, zone lists and component lists alike. A list may carry at most one gate.
+- **Bold sub-headings are permitted in base lists as well as zone lists** (v1.6.1). They are group keys; a base item with no sub-heading groups under the base id. `mechanical-base` relies on this — without it, 24 items collapse into one group of 20 core, 2.5× the §2 cap.
 - **Component inheritance** is declared in the heading: ``### `child-type` — inherits `parent-type` ``. The child's rendered list is the parent's items followed by its own. Ids remain globally unique.
 - Satisfy cell sub-parses:
   - pin types inline — `` pin `water-main` ``, alternatives `` pin `furnace|boiler|heat-pump` ``
   - measure units in parens — `measure (psi)`, `measure (year)`
   - choice options in parens, pipe-separated — `choice (ball|gate|other|unknown)`
 - **Trigger cells:** `|` means anyOf; ids after the first inherit the prefix of the first (`property.gas|propane` ⇒ `property.gas` OR `property.propane`).
-- Vocabulary tables (A–E at end): columns as declared per table. **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
+- Vocabulary tables (A–F at end): columns as declared per table. **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
 - Malformed rows fail closed.
 
 ---
@@ -111,6 +169,10 @@ interior-base ──┬── living-space   (bedroom, living, dining, office, h
                 └── unfinished     (basement, attic, crawlspace, garage) ── + rough-base
 exterior-base ──┬── elevation
                 └── site
+
+mechanical-base ─── inherited by EVERY zone type; every item gated on
+                    `zone.has_mechanicals`, so it renders only where the
+                    mechanicals actually are — whatever the room is called
 ```
 
 **Component inheritance (v1.4):**
@@ -152,33 +214,57 @@ water-treatment ┬── water-softener · sediment-filter
 
 **The pin-vs-item test (v1.5):** **does the thing need its own position on the map?** If someone must walk somewhere else to reach it, it is a **pin**. If it is on or immediately at another object, it is an **item** on that object's list. A curb stop is at the street while the main shutoff is in the basement — two positions, two pins. A water heater's shutoff is on the water heater — one position, so an item. Getting this wrong puts a thing on the emergency map at the wrong address, which is worse than omitting it.
 
+**Declaration sites (v1.6.2).** Every structural fact — what inherits what, what gates what, what defaults where — has **exactly one parsed home**, and prose never substitutes for it. Where this file states a structural fact in a sentence and nowhere else, that is a **defect in the dialect**, not a lapse in wording: the response is to add a declaration site (§0) and move the fact into it. Four consecutive revisions shipped this defect class before the rule took this form; writing it as "be careful" did not work.
+
+**Retirement lineage (v1.6):** when an item retires because its content moved elsewhere, the successor ids are recorded in **Table F**, not only in prose. Software must not join a retired series to its successor — a false continuity is worse than an honest break, and the binder correctly treats a retired id as a discontinuity. Table F exists so a *person* reading a series that stops can find where it continued. **Every retirement records its successors, or `none` if the question was genuinely dropped.**
+
 **States:** unresolved · satisfied (with evidence link) · **n/a** (reason from table C, optional note). "Confirmed absent" is real inspection data and exports in the manifest. `deferred` and `no-access` N/A land on the visit-two gap list.
 
 **Suggestions:** deterministic zone-type priors and (Stage 2) RoomPlan candidates may propose pin types; on-demand AI may suggest when asked. Proposals touch `evidence` items only, and only as proposals. Never automatic per-photo classification.
 
 ## 3. Triggers
 
-Closed vocabulary: `property.*` (table A) · `zone.*` (table B) · `pin.*` (presence of a pin type in the zone). Combinators: allOf / anyOf / not.
+Closed vocabulary:
+- **`property.*`** (Table A) — declared at intake, before the visit.
+- **`zone.*`** (Table B) — an attribute of this zone, set at zone creation.
+- **`pin.*`** — a pin of this type exists **in this zone**. Zone-scoped, strictly: **rejected by the validator at session scope** (v1.6.1). Before `house.*` existed, `pin.*` evaluated at session scope silently meant house-wide — one namespace with two meanings depending on where it was read, which is the ambiguity this section exists to prevent. No session item used it, so the restriction cost nothing to impose now and would not have stayed free.
+- **`house.*`** (v1.6) — a pin of this type exists **anywhere in this visit**. House-scoped.
+
+Combinators: allOf / anyOf / not.
+
+**`pin.*` vs `house.*` — the distinction is which question is being asked.** A zone checklist asks *is there one here* (`pin.sump-pump` in the utility zone). A maintenance schedule asks *does this house have one* (`house.sump-pump`). Using the zone form for a house question silently under-fires; using the house form for a zone question over-fires. Neither is a superset of the other, which is why both exist.
+
+*Timing note for implementers:* `property.*` and `zone.*` are stable once set. **`house.*` changes during a visit** as pins are created, so a house-triggered item can appear partway through. Stable at manifest time; the field UI should expect it.
+
+**Deliberately absent: `answer.*`.** Conditions on a *recorded value* — `utl.drain-material-id in (clay, Orangeburg)` triggering a sewer camera, an elevated radon result triggering mitigation monitoring, `fc.width > 5` escalating a crack — are **not field-config triggers and will not be added.** Two reasons, and they point the same way: it needs an operator and a value rather than existence, which is materially more machinery; and **several of the inputs never exist in the field app at all** — a radon result arrives three months later, a permit date comes from a document. The field could never evaluate them, so a field-config item gated on one could never fire.
+
+**That whole class belongs to the binder builder**, which holds every answer — field, lab and document — evaluates the condition once, and returns the resulting work as a carried item in the session plan. One evaluator, one namespace, no risk of the same condition resolving differently in two apps. It also fits Master Spec §15's *"customized, never blind"*: the schedule is re-derived each visit, so a crack that was 1.5 mm and is now 4 mm changes what the next visit carries.
+
+**The field's narrow version of this stays, and is deliberately different.** §9.2's prompt-on-dangerous-value — selecting `foil flex` offers a pre-typed concern — is *in-visit concern raising*, not schedule derivation. It acts immediately, on a value the inspector just entered, and imposes nothing. Keeping the two apart is what stops one namespace meaning two things.
+
+**Division of labour, stated once: the master declares vocabulary; the builder declares consequences.** The master says `utl.drain-material-id` can be `clay`. The builder says clay means a sewer camera at some interval. The prose notes in this file that name flag-worthy values (`poly-B`, `Orangeburg`, `underground`, `horizontal`) are **explanatory, not machine-read** — they tell a human why the value matters; they do not encode the downstream action.
 
 ## 4. Zone taxonomy
 
 Typed zone + editable label; **labels are display-only and never drive logic.**
 
+**Every zone type inherits `mechanical-base`** (v1.6.1). That is not a claim that every zone *has* mechanicals — every item in that list is gated on `zone.has_mechanicals`, so it renders only where the equipment actually is. **Inheritance attaches the list; the attribute gates the items.** Both are required; neither substitutes for the other. A house's mechanicals can be in a utility room, a basement corner, a hall closet, a garage, an attic, or outdoors on an elevation — and the checklist follows them rather than following what someone named the room.
+
 | Type | Typical labels | Inherits |
 |---|---|---|
-| `utility` | mechanical room, furnace room | interior-base, rough-base |
-| `basement` | basement, cellar, rec room | interior-base, rough-base |
-| `crawlspace` | crawlspace | rough-base |
-| `attic` | attic, loft access | rough-base |
-| `kitchen` | kitchen, kitchenette | interior-base, wet-base |
-| `bathroom` | full bath, ensuite, powder room | interior-base, wet-base |
-| `laundry` | laundry, mudroom w/ washer | interior-base, wet-base |
-| `living-space` | bedroom, living, dining, office, den | interior-base |
-| `circulation` | hall, stairwell, entry, landing | interior-base |
-| `garage` | attached garage, carport | interior-base, rough-base |
-| `elevation` | north side, front, rear | exterior-base |
-| `site` | grounds, driveway, yard, shoreline | exterior-base |
-| `outbuilding` | shed, barn, workshop, boathouse | exterior-base, rough-base |
+| `utility` | mechanical room, furnace room | interior-base, rough-base, **mechanical-base** |
+| `basement` | basement, cellar, rec room | interior-base, rough-base, **mechanical-base** |
+| `crawlspace` | crawlspace | rough-base, **mechanical-base** |
+| `attic` | attic, loft access | rough-base, **mechanical-base** |
+| `kitchen` | kitchen, kitchenette | interior-base, wet-base, **mechanical-base** |
+| `bathroom` | full bath, ensuite, powder room | interior-base, wet-base, **mechanical-base** |
+| `laundry` | laundry, mudroom w/ washer | interior-base, wet-base, **mechanical-base** |
+| `living-space` | bedroom, living, dining, office, den | interior-base, **mechanical-base** |
+| `circulation` | hall, stairwell, entry, landing | interior-base, **mechanical-base** |
+| `garage` | attached garage, carport | interior-base, rough-base, **mechanical-base** |
+| `elevation` | north side, front, rear | exterior-base, **mechanical-base** |
+| `site` | grounds, driveway, yard, shoreline | exterior-base, **mechanical-base** |
+| `outbuilding` | shed, barn, workshop, boathouse | exterior-base, rough-base, **mechanical-base** |
 
 ## 5. Base checklists
 
@@ -223,21 +309,14 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `rgh.storage-hazard` | Fuel, solvent, paint storage conditions | check | standard | action | baseline | — |
 | `bsm.finished-behind` | Concealed areas behind finished surfaces recorded as *not inspected* | note | core | action | baseline | `zone.finished` |
 
-### `exterior-base`
+### `mechanical-base` — gated on `zone.has_mechanicals` (renders grouped by the sub-headings)
 
-| id | text | satisfy | tier | attest | scope |
-|---|---|---|---|---|---|
-| `ext.wide` | Wide photo canvas covering the full elevation/area | photo | core | evidence | baseline |
-| `ext.grade` | Grading slope away from foundation; standing water noted | check | core | action | baseline, seasonal:spring |
-| `ext.cladding` | Cladding, trim, caulking condition | check | standard | action | baseline |
-| `ext.penetrations` | Every wall penetration sealed | check | standard | action | baseline |
-| `ext.foundation-ext` | Exterior visible foundation inspected; cracks pinned | pin `foundation-crack` | core | action | baseline |
-| `ext.roofline` | Roofline captured by pole cam — slopes, valleys, flashing, edges | photo | core | evidence | baseline |
-| `ext.terminations` | Every vent termination pinned and traced to its interior source | pin `vent-termination` | core | action | baseline |
+**Inherited by every zone type** (§4), and **gated at the list level in the heading above** — that gate is the authoritative declaration; this paragraph only explains it. The list renders only where the mechanicals actually are: utility room, basement corner, hall closet, garage, crawlspace, attic, or outdoors. `utility` sets the attribute true at creation (Table B); any other zone sets it with one tap.
 
-## 6. Zone checklists
+*The Fuel table's items carry their own `property.*` triggers. Those AND with the list gate — a propane tank item fires only in a zone that has mechanicals **and** on a property that has propane. That AND is why the gate is at list level: a trigger cell cannot express it.*
 
-### `utility` (renders grouped by the sub-headings)
+*Ids retain the `utl.` prefix. That prefix is now **historical** — same as `liv.egress` inside `interior-base` and `bsm.finished-behind` inside `rough-base`. This is a **move**, so every id carries: downstream bindings by item id are unaffected.*
+
 
 **Heating & air**
 | id | text | satisfy | tier | attest |
@@ -290,6 +369,27 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 |---|---|---|---|---|
 | `utl.every-nameplate` | Every appliance in this room has a legible nameplate photo | photo | core | evidence |
 | `utl.unidentified` | Anything unidentified pinned as freeform and chat-asked | check | standard | action |
+
+
+### `exterior-base`
+
+| id | text | satisfy | tier | attest | scope |
+|---|---|---|---|---|---|
+| `ext.wide` | Wide photo canvas covering the full elevation/area | photo | core | evidence | baseline |
+| `ext.grade` | Grading slope away from foundation; standing water noted | check | core | action | baseline, seasonal:spring |
+| `ext.cladding` | Cladding, trim, caulking condition | check | standard | action | baseline |
+| `ext.penetrations` | Every wall penetration sealed | check | standard | action | baseline |
+| `ext.foundation-ext` | Exterior visible foundation inspected; cracks pinned | pin `foundation-crack` | core | action | baseline |
+| `ext.roofline` | Roofline captured by pole cam — slopes, valleys, flashing, edges | photo | core | evidence | baseline |
+| `ext.terminations` | Every vent termination pinned and traced to its interior source | pin `vent-termination` | core | action | baseline |
+
+## 6. Zone checklists
+
+### `utility`
+
+*No own items.* Every item formerly listed here moved to `mechanical-base` in v1.6 with its id intact.
+
+A `utility` zone is an ordinary interior zone that **sets `zone.has_mechanicals` true by default at creation** (Table B). It inherits `mechanical-base` exactly as every other zone type does — **the type does not route the content; it only pre-answers the question.** Any other zone reaches the same list by ticking the same box.
 
 ### `basement`
 
@@ -412,11 +512,14 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 
 | id | text | satisfy | tier | attest | trigger |
 |---|---|---|---|---|---|
+| `ses.shutoff-map` | Emergency shutoff map complete: every Master Spec §1 shutoff and control either pinned or explicitly recorded absent — water main, curb stop, gas, fuel, electrical, water heater, boiler, furnace switch, sump, septic/sewage alarm, solar disconnects, pool disconnect, irrigation, hose bibs, fireplace valve | check | core | action | — |
 | `ses.alarm-coverage` | Alarm coverage judged against the pin set: smoke on every storey and outside sleeping areas; CO adjacent to sleeping areas where fuel-burning appliances, a fireplace, or an attached garage exist | check | core | action | — |
 | `ses.below-recheck` | Ceilings below every wet room re-checked **after** all fixtures were run | check | core | action | — |
 | `ses.termination-reconcile` | Every interior exhaust (bath fans, hood, dryer, HRV) matched to a pinned exterior termination | check | core | action | — |
 | `ses.triggers-confirmed` | Intake-declared property flags confirmed or corrected on site | check | core | action | — |
 | `ses.wood-heat-pinned` | Wood-burning appliance pinned and WETT flag recorded | pin `fireplace` | core | evidence | `property.wood_heat` |
+
+*`ses.shutoff-map` is the safety net that survives any zone-naming choice — it is evaluated house-wide, so it fires whether the mechanicals were captured in a `utility` zone, a `basement`, or a garage. It is also a **human attestation sitting beside the builder's own audit of the same thing**: when the two disagree, one is wrong and neither is authoritative, which is exactly the disagreement worth surfacing rather than resolving silently.*
 
 ## 7. Component library
 
@@ -873,6 +976,18 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `apm.mount` | Mounting secure (over-range units) | check | standard | action |
 | `apm.vent` | Vent configuration if over-range | choice (ducted to exterior\|recirculating\|n/a — countertop\|unknown) | standard | evidence |
 
+### `dock`
+| id | text | satisfy | tier | attest |
+|---|---|---|---|---|
+| `dck.unit` | Dock photographed whole from shore, from a repeatable position | photo | core | evidence |
+| `dck.type` | Dock type | choice (fixed/crib\|floating\|pipe/removable\|cantilever\|unknown) | standard | evidence |
+| `dck.decking` | Decking, fasteners and hardware condition | check | core | action |
+| `dck.attachment` | Shore attachment and anchoring condition | check | core | action |
+| `dck.season` | Current seasonal state | choice (in water\|removed for season\|permanent\|unknown) | standard | evidence |
+| `dck.permit` | Shoreline/dock permit documentation noted | note | standard | evidence |
+
+*Filled in v1.6 because it was a stub **actively referenced** — `sit.shoreline` names it as a pin alternative, so a waterfront property could produce a `dock` pin with nothing behind it. `dck.unit` is a repeatable-position shot: shoreline and dock condition are the Master Spec §10 comparison case.*
+
 ### `retaining-wall`
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
@@ -936,9 +1051,9 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 *Many jurisdictions require annual backflow certification. We record the date if documented; we never certify.*
 
 ### Stubs (ids reserved; items TBD in a later content pass)
-`ev-charger` · `cistern` · `elevator-lift` · `dock` · `outbuilding` · `radon-fan` · `backflow-preventer` · `boiler-zone-valve` · `appliance-freezer` · `iron-filter`
+`ev-charger` · `cistern` · `elevator-lift` · `outbuilding` · `radon-fan` · `backflow-preventer` · `boiler-zone-valve` · `appliance-freezer` · `iron-filter`
 
-*Three stubs filled in v1.5 (`solar-inverter`, `pool-equipment`, `irrigation-backflow`) — all three carried a §1 shutoff the library could not record. The remaining ten carry none, which is why they can wait.*
+*Four stubs filled across v1.5–v1.6 (`dock` in v1.6 — it was referenced by `sit.shoreline`). Three filled in v1.5 (`solar-inverter`, `pool-equipment`, `irrigation-backflow`) — all three carried a §1 shutoff the library could not record. The remaining ten carry none, which is why they can wait.*
 
 ---
 
@@ -960,16 +1075,22 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `pre_1990` | Built before ~1990 | Year built |
 | `solar` | Solar/battery | Solar/battery/EV |
 | `ev` | EV charging | Solar/battery/EV |
+| `seasonal_vacancy` | Seasonal or periodically vacant | Occupancy (v1.6) |
+| `secondary_suite` | Secondary suite / in-law / rental unit | Secondary suite (v1.6) |
+| `flat_roof` | Flat or low-slope roof section | ⚠ **not yet asked at intake** — see §9 |
+
+*`seasonal_vacancy` drives Master Spec §16 departure, during-absence and return procedures. `secondary_suite` changes alarm coverage and egress requirements. Both were **already asked on the intake form** and had no flag — the question was collected and the vocabulary never received the answer. Worth a sweep of the intake form for others in that state.*
 
 ## B. Zone attributes (`zone.*`)
 
-| id | label | askAtCreation |
-|---|---|---|
-| `finished` | Finished space | yes |
-| `sleeping` | Used for sleeping | yes |
-| `has_stairs` | Contains stairs | yes |
-| `has_plumbing` | Contains plumbing | no (derived from pins/observation — **reserved**, not yet consumed) |
-| `exterior_wall` | Has exterior wall(s) | no (**reserved**, not yet consumed) |
+| id | label | askAtCreation | defaults true for |
+|---|---|---|---|
+| `finished` | Finished space | yes | — |
+| `sleeping` | Used for sleeping | yes | — |
+| `has_stairs` | Contains stairs | yes | — |
+| `has_mechanicals` | Contains mechanical equipment (furnace, panel, water heater, main shutoff…) | yes | `utility` |
+| `has_plumbing` | Contains plumbing | no (derived from pins/observation — **reserved**, not yet consumed) | — |
+| `exterior_wall` | Has exterior wall(s) | no (**reserved**, not yet consumed) | — |
 
 ## C. N/A reasons
 
@@ -1064,6 +1185,22 @@ Search-only synonyms. An alias resolves to a canonical type in the type picker. 
 
 *New aliases are cheap; new types are not. **When freeform telemetry shows a repeated term, check whether an alias fixes it before adding a type** — a type carries items, appears in the manifest, and becomes a permanent vocabulary commitment. An alias is one row.*
 
+## F. Retirement lineage (v1.6)
+
+Where a retired item's content went. **Software must not use this to join a series** — a retired id is a discontinuity and stays one. This exists so a person reading a series that stops can find where it continued.
+
+| retired id | version | successors | reason |
+|---|---|---|---|
+| `bth.toilet-secure` | v1.4 | `wc.secure`, `wc.base-dry` | Redefined: a check/action test became a pin/evidence linkage item when `toilet` became a component type |
+| `bth.tub-surround` | v1.4 | `tub.surround`, `shw.surround` | Redefined: split across the new `bathtub` and `shower` types |
+| `kit.dw-connection` | v1.4 | `apd.airgap`, `apd.connections`, `apd.base` | Content moved to `appliance-dishwasher` |
+| `kit.fridge-line` | v1.4 | `apr.water-line` | Content moved to `appliance-refrigerator` |
+| `kit.fuel-range` | v1.4 | `apg.fuel`, `apg.shutoff`, `apg.connector` | Content moved to `appliance-range` |
+| `lnd.hoses` | v1.4 | `apw.hoses`, `apw.hose-age` | Content moved to `appliance-washer` |
+| `wm.curbstop` | v1.5 | `cs.photo`, `cs.access`, `cs.key` | Redefined: an item became the `curb-stop` component type (pin-vs-item test — the curb stop is at the street) |
+
+*No retirements in v1.6. The `utl.*` mechanical items **moved** to `mechanical-base` and keep their ids, so none appear here.*
+
 ---
 
 ## 8. Deferred content passes
@@ -1083,10 +1220,20 @@ Search-only synonyms. An alias resolves to a canonical type in the type picker. 
 3. **Choice vs. multi-select** — everything here is single-select. If a genuine multi case appears, it's a new type, not a widened `choice`.
 4. **Table D layer rewrite** — must land with the concern entity, not before (see Table D note).
 5. **Pin nicknames** — v1.4 removes most of the reason they existed: nicknames were covering for missing component types. Recommend keeping them through the next field walk, then reviewing whether they still earn their place. Don't retire them in the same pass that adds the types, or you remove the workaround and the gap together and can't tell which mattered.
-6. **§1 emergency-sheet coverage is now the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+6. **Intake form needs a question it does not ask.** `flat_roof` is declared in Table A because Master Spec §15's trigger table depends on it, but nothing sets it — the intake form has no flat/low-slope roof question. Add it there, or drop the flag; a flag no input can set is worse than an absent one. **And sweep the intake form the other way:** `seasonal_vacancy` and `secondary_suite` were asked for weeks and had no flag, which is how this class of gap hides.
 
-7. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
+7. **Sweep for remaining prose-only structural claims.** v1.6.2 moved the last known one (the `mechanical-base` gate) into the dialect. **Anything else in this file that states a structural fact only in a sentence is an undetected instance of the same class.** Worth a deliberate pass by whoever next parses the file end to end — the generator sees the tables, so only a human reading the prose can find them, and only the parser can confirm they're absent from the config.
+
+8. **Item-count reconciliation between sessions.** Component types (58) and `.unit` items (23) match exactly across both parses. The item total does not: 345 table rows vs 377 unique ids. Likely rows-in-§5/§6/§7 versus unique ids across base + zone + session + component lists. **The two sessions should reconcile directly with a per-section breakdown** rather than either adopting the other's number — a count that disagrees for an unexamined reason is a count neither should cite.
+
+9. **The `answer.*` class is the binder's, and the binder must own its vocabulary too.** Conditions on recorded values are out of this file by design (§3). The builder reads this master's `choice` option values as its condition vocabulary — so **renaming or removing an option value is a breaking change for the builder**, not just a content edit. Worth the same care as an item id.
+
+10. **§1 emergency-sheet coverage is the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+
+11. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
 
 ---
 
-**Status:** v1.5 — closes Master Spec §1 (the emergency shutoff map) against gaps G1–G8. 5 new component types (3 stubs filled, 2 split out by the pin-vs-item test), 4 new items on existing components, 2 new zone items, 1 item retired (`wm.curbstop`), new Table E aliases, and the pin-vs-item rule written into §2. Generator note: dialect gains Table E parsing (alias → canonical type, search-only, no items). Expected item count change: roughly +35, plus 30 alias rows that are not items.
+**Status:** v1.6.2 — supersedes v1.6.1 (never built). Adds the **list-level gate** to the dialect and applies it to `mechanical-base`, which had 21 of 24 items ungated in prose-only form and would have rendered the full mechanical checklist in every bedroom and hallway. Carries forward v1.6.1's Inherits wiring, base-list sub-headings, Table B column 4, and the `pin.*` zone-scope restriction. **No item ids retired or renamed since v1.5.**
+
+*Authoring rule, now in §2 and §0 rather than only here: **every structural fact has exactly one parsed home, and prose never substitutes for it.** Where this file states a structural fact only in a sentence, that is a missing declaration site in the dialect — add the site, move the fact. Four revisions shipped this defect class while the rule was phrased as "be careful"; it is phrased as a mechanism now because the phrasing was the problem.*

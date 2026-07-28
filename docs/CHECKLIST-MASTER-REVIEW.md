@@ -1388,3 +1388,43 @@ has not started. It is also sequenced behind the five-zone field test by the des
 **So: freeze the master, run the walk, and unblock the binder with the v3 contract it already
 has.** Master versions after that should be driven by what the walk finds, which is how v1.3
 through v1.6 earned their place.
+
+---
+
+## 25. v1.11 intake — §9.8 closed (2026-07-28)
+
+**Accepted and installed.** 407 → 409 items. `fp.sweep-tag` and `irr.test-tag` added
+(photo/standard) with Table I rows. **Eight values sourced, one deliberately excluded and on
+the record, none deferred.**
+
+All eight resolve under the co-visibility check, inheritance composed. The two new rows are the
+straightforward case — source and value on the same component — so they exercise the rule
+rather than its edges.
+
+### 25.1 The boundary distinction is now testable, which is the point
+
+§2 carries both shapes, and they are the reason the test is a rule rather than a coin flip:
+
+| shape | example | verdict | why |
+|---|---|---|---|
+| one value, sometimes evidenced | `fp.sweep` | **included** | the N/A path already models the unevidenced case |
+| artifact value **and** testimony in one field | `wt.consumables` | **excluded** | no single photograph reaches the whole value |
+
+Pinned by test. The exclusion is asserted explicitly, so `wt.consumables` remaining unsourced
+is a recorded decision rather than a gap someone re-discovers.
+
+### 25.2 Test written to the new rule
+
+The floor now names eight items and asserts **containment**; the invariant — *every provenance
+source is a photo reachable on the same object* — is asserted separately and once. Adding a
+ninth row passes; removing one fails. That is the shape CLAUDE.md now requires, applied to the
+test that taught the lesson.
+
+### 25.3 Status
+
+Master content is **complete for this cycle**. Nothing is deferred, nothing is flagged, and the
+guardrails that would catch the next authoring defect are in place and have each fired at least
+once on real content.
+
+Per §24: the binder is unblocked by the manifest v3 contract it already has. The next
+blocking work is manifest v4 for the object/concern model, sequenced behind the field test.

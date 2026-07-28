@@ -9,7 +9,7 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.10.0",
+  "configVersion": "1.11.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
@@ -3425,8 +3425,18 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "fp.sweep-tag",
+          "text": "Sweep/service tag photographed if present",
+          "satisfy": "photo",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "fp.sweep",
-          "text": "Last-sweep evidence noted",
+          "text": "Last sweep/service date recorded",
           "satisfy": "note",
           "tier": "standard",
           "attest": "evidence",
@@ -5365,8 +5375,18 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ]
         },
         {
+          "id": "irr.test-tag",
+          "text": "Backflow test/certification tag photographed if present",
+          "satisfy": "photo",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
           "id": "irr.test-record",
-          "text": "Last certification/test date if documented",
+          "text": "Last certification/test date recorded",
           "satisfy": "note",
           "tier": "standard",
           "attest": "evidence",
@@ -5733,6 +5753,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "itemId": "pnl.brand",
       "derivedFrom": "Panel manufacturer label",
       "sourceItemId": "pnl.label"
+    },
+    {
+      "itemId": "fp.sweep",
+      "derivedFrom": "Sweep/service tag date",
+      "sourceItemId": "fp.sweep-tag"
+    },
+    {
+      "itemId": "irr.test-record",
+      "derivedFrom": "Backflow test tag date",
+      "sourceItemId": "irr.test-tag"
     }
   ],
   "naReasons": [

@@ -989,7 +989,10 @@ describe("derived-value provenance (master v1.9)", () => {
     // the alias-capitals test: pinning incidental membership rather than the rule. Removing a
     // row still fails (a value silently losing its provenance), adding one is free.
     const declared = cfg.provenance.map((p) => p.itemId);
-    for (const id of ["apw.hose-age", "ft.age", "wh.age", "wsf.age", "pnl.service", "pnl.brand"])
+    for (const id of [
+      "apw.hose-age", "ft.age", "wh.age", "wsf.age",
+      "pnl.service", "pnl.brand", "fp.sweep", "irr.test-record",
+    ])
       expect(declared, `${id} lost its provenance`).toContain(id);
     const all = new Map<string, { satisfy: string }>();
     const walk = (o: unknown): void => {
@@ -1050,5 +1053,50 @@ describe("derived-value provenance (master v1.9)", () => {
     walk(cfg);
     expect(all.get("ft.nameplate")).toBe("photo");
     expect(all.get("apw.hose-label")).toBe("photo");
+  });
+});
+
+/**
+ * The provenance boundary test (master v1.11 §2). Two shapes that look alike and resolve
+ * oppositely — the reason the rule is a test rather than a judgement call:
+ *
+ *   ONE value, sometimes evidenced        -> INCLUDED. The N/A path models the unevidenced
+ *                                            case; leaving it unsourced would record "I saw
+ *                                            the tag" and "the owner told me" in one field.
+ *   An artifact value AND testimony
+ *   bundled in ONE field                  -> EXCLUDED. No single photograph reaches the whole
+ *                                            value, so a row would overclaim.
+ */
+describe("provenance boundary (master v1.11 §2)", () => {
+  const cfg = validConfig();
+  const sourced = new Set(cfg.provenance.map((p) => p.itemId));
+
+  it("includes the sometimes-evidenced values, with photo sources", () => {
+    for (const [item, src] of [["fp.sweep", "fp.sweep-tag"], ["irr.test-record", "irr.test-tag"]]) {
+      expect(sourced, `${item} unsourced`).toContain(item);
+      expect(cfg.provenance.find((p) => p.itemId === item)!.sourceItemId).toBe(src);
+    }
+  });
+
+  it("excludes wt.consumables — and the exclusion is deliberate, not an omission", () => {
+    // "Consumable size and last change recorded" bundles an artifact value with testimony.
+    // Recorded as an explicit exclusion in the master so it cannot be re-swept as an oversight.
+    expect(sourced).not.toContain("wt.consumables");
+  });
+
+  it("every provenance source is a photo reachable on the same object", () => {
+    // The invariant, stated once — this is what must hold at eight rows and at eighty.
+    const all = new Map<string, string>();
+    const walk = (o: unknown): void => {
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (o && typeof o === "object") {
+        const r = o as Record<string, unknown>;
+        if (typeof r.id === "string" && typeof r.satisfy === "string") all.set(r.id, r.satisfy);
+        Object.values(r).forEach(walk);
+      }
+    };
+    walk(cfg);
+    for (const p of cfg.provenance) expect(all.get(p.sourceItemId), p.itemId).toBe("photo");
+    expect(validateChecklistConfig(cfg as unknown as Record<string, unknown>).ok).toBe(true);
   });
 });

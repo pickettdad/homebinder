@@ -86,7 +86,13 @@ function checkItemHeader(table: Table): void {
     );
 }
 
-const stripTicks = (s: string) => s.replace(/`/g, "").trim();
+/**
+ * Strip backticks AND markdown emphasis from a cell before reading it as an id.
+ * v1.6.1 authored the new inherits entry as `**mechanical-base**` for emphasis; without
+ * this the asterisks became part of the id and thirteen zone types inherited a base list
+ * that did not exist. Ids never contain `*` or `_`, so removing them is always safe.
+ */
+const stripTicks = (s: string) => s.replace(/[`*_]/g, "").trim();
 
 function parseSatisfy(cell: string, line: number): Pick<ItemInput, "satisfy" | "pinTypes" | "unit" | "options"> {
   const pin = cell.match(/^pin `([^`]+)`$/);
@@ -272,9 +278,12 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
       continue;
     }
 
-    // Bold sub-headings inside a zone section are rendered-group keys (utility).
+    // Bold sub-headings are rendered-group keys. Zone sections have always used them
+    // (utility); v1.6.1 §0 extends them to BASE lists, which mechanical-base needs: it
+    // carries 24 items with 20 core, and without sub-headings they collapse into a single
+    // rendered group 2.5x over the master's own <=8-core-per-group cap.
     const bold = line.match(/^\*\*([^*]+)\*\*$/);
-    if (bold && section === "zone" && currentList) {
+    if (bold && (section === "zone" || section === "base") && currentList) {
       currentGroup = bold[1]!.trim();
       i++;
       continue;
@@ -295,8 +304,9 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           });
       } else if (section === "base" || section === "zone" || section === "component" || section === "session") {
         checkItemHeader(table);
+        // Sub-headings are group keys for zone AND base lists (v1.6.1 §0).
         const items = table.rows.map((row) =>
-          parseItemRow(table, row, section === "zone" ? currentGroup : undefined),
+          parseItemRow(table, row, section === "zone" || section === "base" ? currentGroup : undefined),
         );
         if (section === "session") {
           cfg.sessionItems!.push(...items);
@@ -305,8 +315,14 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
         } else if (section === "base") {
           if (currentList.ids.length !== 1)
             throw new MasterParseError(table.line, "base list heading must name exactly one id");
-          cfg.baseLists!.push({ id: currentList.ids[0]!, items });
-          currentList = null;
+          // Merge, and KEEP currentList: since v1.6.1 a base list may be split across
+          // several tables by bold sub-headings (mechanical-base has six). Clearing it after
+          // the first table made every following one "outside a ### heading" — the same
+          // multi-table shape zone lists have always had.
+          const baseId = currentList.ids[0]!;
+          const existingBase = cfg.baseLists!.find((b) => b.id === baseId);
+          if (existingBase) existingBase.items.push(...items);
+          else cfg.baseLists!.push({ id: baseId, items });
         } else if (section === "zone") {
           // Utility's grouped tables arrive one sub-heading at a time — merge per zone type.
           const zoneType = currentList.ids[0]!;
@@ -333,16 +349,25 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
             intakeSource: (row.cells[2] ?? "").trim(),
           });
       } else if (section === "attrs") {
-        if (table.header.join("|") !== "id|label|askatcreation")
+        // v1.6.1 added a 4th column; both shapes accepted so the header change alone
+        // isn't a breaking edit for anyone regenerating an older master.
+        const attrHeader = table.header.join("|");
+        if (attrHeader !== "id|label|askatcreation" && attrHeader !== "id|label|askatcreation|defaults true for")
           throw new MasterParseError(table.line, `unexpected zone-attributes header: ${table.header.join(" | ")}`);
         for (const row of table.rows) {
           const ask = (row.cells[2] ?? "").trim().toLowerCase();
           if (!ask.startsWith("yes") && !ask.startsWith("no"))
             throw new MasterParseError(row.line, `askAtCreation must start with yes/no: '${row.cells[2]}'`);
+          const defCell = (row.cells[3] ?? "").trim();
+          const defaultsTrueFor =
+            defCell === "" || defCell === "—" || defCell === "-"
+              ? []
+              : defCell.split(",").map((t) => stripTicks(t)).filter(Boolean);
           cfg.zoneAttributes!.push({
             id: stripTicks(row.cells[0] ?? ""),
             label: (row.cells[1] ?? "").trim(),
             askAtCreation: ask.startsWith("yes"),
+            defaultsTrueFor,
           });
         }
       } else if (section === "na") {

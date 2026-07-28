@@ -44,19 +44,31 @@ const componentTypesOf = (pins: PinStateV2[]): Set<string> => {
   return types;
 };
 
-/** The active trigger refs for a zone: property.* + zone.* + pin.* (master §3). */
+/**
+ * The active trigger refs: property.* + zone.* + pin.* + house.* (master §3, v1.6.1).
+ *
+ * `pin.*` is ZONE-SCOPED — "a pin of this type is in this zone" — and is emitted only when
+ * a zone is in hand. `house.*` is visit-wide and is emitted always, including at session
+ * scope where `pin.*` has no meaning.
+ *
+ * Before v1.6.1 the session branch emitted `pin.*` over every pin in the house, so the same
+ * namespace silently answered a different question depending on where it was evaluated.
+ * Nothing used it there, so the ambiguity was removed rather than documented; the validator
+ * now rejects `pin.*` on a session item and points at `house.*`.
+ *
+ * Timing: `house.*` changes as pins are created, so a house-triggered item can appear
+ * partway through a walk. That is intended — it is stable by manifest time.
+ */
 export function activeRefs(
   state: SessionStateV2,
   zone: ZoneStateV2 | undefined,
 ): Set<string> {
   const refs = new Set<string>();
   for (const f of state.propertyFlags) refs.add(`property.${f}`);
+  for (const t of componentTypesOf(state.pins.filter((p) => !p.retired))) refs.add(`house.${t}`);
   if (zone) {
     for (const [attr, on] of Object.entries(zone.attributes)) if (on) refs.add(`zone.${attr}`);
     for (const t of componentTypesOf(zonePins(state, zone.zoneId))) refs.add(`pin.${t}`);
-  } else {
-    // Session scope: pin.* refs consider every non-retired pin in the house.
-    for (const t of componentTypesOf(state.pins.filter((p) => !p.retired))) refs.add(`pin.${t}`);
   }
   return refs;
 }
@@ -108,7 +120,9 @@ export function deriveZoneItems(
     const base = config.baseLists.find((b) => b.id === baseId);
     for (const item of base?.items ?? [])
       if (triggered(item, refs))
-        out.push({ item, scope, group: baseId, status: statusOf(state, scope, item, pins) });
+        // item.group ?? baseId: base lists may now carry authored sub-headings (v1.6.1),
+        // and mechanical-base depends on them to stay inside the per-group core cap.
+        out.push({ item, scope, group: item.group ?? baseId, status: statusOf(state, scope, item, pins) });
   }
   const own = config.zoneLists.find((zl) => zl.zoneType === zone.zoneType);
   for (const item of own?.items ?? [])

@@ -12,7 +12,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
   "configVersion": "1.5.1",
   "propertyFlags": [
     {
-      "id": "municipal_water",
+      "id": "municipalwater",
       "label": "Municipal water",
       "intakeSource": "Water source"
     },
@@ -22,7 +22,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "intakeSource": "Water source"
     },
     {
-      "id": "municipal_sewer",
+      "id": "municipalsewer",
       "label": "Municipal sewer",
       "intakeSource": "Sewage"
     },
@@ -47,7 +47,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "intakeSource": "Fuel on property"
     },
     {
-      "id": "wood_heat",
+      "id": "woodheat",
       "label": "Wood-burning appliance",
       "intakeSource": "Wood-burning appliance"
     },
@@ -67,7 +67,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "intakeSource": "Waterfront"
     },
     {
-      "id": "pre_1990",
+      "id": "pre1990",
       "label": "Built before ~1990",
       "intakeSource": "Year built"
     },
@@ -86,27 +86,32 @@ export const checklistsBaseline: ChecklistConfigInput = {
     {
       "id": "finished",
       "label": "Finished space",
-      "askAtCreation": true
+      "askAtCreation": true,
+      "defaultsTrueFor": []
     },
     {
       "id": "sleeping",
       "label": "Used for sleeping",
-      "askAtCreation": true
+      "askAtCreation": true,
+      "defaultsTrueFor": []
     },
     {
-      "id": "has_stairs",
+      "id": "hasstairs",
       "label": "Contains stairs",
-      "askAtCreation": true
+      "askAtCreation": true,
+      "defaultsTrueFor": []
     },
     {
-      "id": "has_plumbing",
+      "id": "hasplumbing",
       "label": "Contains plumbing",
-      "askAtCreation": false
+      "askAtCreation": false,
+      "defaultsTrueFor": []
     },
     {
-      "id": "exterior_wall",
+      "id": "exteriorwall",
       "label": "Has exterior wall(s)",
-      "askAtCreation": false
+      "askAtCreation": false,
+      "defaultsTrueFor": []
     }
   ],
   "zoneTypes": [
@@ -1243,7 +1248,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ],
           "trigger": {
             "anyOf": [
-              "zone.has_stairs"
+              "zone.hasstairs"
             ]
           }
         }
@@ -1557,7 +1562,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ],
           "trigger": {
             "anyOf": [
-              "property.municipal_water"
+              "property.municipalwater"
             ]
           }
         },
@@ -1735,7 +1740,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "trigger": {
         "anyOf": [
-          "property.wood_heat"
+          "property.woodheat"
         ]
       }
     }

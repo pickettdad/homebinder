@@ -800,3 +800,77 @@ which no normaliser can reach. Verified by mutating `air conditioner` back to
 Duplicate `Authored from:` gone (one line, naming v1.5) · §0 retitled v1.5.1 · vocabulary
 tables now "A–E", with the Table E row shape declared in the dialect. All three verified in
 the installed file.
+
+---
+
+## 16. v1.6 → v1.6.1 intake — engine landed, content BLOCKED on one fix (2026-07-27)
+
+All three v1.6 blockers are fixed in v1.6.1 and verified: `mechanical-base` in all 13
+Inherits cells · §0 documents base-list sub-headings · Table B gains `defaults true for`
+(`has_mechanicals` → `utility`) · `pin.*` ruled zone-only.
+
+**Engine support is built and landed against the v1.5.1 master. The v1.6.1 master is NOT
+installed**, because one authoring gap would ship a defect worse than the one v1.6 fixed.
+
+### 16.1 BLOCKER — the `has_mechanicals` gate exists only in prose
+
+`mechanical-base`'s heading states: *"Every item below is gated on `zone.has_mechanicals`."*
+**No item table carries a trigger column.** Five of the six sub-heading tables are
+`id | text | satisfy | tier | attest`; only *Fuel* has a trigger column, and it is used for
+`property.gas|propane`.
+
+Measured on a generated v1.6.1 config: **21 of 24 mechanical items carry no trigger at all,
+17 of them core.** Combined with universal inheritance, that means:
+
+> every zone — bedroom, hallway, bathroom, every elevation — renders all 24 mechanical items,
+> 17 core among them. A bedroom checklist would demand a furnace and a main water shutoff.
+
+This is worse than the v1.6 defect it follows. v1.6 made the shutoff map vanish; this makes
+it appear everywhere, and it is the wall-of-items problem the accordion work exists to
+prevent, reproduced in every room of the house.
+
+**It is also the fourth instance of the class v1.6.1's own status line names** — *"the prose
+asserting something the machine-read tables did not say."* Recorded without irony: the lesson
+is correct, it was written the same day, and it recurred inside the change that introduced
+it. That is evidence the rule needs a mechanical check, not more care.
+
+**Two fixes, owner's call:**
+
+1. **Add a `trigger` column to the five mechanical-base tables**, `zone.has_mechanicals` in
+   21 rows. The Fuel table's three rows need `zone.has_mechanicals` combined with the
+   existing property trigger — note the dialect's trigger cell is `anyOf` only, so an
+   `allOf` of two refs is not currently expressible in a cell. Those three would need either
+   dialect support for allOf or acceptance that fuel items are gated on property alone.
+2. **Declare a list-level gate in the dialect** — e.g. a base-list heading may carry
+   `gated on \`zone.attr\``, applied to every item in the list. Twenty-one identical cells
+   are noise, and the master already expresses the intent at list level.
+
+**Recommend (2)**, with (1) as the fallback. It matches how the content is actually authored,
+it cannot drift row-by-row, and it makes the Fuel `allOf` case fall out naturally: the list
+gate ANDs with each item's own trigger. Either way the dialect declaration belongs in §0 —
+I have not invented it here.
+
+### 16.2 Engine work landed this turn (against v1.5.1, fully backward compatible)
+
+- **Base lists may span several tables under bold sub-headings.** Previously one heading =
+  one table; the second table errored "outside a ### heading". Base items now also carry
+  their sub-heading as the rendered-group key. Without this `mechanical-base`'s 24 items
+  collapse into one group of 20 core — 2.5× the §2 cap. With it: 6 groups, max 7 core.
+- **Markdown emphasis is stripped from id cells.** v1.6.1 authored `**mechanical-base**`;
+  unstripped, the asterisks became part of the id and 13 zone types inherited a list that
+  did not exist — surfacing as a validation error three steps from the cause.
+- **Table B `defaults true for`** parsed into `zoneAttributes[].defaultsTrueFor`, validated
+  against real zone types. Both the 3- and 4-column headers parse, so regenerating an older
+  master is not a breaking edit.
+- **`house.*` namespace** added; `activeRefs` emits it at every scope. **`pin.*` is now
+  zone-only** and the validator rejects it on a session item, naming the `house.*` form.
+  Nothing used it there, so the ambiguity was removed rather than documented.
+
+Tested against fixtures rather than the shipped master, since v1.5.1 does not exercise any
+of it — the engine and the content stay reviewable apart.
+
+### 16.3 Still open from §15
+
+The 345-vs-377 item-count reconciliation (now v1.6.1 §9.7) is not addressed here. My figure
+counts **unique item ids across base + zone + session + component lists**. Happy to produce
+the per-section breakdown whenever the binder session wants to run it side by side.

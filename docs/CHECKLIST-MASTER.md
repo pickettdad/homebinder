@@ -1,6 +1,6 @@
-# HouseSteady Field Assistant — Checklist Master (v1.7.1)
+# HouseSteady Field Assistant — Checklist Master (v1.7.2)
 
-**Version:** v1.7.1 · **Date:** 2026-07-28 · **Supersedes:** v1.7 (2026-07-28, never built)
+**Version:** v1.7.2 · **Date:** 2026-07-28 · **Supersedes:** v1.7.1 (2026-07-28)
 **Governance:** this file is a **governed cross-app contract** — see §10. Field is custodian; the binder builder and the equipment registry are consumers with ratifying interest on named surfaces.
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
@@ -33,6 +33,15 @@ Also corrected: §6's prose claimed *"that attribute, not the zone type, is what
 **Count reconciliation:** component types **58** and `.unit` items **23** match exactly across both sessions' parses — same file, same reading. Items differ (345 rows vs 377 unique ids) and the two sessions should reconcile directly rather than either guessing; the likely difference is table rows in §5/§6/§7 versus unique ids across base + zone + session + component lists. Recorded in §9.
 
 
+
+
+**Changelog v1.7.1 → v1.7.2 — Table H made honest, two units assigned, the meter decision deferred deliberately.**
+
+- **Table H's prose contradicted its own table.** It asserted *"Every `measure` item declares its unit inline"* while five did not. That is the prose-vs-tables class living inside the table written to prevent it. Reworded to state what is true, with the exceptions named. The field session correctly declined to enforce the rule against an open question; it becomes enforceable when the last three are answered.
+- **`liv.egress` and `sit.measurements` assigned `in`.** Both are lengths; the unit was never in doubt. That leaves three, not five.
+- **Three moisture items stay unitless deliberately** — `int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`. **The owner does not yet own a moisture meter**, and the unit cannot be declared before the instrument exists: %WME, %MC and relative 0–100 are different scales, and a wrong declaration corrupts the series exactly as Table H warns. See §9 — this is now a **purchasing decision with a permanent schema consequence**, not a content gap.
+- **Count correction:** five unitless items, not six as v1.7 stated.
+- **Emphasis removed from the thirteen §4 Inherits cells** (v1.7.1, folded in here). v1.7 authored the emphasis ban while the file violated it thirteen times — the ban caught it on first contact, which is the rule paying for itself immediately.
 
 **Changelog v1.6.2 → v1.7 — governance, plus four stability fixes the governance made obvious.**
 
@@ -155,7 +164,7 @@ Both are the same defect: the library was built from mechanical systems outward 
 
 ---
 
-## 0. Table dialect (for the generator — v1.7)
+## 0. Table dialect (for the generator — v1.7.2)
 
 - Base/zone/session tables: `id | text | satisfy | tier | attest [| scope] [| trigger]`. Scope defaults to `[baseline]` where the column is absent.
 - Component tables (§7): `id | text | satisfy | tier | attest`.
@@ -307,7 +316,7 @@ Typed zone + editable label; **labels are display-only and never drive logic.**
 | `int.lighting` | Switches and fixtures function | check | standard | action | baseline | — |
 | `int.registers` | Supply/return registers unblocked, airflow confirmed — pin problem registers | check | standard | action | baseline | — |
 | `int.alarms` | Smoke/CO alarms in this zone pinned (manufacture dates photographed) | pin `smoke-alarm\|co-alarm` | standard | evidence | baseline, monthly | — |
-| `liv.egress` | Sleeping-room window egress: opens fully; size and sill height measured | measure | core | action | baseline | `zone.sleeping` |
+| `liv.egress` | Sleeping-room window egress: opens fully; size and sill height measured | measure (in) | core | action | baseline | `zone.sleeping` |
 | `int.owner-quirks` | Anything the owner flagged in this room verified and captured | note | standard | action | baseline | — |
 
 ### `wet-base`
@@ -532,7 +541,7 @@ A `utility` zone is an ordinary interior zone that **sets `zone.has_mechanicals`
 | `sit.retaining` | Retaining walls pinned: lean, drainage, condition | pin `retaining-wall` | standard | evidence | — |
 | `sit.shoreline` | Shoreline/dock captured; erosion comparison positions established | pin `comparison-position\|dock` | core | evidence | `property.waterfront` |
 | `sit.outbuildings` | Outbuildings identified; each gets a zone if substantial | check | standard | action | — |
-| `sit.measurements` | Driveway/walkway dimensions captured | measure | standard | action | — |
+| `sit.measurements` | Driveway/walkway dimensions captured | measure (in) | standard | action | — |
 
 ## 6b. Session items (session-close audit)
 
@@ -1266,7 +1275,7 @@ Option values follow the item-id lifecycle (§2): never renamed, only retired an
 
 ## H. Measure units (v1.7)
 
-Every `measure` item declares its unit inline — `measure (psi)`. This table is the closed set. **A unit is part of the item's identity: changing it is a breaking change, not a content edit.** A `fc.width` recorded in mm on visit one and cm on visit five would corrupt the comparison series, and **no existing check could catch it** — the drift gate, the schema validator and the round-trip test all compare the config to itself.
+Units are declared inline on the item — `measure (psi)` — and this table is the closed set. **Three items are deliberately unitless and are listed below; every other `measure` item declares a unit.** **A unit is part of the item's identity: changing it is a breaking change, not a content edit.** A `fc.width` recorded in mm on visit one and cm on visit five would corrupt the comparison series, and **no existing check could catch it** — the drift gate, the schema validator and the round-trip test all compare the config to itself.
 
 | unit | means | used by |
 |---|---|---|
@@ -1275,8 +1284,11 @@ Every `measure` item declares its unit inline — `measure (psi)`. This table is
 | `%RH` | relative humidity, percent | `bsm.humidity` |
 | `year` | four-digit calendar year (gated 1900–current) | `wh.age`, `ft.age`, `wsf.age`, `apw.hose-age` |
 | `mm` | millimetres | `fc.width` |
+| `in` | inches (lengths) | `liv.egress`, `sit.measurements` |
 
-*Six `measure` items carry no unit and are listed in §9 — assigning them requires knowing what the instrument actually reads, and a wrong guess corrupts the series in exactly the way this table exists to prevent.*
+**Deliberately unitless (3), pending an instrument:** `int.moisture-suspect` · `rgh.moisture` · `wet.surround-moisture`. All three record a moisture-meter reading, and **the scale is a property of the meter, not of the checklist** — %WME, %MC and relative 0–100 are not interchangeable. Declaring one before the instrument exists would guarantee the corruption this table prevents. **Enforce the "every measure item declares a unit" rule once these three are answered, not before.**
+
+
 
 ---
 
@@ -1299,15 +1311,19 @@ Every `measure` item declares its unit inline — `measure (psi)`. This table is
 5. **Pin nicknames** — v1.4 removes most of the reason they existed: nicknames were covering for missing component types. Recommend keeping them through the next field walk, then reviewing whether they still earn their place. Don't retire them in the same pass that adds the types, or you remove the workaround and the gap together and can't tell which mattered.
 6. **Intake form needs a question it does not ask.** `flat_roof` is declared in Table A because Master Spec §15's trigger table depends on it, but nothing sets it — the intake form has no flat/low-slope roof question. Add it there, or drop the flag; a flag no input can set is worse than an absent one. **And sweep the intake form the other way:** `seasonal_vacancy` and `secondary_suite` were asked for weeks and had no flag, which is how this class of gap hides.
 
-7. **Sweep for remaining prose-only structural claims.** v1.6.2 moved the last known one (the `mechanical-base` gate) into the dialect. **Anything else in this file that states a structural fact only in a sentence is an undetected instance of the same class.** Worth a deliberate pass by whoever next parses the file end to end — the generator sees the tables, so only a human reading the prose can find them, and only the parser can confirm they're absent from the config.
+7. **The moisture-meter decision — a purchase with a permanent schema consequence.** Three items (`int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`) record a meter reading and stay unitless until an instrument exists. **The scale is set by the meter, and it is set once:** readings taken in %WME cannot be compared to readings in %MC or on a relative 0–100 scale, so switching instruments later corrupts every series retroactively. Decide the meter deliberately, declare its unit in Table H, and treat replacing it as a breaking change requiring a new item rather than a changed unit. *(A pinned meter reading %WME is the common inspection convention, but the choice is the owner's and the declaration follows the instrument, not the other way round.)*
 
-8. **Item-count reconciliation between sessions.** Component types (58) and `.unit` items (23) match exactly across both parses. The item total does not: 345 table rows vs 377 unique ids. Likely rows-in-§5/§6/§7 versus unique ids across base + zone + session + component lists. **The two sessions should reconcile directly with a per-section breakdown** rather than either adopting the other's number — a count that disagrees for an unexamined reason is a count neither should cite.
+8. **`measure` holds one number; two items want several.** `liv.egress` asks for width, height and sill height; `sit.measurements` asks for driveway and walkway dimensions. Both now declare `in`, which is correct for whatever single value is recorded — but the multi-value shape is unmodelled. Either split into separate items (`liv.egress-width`, `liv.egress-height`, `liv.egress-sill`) or add a multi-value measure kind. **Splitting is the safer answer** — three declared numbers beat one ambiguous one, and each becomes independently comparable across visits.
 
-9. **The `answer.*` class is the binder's, and the binder must own its vocabulary too.** Conditions on recorded values are out of this file by design (§3). The builder reads this master's `choice` option values as its condition vocabulary — so **renaming or removing an option value is a breaking change for the builder**, not just a content edit. Worth the same care as an item id.
+9. **Sweep for remaining prose-only structural claims.** v1.6.2 moved the last known one (the `mechanical-base` gate) into the dialect. **Anything else in this file that states a structural fact only in a sentence is an undetected instance of the same class.** Worth a deliberate pass by whoever next parses the file end to end — the generator sees the tables, so only a human reading the prose can find them, and only the parser can confirm they're absent from the config.
 
-10. **§1 emergency-sheet coverage is the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+10. **Item-count reconciliation between sessions.** Component types (58) and `.unit` items (23) match exactly across both parses. The item total does not: 345 table rows vs 377 unique ids. Likely rows-in-§5/§6/§7 versus unique ids across base + zone + session + component lists. **The two sessions should reconcile directly with a per-section breakdown** rather than either adopting the other's number — a count that disagrees for an unexamined reason is a count neither should cite.
 
-11. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
+11. **The `answer.*` class is the binder's, and the binder must own its vocabulary too.** Conditions on recorded values are out of this file by design (§3). The builder reads this master's `choice` option values as its condition vocabulary — so **renaming or removing an option value is a breaking change for the builder**, not just a content edit. Worth the same care as an item id.
+
+12. **§1 emergency-sheet coverage is the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
+
+13. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
 
 ## 10. Governance (v1.7)
 
@@ -1347,6 +1363,6 @@ The registry reads component types (the fleet dimension), option values (the pre
 
 ---
 
-**Status:** v1.7 — adds **§10 Governance** (Field custodian, builder ratifying consumer on ten binding surfaces, registry named as the third consumer that cannot argue for itself, acceptance tests as a floor not a ceiling, Field's cannot-reasonably-capture veto). Extends the id lifecycle to **choice option values** with **Table G**; declares **`.unit`/`.wide`** as reserved item classes; adds **Table H measure units**; bans markdown emphasis in parsed cells; adds three component types (`leak-sensor`, `humidifier`, `dehumidifier`) so the builder's `house.*` conditions have types to reference. **No item ids retired or renamed since v1.5; no option values retired ever.**
+**Status:** v1.7.2 — carries v1.7's governance (§10) and stability rules, with Table H made honest, `in` assigned to the two length items, and the three moisture items left deliberately unitless pending an instrument. Emphasis removed from the thirteen §4 Inherits cells (v1.7.1). **No item ids retired or renamed since v1.5; no option values retired ever.**
 
-*Three stability rules now sit together and share one cause — **a consistency check cannot catch a transformation applied uniformly.** The drift gate, schema validator and round-trip test all compare the config to itself, so a uniform corruption satisfies all three. Item ids, option values and measure units each needed a rule that compares against something external: the master's literal text.*
+*Three stability rules now share one cause — **a consistency check cannot catch a transformation applied uniformly.** The drift gate, schema validator and round-trip test all compare the config to itself, so a uniform corruption satisfies all three. Item ids, option values and measure units each needed a check against something external: the master's literal text. The field session's corollary, earned twice in one session: **a fix for that class must be tested on the class, not the instance** — an emphasis ban that rejects emphasis but still eats underscores has not been tested on the class.*

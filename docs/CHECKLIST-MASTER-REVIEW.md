@@ -1034,3 +1034,62 @@ relative 0–100 scale — depends on the instrument in the owner's hand, and gu
 corrupt the comparison series in the precise way Table H exists to prevent. Routed to the
 owner. `liv.egress` and `sit.measurements` are separate and simpler: both are lengths, and
 `in` is already declared.
+
+---
+
+## 19. v1.7.2 intake (2026-07-28)
+
+**Accepted and installed.** 401 items, unchanged from v1.7.1 — this version corrects claims
+and assigns two units, adding no content. All four changes verified:
+
+| claim | verified |
+|---|---|
+| Table H reworded to three deliberate exceptions | ✅ no blanket claim remains |
+| `liv.egress` + `sit.measurements` declare `in` | ✅ both |
+| emphasis removed from §4 Inherits | ✅ zero occurrences |
+| count corrected to five | ✅ "six" no longer claimed |
+
+Unitless `measure` items are now exactly three, all moisture: `int.moisture-suspect`,
+`rgh.moisture`, `wet.surround-moisture`.
+
+**The meter answer settles it correctly.** The owner does not own one yet, so the scale is
+genuinely undetermined — not merely unrecorded. §9.7's framing is the right one: the
+instrument sets the scale permanently, and switching later corrupts every prior series
+retroactively. Enforce *every-measure-declares-a-unit* when the instrument exists, not before.
+
+### 19.1 On splitting `liv.egress` — agreed, with two refinements
+
+Recommendation accepted. Two things to get right when it lands:
+
+**(1) It is four things, not three.** The current row reads *"Sleeping-room window egress:
+opens fully; size and sill height measured"* — that is one **check** (opens fully) plus
+**three** numbers (width, height, sill height). Splitting into three measures leaves "opens
+fully" homeless or silently bundled into one of them. Proposed shape:
+
+| id | text | satisfy | attest |
+|---|---|---|---|
+| `liv.egress-opens` | Sleeping-room egress window opens fully | check | action |
+| `liv.egress-width` | Clear opening width | measure (in) | action |
+| `liv.egress-height` | Clear opening height | measure (in) | action |
+| `liv.egress-sill` | Sill height above finished floor | measure (in) | action |
+
+This is also what the assessment actually needs: egress thresholds are **per dimension** —
+minimum width, minimum height, minimum openable area, maximum sill height. One number cannot
+be compared against four different limits, and the binder cannot flag *which* dimension fails.
+
+**(2) `liv.egress` must RETIRE, not carry over to one of the four.** Per §2's own rule this is
+a redefinition, not a move: one ambiguous number becomes several specific ones. Keeping the id
+for, say, sill height would let a past reading — recorded when the item meant "size", and
+nobody now knows which dimension the inspector measured — render as satisfying "sill height
+above finished floor". That is textbook false continuity, and the id has a real recorded value
+behind it, which makes it worse than the `bth.toilet-secure` case.
+
+**Cost, stated honestly:** one `action` tap becomes four. For a life-safety item in a sleeping
+room that is proportionate, and it is the only item in the master where a single `measure`
+carries more than one number — so the fix does not generalise into a wave of splits.
+
+### 19.2 Carried
+
+The every-measure-declares-a-unit rule remains **recorded, not enforced** (§18.3), now for a
+better-stated reason: the instrument does not exist yet. When it does, three cells and one
+validator rule close it.

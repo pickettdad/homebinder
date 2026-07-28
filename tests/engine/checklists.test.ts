@@ -167,9 +167,10 @@ describe("content invariants (master v1.1 discipline)", () => {
     expect(alarms?.tier).toBe("standard");
     expect(alarms?.pinTypes).toEqual(["smoke-alarm", "co-alarm"]);
 
-    // v1.2: liv.egress lives in interior-base so ANY sleeping zone gets the core
+    // v1.2: the egress items live in interior-base so ANY sleeping zone gets the core
     // egress item (id retained per id-stability — the liv. prefix is historical).
-    const egress = interior.items.find((i) => i.id === "liv.egress");
+    // v1.8 split liv.egress into four per-dimension items; the placement rule is unchanged.
+    const egress = interior.items.find((i) => i.id === "liv.egress-width");
     expect(egress?.trigger).toEqual({ anyOf: ["zone.sleeping"] });
     expect(egress?.tier).toBe("core");
 
@@ -455,6 +456,10 @@ describe("id stability", () => {
   const RETIRED = [
     "bth.toilet-secure", "bth.tub-surround",
     "kit.dw-connection", "kit.fridge-line", "kit.fuel-range", "lnd.hoses",
+    // v1.8: one item recording one number for four per-dimension thresholds. Retired rather
+    // than reused, because the recorded value's provenance is unknowable — and a NUMBER
+    // carries false precision, so nothing about it would invite doubt.
+    "liv.egress",
   ];
 
   it("no retired id has been reused", () => {
@@ -918,5 +923,52 @@ describe("no markdown emphasis in parsed cells (master v1.7 §0)", () => {
     const cfg = parseMaster(masterText);
     expect(cfg.zoneAttributes!.map((a) => a.id)).toContain("has_stairs");
     expect(cfg.zoneAttributes!.map((a) => a.id)).toContain("has_mechanicals");
+  });
+});
+
+/**
+ * Egress split (master v1.8). One item asking for a check plus three numbers became four,
+ * because egress thresholds are PER DIMENSION — one number cannot be compared against four
+ * limits, and the binder cannot say which dimension failed.
+ */
+describe("egress split (master v1.8)", () => {
+  const cfg = validConfig();
+  const base = cfg.baseLists.find((b) => b.id === "interior-base")!;
+  const egress = base.items.filter((i) => i.id.startsWith("liv.egress"));
+
+  it("is four items — the check is not a measurement", () => {
+    expect(egress.map((i) => i.id).sort()).toEqual([
+      "liv.egress-height", "liv.egress-opens", "liv.egress-sill", "liv.egress-width",
+    ]);
+    expect(egress.find((i) => i.id === "liv.egress-opens")!.satisfy).toBe("check");
+    for (const id of ["liv.egress-width", "liv.egress-height", "liv.egress-sill"]) {
+      const i = egress.find((x) => x.id === id)!;
+      expect(i.satisfy).toBe("measure");
+      expect(i.unit).toBe("in");
+    }
+  });
+
+  it("records no openable area — it is DERIVED from width × height", () => {
+    // A recorded derived value can disagree with its own inputs. The binder computes it
+    // from two measurements that cannot contradict each other.
+    expect(egress.some((i) => /area/i.test(i.id) || /area/i.test(i.text))).toBe(false);
+  });
+
+  it("all four stay attest:action and gated on zone.sleeping", () => {
+    for (const i of egress) {
+      expect(i.attest, i.id).toBe("action");
+      expect(JSON.stringify(i.trigger), i.id).toContain("zone.sleeping");
+    }
+  });
+
+  it("keeps interior-base inside the per-group core cap via its own sub-heading", () => {
+    // Four core items added to a list already carrying five would sit at exactly 8 — the cap,
+    // with zero headroom. The authored sub-heading splits them into their own rendered group.
+    const byGroup = new Map<string, number>();
+    for (const i of base.items)
+      if (i.tier === "core") byGroup.set(i.group ?? "(base)", (byGroup.get(i.group ?? "(base)") ?? 0) + 1);
+    expect(egress.every((i) => i.group === "Egress (sleeping rooms)")).toBe(true);
+    expect(Math.max(...byGroup.values())).toBeLessThanOrEqual(8);
+    expect(byGroup.get("Egress (sleeping rooms)")).toBe(4);
   });
 });

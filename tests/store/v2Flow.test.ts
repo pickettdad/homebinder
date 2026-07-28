@@ -205,7 +205,7 @@ describe("v2 walk flow through the store", () => {
     const { deriveZoneItems } = await import("../../src/engine/v2/checklist");
     const cfg = s().v2Config!;
     const state = s().v2Session!;
-    expect(deriveZoneItems(cfg, state, bed).map((d) => d.item.id)).toContain("liv.egress");
-    expect(deriveZoneItems(cfg, state, utl).map((d) => d.item.id)).not.toContain("liv.egress");
+    expect(deriveZoneItems(cfg, state, bed).map((d) => d.item.id)).toContain("liv.egress-width");
+    expect(deriveZoneItems(cfg, state, utl).map((d) => d.item.id)).not.toContain("liv.egress-width");
   });
 });

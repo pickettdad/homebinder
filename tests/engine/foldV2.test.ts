@@ -346,8 +346,8 @@ describe("checklist derivation (real config)", () => {
 
   it("zone attribute triggers: egress only in sleeping zones (v1.2 interior-base move)", () => {
     const state = foldV2(mkEvents(baseEvents));
-    expect(deriveZoneItems(config, state, "bed").map((d) => d.item.id)).toContain("liv.egress");
-    expect(deriveZoneItems(config, state, "bath").map((d) => d.item.id)).not.toContain("liv.egress");
+    expect(deriveZoneItems(config, state, "bed").map((d) => d.item.id)).toContain("liv.egress-width");
+    expect(deriveZoneItems(config, state, "bath").map((d) => d.item.id)).not.toContain("liv.egress-width");
   });
 
   it("attaches component items per pin — two water heaters mean two nameplate items", () => {

@@ -9,10 +9,10 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.5.1",
+  "configVersion": "1.6.2",
   "propertyFlags": [
     {
-      "id": "municipalwater",
+      "id": "municipal_water",
       "label": "Municipal water",
       "intakeSource": "Water source"
     },
@@ -22,7 +22,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "intakeSource": "Water source"
     },
     {
-      "id": "municipalsewer",
+      "id": "municipal_sewer",
       "label": "Municipal sewer",
       "intakeSource": "Sewage"
     },
@@ -47,7 +47,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "intakeSource": "Fuel on property"
     },
     {
-      "id": "woodheat",
+      "id": "wood_heat",
       "label": "Wood-burning appliance",
       "intakeSource": "Wood-burning appliance"
     },
@@ -67,7 +67,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "intakeSource": "Waterfront"
     },
     {
-      "id": "pre1990",
+      "id": "pre_1990",
       "label": "Built before ~1990",
       "intakeSource": "Year built"
     },
@@ -80,6 +80,21 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "id": "ev",
       "label": "EV charging",
       "intakeSource": "Solar/battery/EV"
+    },
+    {
+      "id": "seasonal_vacancy",
+      "label": "Seasonal or periodically vacant",
+      "intakeSource": "Occupancy (v1.6)"
+    },
+    {
+      "id": "secondary_suite",
+      "label": "Secondary suite / in-law / rental unit",
+      "intakeSource": "Secondary suite (v1.6)"
+    },
+    {
+      "id": "flat_roof",
+      "label": "Flat or low-slope roof section",
+      "intakeSource": "⚠ **not yet asked at intake** — see §9"
     }
   ],
   "zoneAttributes": [
@@ -96,19 +111,27 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "defaultsTrueFor": []
     },
     {
-      "id": "hasstairs",
+      "id": "has_stairs",
       "label": "Contains stairs",
       "askAtCreation": true,
       "defaultsTrueFor": []
     },
     {
-      "id": "hasplumbing",
+      "id": "has_mechanicals",
+      "label": "Contains mechanical equipment (furnace, panel, water heater, main shutoff…)",
+      "askAtCreation": true,
+      "defaultsTrueFor": [
+        "utility"
+      ]
+    },
+    {
+      "id": "has_plumbing",
       "label": "Contains plumbing",
       "askAtCreation": false,
       "defaultsTrueFor": []
     },
     {
-      "id": "exteriorwall",
+      "id": "exterior_wall",
       "label": "Has exterior wall(s)",
       "askAtCreation": false,
       "defaultsTrueFor": []
@@ -123,7 +146,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "interior-base",
-        "rough-base"
+        "rough-base",
+        "mechanical-base"
       ]
     },
     {
@@ -135,7 +159,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "interior-base",
-        "rough-base"
+        "rough-base",
+        "mechanical-base"
       ]
     },
     {
@@ -144,7 +169,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "crawlspace"
       ],
       "inherits": [
-        "rough-base"
+        "rough-base",
+        "mechanical-base"
       ]
     },
     {
@@ -154,7 +180,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "loft access"
       ],
       "inherits": [
-        "rough-base"
+        "rough-base",
+        "mechanical-base"
       ]
     },
     {
@@ -165,7 +192,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "interior-base",
-        "wet-base"
+        "wet-base",
+        "mechanical-base"
       ]
     },
     {
@@ -177,7 +205,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "interior-base",
-        "wet-base"
+        "wet-base",
+        "mechanical-base"
       ]
     },
     {
@@ -188,7 +217,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "interior-base",
-        "wet-base"
+        "wet-base",
+        "mechanical-base"
       ]
     },
     {
@@ -201,7 +231,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "den"
       ],
       "inherits": [
-        "interior-base"
+        "interior-base",
+        "mechanical-base"
       ]
     },
     {
@@ -213,7 +244,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "landing"
       ],
       "inherits": [
-        "interior-base"
+        "interior-base",
+        "mechanical-base"
       ]
     },
     {
@@ -224,7 +256,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "interior-base",
-        "rough-base"
+        "rough-base",
+        "mechanical-base"
       ]
     },
     {
@@ -235,7 +268,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "rear"
       ],
       "inherits": [
-        "exterior-base"
+        "exterior-base",
+        "mechanical-base"
       ]
     },
     {
@@ -247,7 +281,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
         "shoreline"
       ],
       "inherits": [
-        "exterior-base"
+        "exterior-base",
+        "mechanical-base"
       ]
     },
     {
@@ -260,7 +295,8 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "inherits": [
         "exterior-base",
-        "rough-base"
+        "rough-base",
+        "mechanical-base"
       ]
     }
   ],
@@ -568,91 +604,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ]
     },
     {
-      "id": "exterior-base",
-      "items": [
-        {
-          "id": "ext.wide",
-          "text": "Wide photo canvas covering the full elevation/area",
-          "satisfy": "photo",
-          "tier": "core",
-          "attest": "evidence",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "ext.grade",
-          "text": "Grading slope away from foundation; standing water noted",
-          "satisfy": "check",
-          "tier": "core",
-          "attest": "action",
-          "scope": [
-            "baseline",
-            "seasonal:spring"
-          ]
-        },
-        {
-          "id": "ext.cladding",
-          "text": "Cladding, trim, caulking condition",
-          "satisfy": "check",
-          "tier": "standard",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "ext.penetrations",
-          "text": "Every wall penetration sealed",
-          "satisfy": "check",
-          "tier": "standard",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "ext.foundation-ext",
-          "text": "Exterior visible foundation inspected; cracks pinned",
-          "satisfy": "pin",
-          "pinTypes": [
-            "foundation-crack"
-          ],
-          "tier": "core",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "ext.roofline",
-          "text": "Roofline captured by pole cam — slopes, valleys, flashing, edges",
-          "satisfy": "photo",
-          "tier": "core",
-          "attest": "evidence",
-          "scope": [
-            "baseline"
-          ]
-        },
-        {
-          "id": "ext.terminations",
-          "text": "Every vent termination pinned and traced to its interior source",
-          "satisfy": "pin",
-          "pinTypes": [
-            "vent-termination"
-          ],
-          "tier": "core",
-          "attest": "action",
-          "scope": [
-            "baseline"
-          ]
-        }
-      ]
-    }
-  ],
-  "zoneLists": [
-    {
-      "zoneType": "utility",
+      "id": "mechanical-base",
       "items": [
         {
           "id": "utl.heat-source",
@@ -991,8 +943,93 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ],
           "group": "Close-out"
         }
-      ]
+      ],
+      "gate": "zone.has_mechanicals"
     },
+    {
+      "id": "exterior-base",
+      "items": [
+        {
+          "id": "ext.wide",
+          "text": "Wide photo canvas covering the full elevation/area",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ext.grade",
+          "text": "Grading slope away from foundation; standing water noted",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline",
+            "seasonal:spring"
+          ]
+        },
+        {
+          "id": "ext.cladding",
+          "text": "Cladding, trim, caulking condition",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ext.penetrations",
+          "text": "Every wall penetration sealed",
+          "satisfy": "check",
+          "tier": "standard",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ext.foundation-ext",
+          "text": "Exterior visible foundation inspected; cracks pinned",
+          "satisfy": "pin",
+          "pinTypes": [
+            "foundation-crack"
+          ],
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ext.roofline",
+          "text": "Roofline captured by pole cam — slopes, valleys, flashing, edges",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "ext.terminations",
+          "text": "Every vent termination pinned and traced to its interior source",
+          "satisfy": "pin",
+          "pinTypes": [
+            "vent-termination"
+          ],
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    }
+  ],
+  "zoneLists": [
     {
       "zoneType": "basement",
       "items": [
@@ -1248,7 +1285,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ],
           "trigger": {
             "anyOf": [
-              "zone.hasstairs"
+              "zone.has_stairs"
             ]
           }
         }
@@ -1562,7 +1599,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
           ],
           "trigger": {
             "anyOf": [
-              "property.municipalwater"
+              "property.municipal_water"
             ]
           }
         },
@@ -1687,6 +1724,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
   ],
   "sessionItems": [
     {
+      "id": "ses.shutoff-map",
+      "text": "Emergency shutoff map complete: every Master Spec §1 shutoff and control either pinned or explicitly recorded absent — water main, curb stop, gas, fuel, electrical, water heater, boiler, furnace switch, sump, septic/sewage alarm, solar disconnects, pool disconnect, irrigation, hose bibs, fireplace valve",
+      "satisfy": "check",
+      "tier": "core",
+      "attest": "action",
+      "scope": [
+        "baseline"
+      ]
+    },
+    {
       "id": "ses.alarm-coverage",
       "text": "Alarm coverage judged against the pin set: smoke on every storey and outside sleeping areas; CO adjacent to sleeping areas where fuel-burning appliances, a fireplace, or an attached garage exist",
       "satisfy": "check",
@@ -1740,7 +1787,7 @@ export const checklistsBaseline: ChecklistConfigInput = {
       ],
       "trigger": {
         "anyOf": [
-          "property.woodheat"
+          "property.wood_heat"
         ]
       }
     }
@@ -4615,6 +4662,86 @@ export const checklistsBaseline: ChecklistConfigInput = {
     },
     {
       "types": [
+        "dock"
+      ],
+      "items": [
+        {
+          "id": "dck.unit",
+          "text": "Dock photographed whole from shore, from a repeatable position",
+          "satisfy": "photo",
+          "tier": "core",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "dck.type",
+          "text": "Dock type",
+          "satisfy": "choice",
+          "options": [
+            "fixed/crib",
+            "floating",
+            "pipe/removable",
+            "cantilever",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "dck.decking",
+          "text": "Decking, fasteners and hardware condition",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "dck.attachment",
+          "text": "Shore attachment and anchoring condition",
+          "satisfy": "check",
+          "tier": "core",
+          "attest": "action",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "dck.season",
+          "text": "Current seasonal state",
+          "satisfy": "choice",
+          "options": [
+            "in water",
+            "removed for season",
+            "permanent",
+            "unknown"
+          ],
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        },
+        {
+          "id": "dck.permit",
+          "text": "Shoreline/dock permit documentation noted",
+          "satisfy": "note",
+          "tier": "standard",
+          "attest": "evidence",
+          "scope": [
+            "baseline"
+          ]
+        }
+      ]
+    },
+    {
+      "types": [
         "retaining-wall"
       ],
       "items": [
@@ -4978,13 +5105,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
     {
       "types": [
         "elevator-lift"
-      ],
-      "stub": true,
-      "items": []
-    },
-    {
-      "types": [
-        "dock"
       ],
       "stub": true,
       "items": []

@@ -53,7 +53,7 @@ const media = (n: number) => ({ mediaId: `m${n}`, sha256: `sha${n}`, mime: "imag
 
 describe("foldV2 core", () => {
   it("throws without SessionInitialized", () => {
-    expect(() => foldV2(mkEvents([{ type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} }]))).toThrow(
+    expect(() => foldV2(mkEvents([{ type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } }]))).toThrow(
       /SessionInitialized/,
     );
   });
@@ -62,7 +62,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: { has_mechanicals: true } },
         { type: "CanvasAdded", canvasId: "c1", zoneId: "z1", kind: "photo", media: media(1) },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         { type: "PinTyped", pinId: "p1", pinType: { kind: "component", componentType: "water-heater" } },
@@ -86,7 +86,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         { type: "PinRetired", pinId: "p1", note: "mistake" },
         { type: "PinCreated", pinId: "p2", pinNumber: 2, zoneId: "z1" },
@@ -148,7 +148,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {}, level: "basement" },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true }, level: "basement" },
         { type: "ZoneCreated", zoneId: "z2", zoneType: "living-space", label: "Guest", attributes: {} },
         { type: "ZoneLevelSet", zoneId: "z2", level: "second" },
         { type: "ZoneLevelSet", zoneId: "ghost", level: "attic" },
@@ -179,7 +179,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } },
         { type: "CanvasAdded", canvasId: "c1", zoneId: "z1", kind: "photo", media: media(1) },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         { type: "AnchorPlaced", anchorId: "a1", pinId: "p1", canvasId: "c1", x: 0.1, y: 0.1 },
@@ -221,7 +221,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         { type: "PinTyped", pinId: "p1", pinType: { kind: "component", componentType: "water-treatment" } },
         { type: "PinLabeled", pinId: "p1", label: "chlorine tank" },
@@ -236,7 +236,7 @@ describe("foldV2 core", () => {
     const cleared = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         { type: "PinLabeled", pinId: "p1", label: "temp" },
         { type: "PinLabeled", pinId: "p1", label: "" },
@@ -268,7 +268,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         {
           type: "ItemResolved",
@@ -302,7 +302,7 @@ describe("foldV2 core", () => {
     const state = foldV2(
       mkEvents([
         init,
-        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: { has_mechanicals: true } },
         { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
         { type: "ChatMessageSent", threadId: "t1", target: { kind: "pin", id: "p1" }, text: "what is this?", mediaIds: ["m1"] },
         { type: "ChatReplyRecorded", threadId: "t1", model: "claude-sonnet-5", text: "A pressure tank.", usage: { inputTokens: 10, outputTokens: 5 } },
@@ -319,7 +319,7 @@ describe("checklist derivation (real config)", () => {
   const baseEvents: V2EventPayload[] = [
     init,
     { type: "ZoneCreated", zoneId: "bath", zoneType: "bathroom", label: "Main Bath", attributes: {} },
-    { type: "ZoneCreated", zoneId: "utl", zoneType: "utility", label: "Utility", attributes: {} },
+    { type: "ZoneCreated", zoneId: "utl", zoneType: "utility", label: "Utility", attributes: { has_mechanicals: true } },
     { type: "ZoneCreated", zoneId: "bed", zoneType: "living-space", label: "Guest Room", attributes: { sleeping: true } },
   ];
 
@@ -502,8 +502,8 @@ describe("checklist derivation (real config)", () => {
 describe("pin move across zones drops anchors (owner ruling 2026-07-25)", () => {
   const base: V2EventPayload[] = [
     init,
-    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
-    { type: "ZoneCreated", zoneId: "z2", zoneType: "utility", label: "Garage", attributes: {} },
+    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: { has_mechanicals: true } },
+    { type: "ZoneCreated", zoneId: "z2", zoneType: "utility", label: "Garage", attributes: { has_mechanicals: true } },
     { type: "CanvasAdded", canvasId: "c1", zoneId: "z1", kind: "photo", media: media(1) },
     { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
     { type: "AnchorPlaced", anchorId: "a1", pinId: "p1", canvasId: "c1", x: 0.2, y: 0.3 },
@@ -532,7 +532,7 @@ describe("pin move across zones drops anchors (owner ruling 2026-07-25)", () => 
 describe("export tracking / exportIsCurrent", () => {
   const base: V2EventPayload[] = [
     init,
-    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
+    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: { has_mechanicals: true } },
   ];
 
   it("is false before any export", () => {
@@ -569,7 +569,7 @@ describe("export tracking / exportIsCurrent", () => {
 describe("fold v2 — video survives re-filing as visual evidence", () => {
   const base: V2EventPayload[] = [
     { type: "SessionInitialized", configId: "cfg", configVersion: "1.0", configHash: "h", propertyFlags: [], propertyLabel: "H" },
-    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {}, level: "basement" },
+    { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: { has_mechanicals: true }, level: "basement" },
     { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
   ];
 

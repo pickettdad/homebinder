@@ -185,6 +185,51 @@ key. **It should be scoped deliberately if the report needs it — not assumed i
 `satisfied`/`na` is real. It is simply a different signal from the one the report was going to
 be built on.
 
+### Per-item evidence at capture time — DECLINED, deliberately (builder, 2026-07-30)
+
+Offered from this side as the only thing that would close the gap above; **declined, and not to
+be scoped.** Recorded as an explicit exclusion rather than left absent, per the rule that an
+exclusion is evidence of a decision while a silence is indistinguishable from an oversight
+(`CHECKLIST-MASTER-REVIEW.md` §23).
+
+Two reasons, both sound:
+
+1. **Per-pin media presence must not gate the client report either.** A water-heater pin
+   carrying a wide shot and a nameplate but no drain-pan photo would go quiet on the drain pan.
+   Filtering gap rows on "this pin holds media" *suppresses real gaps* — worse than the problem
+   it was reaching for.
+2. **The defence lives in the design, not the data.** The gap report is an editor over
+   pre-populated rows that a human signs. A concierge looking at an unresolved
+   `utl.pipe-material` row on a pin holding three photographs is exactly what the review pass
+   is for. Their mitigation is a **row affordance** — every gap row pointing at a pin shows what
+   media that pin carries, at the point of review. **No manifest change.**
+
+**And it would invert the walk.** Asking what a photograph is *for* at capture time contradicts
+the four-pass model (REDESIGN-v2 / issue #40), where capture is deliberately fast and binding
+happens at review. `ItemResolution.evidence.mediaId` already *is* the concierge saying *this
+photo answers this item*; an unconfirmed photograph honestly is not evidence yet.
+
+### The measurement that would reverse it — and how it is actually computed
+
+**Trigger condition (builder):** if a five-zone walk finishes with **many unresolved items
+sitting on pins that carry media**, the review pass is not happening in the field and binding
+must move earlier. Count it rather than guess.
+
+**One correction on method, because the obvious route does not work.** This is *not* computable
+from a v3 export downstream: "unresolved at pin scope" needs the active item set, which is the
+v4 addition this whole section exists to add. Re-deriving it in the binder to run the
+measurement would be the second trigger engine, measuring the thing it would be wrong about.
+
+**It is computable, exactly once, by replaying the export through the real engine.** The v3
+manifest carries `events[]` verbatim, and `foldV2(events)` reconstructs `SessionStateV2` from
+nothing else (`fold.ts:186`). Feed that plus `config.snapshot` to `deriveZoneItems` /
+`deriveComponentItems` / `deriveSessionItems` and the answer comes out of the single
+implementation — no second engine, no v4 dependency.
+
+**So the measurement is not time-sensitive and does not need tooling on walk night.** The
+exported event log preserves everything it needs; it can be run any time after the walk from
+the export files. Build the script when the count is wanted, not before.
+
 ## Related
 
 - Component sub-type taxonomy request + regional analytics rationale:

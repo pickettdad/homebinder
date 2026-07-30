@@ -112,8 +112,16 @@ activeItems: {
   itemId: string;
   /** The field's own rendered-group key — advisory, for presentation parity. */
   group: string;
+  /** {kind:"unresolved"} | {kind:"proposed",pinIds} | {kind:"satisfied"} | {kind:"na",reasonId} */
+  status: ItemStatus;
 }[]
 ```
+
+**`status` is included (builder, 2026-07-30), with their consumption rule recorded as part of
+the contract:** `resolutions[]` stays authoritative for `satisfied` and `na`; the builder reads
+only `proposed` from `status`; a disagreement between the two is *reported*, never silently
+resolved in favour of one — the treatment `zones[].audit` already gets. The redundant values
+are shipped precisely so that cross-check is possible.
 
 - **Ids only, never item bodies.** Text, `satisfy`, `attest`, `tier` and `unit` all live in
   `config.snapshot`, which ships whole. Duplicating them would create a second copy that can
@@ -129,16 +137,53 @@ session state, so it answers *what was due at export time* — not what was due 
 of the visit. A pin created and then retired mid-walk had items due that the set will not
 show. The event log remains the record of what happened; the active set is the state it ended in.
 
-### One open question for the builder
+### `proposed` is far narrower than "a photograph is being held" — do not build the report on it
 
-`DerivedItem` also carries a `status`, and one of its values is **not reconstructable
-downstream**: `proposed` — matching evidence exists on a pin and one human tap would confirm
-it. `satisfied` and `na` are joinable from `resolutions[]`; `unresolved` is their absence; but
-`proposed` comes from the field's proposal search over pins.
+**Settled: `status` ships. This is not a reopening — it is what `proposed` actually means, which
+does not match the reasoning that selected it, measured against master v1.11.**
 
-This is beyond the literal ask, so it is **not** in the shape above. Adding it would ship an
-observation ("evidence exists"), not a judgment — the `attest: evidence` doctrine, exported.
-Builder's call: say whether v4 should carry `status`, and it goes in as a fourth key.
+The justification for taking `status` was the client-facing report: *an item with a photograph
+sitting unconfirmed on a pin must not read as "we did not capture this."* **Shipping `status`
+does not fix that case.** `statusOf` (`checklist.ts:111`) proposes under three conditions, all
+required:
+
+```ts
+if (item.attest === "evidence" && item.satisfy === "pin" && item.pinTypes?.length) { … }
+```
+
+And what it tests is *"a pin of a wanted component type exists in scope"* — **never whether any
+media exists.** Two consequences, both counted against the 409-item master:
+
+| | count | behaviour |
+|---|---|---|
+| can ever be `proposed` | **38** | evidence + `satisfy:pin` + `pinTypes` |
+| **photo/evidence items** | **74** | **never propose** — read `unresolved` with photos on the pin |
+| all evidence items that can never propose | 155 | wrong `satisfy` kind |
+| action items | 216 | never propose, by rule (review §3.3) |
+
+So `utl.pipe-material` ("Supply pipe material photographed close-up") with a photograph on the
+pin and no confirming tap reads **exactly `unresolved`** — indistinguishable from an item nobody
+touched. That is the reported failure mode, surviving the fix chosen for it.
+
+It fails in the other direction too: **`proposed` can fire with zero media.** Creating a
+water-heater pin proposes `utl.water-heater` immediately, no photograph involved. `proposed` is
+therefore neither necessary nor sufficient for "we are holding a photograph."
+
+**What actually answers the media question, already shipping in v3:** `pins[].mediaIds`, and
+`media[]` carrying `owner: {kind:"pin",pinId}`. For any pin-scoped item the builder can ask
+today whether that pin holds media, with no v4 dependency.
+
+**The honest limit, which no current field is close to closing.** Neither signal binds media to
+a *specific item*. `utl.pipe-material` and `utl.every-nameplate` can sit on the same pin, and
+media presence cannot tell them apart. The item↔media link exists in exactly one place —
+`ItemResolution.evidence.mediaId` — and only on a **satisfied** resolution, i.e. never for the
+unconfirmed case the report cares about. Closing that means the field recording which capture
+was taken *for* which item at capture time, which is a capture-flow feature, not a manifest
+key. **It should be scoped deliberately if the report needs it — not assumed into v4.**
+
+`status` still earns its place: the 38 proposable items are real, and the cross-check over
+`satisfied`/`na` is real. It is simply a different signal from the one the report was going to
+be built on.
 
 ## Related
 

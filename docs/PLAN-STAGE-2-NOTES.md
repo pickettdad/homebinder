@@ -63,10 +63,90 @@ Constraints for whoever builds it (Stage 2, once the session-plan round-trip exi
   the gap-list shape, and the `Source` provenance vocabulary must all leave room for it so
   Stage 2 can add it without a migration.
 
+## Manifest v4 — the active item set ships per scope (ratified 2026-07-30, both sides)
+
+**Decision.** v4 carries the field's resolved **active item set** — its own answer to *what was
+due here* — for every scope, open zones included. **Classification stays with the binder
+builder:** what counts as a gap, what reaches the visit-two plan, what is merely outstanding.
+Field ships facts; the builder assigns meaning. Increment 4 proceeds against v3 now and reads
+the set through a per-manifest-version adapter (their Design v1.1 §C3), so this is additive on
+both sides and blocks nothing.
+
+**Why it cannot be derived downstream.** v3's principle stands — derived views are a
+convenience, the config snapshot plus the event log are the trust root — but *unresolved* is
+not a derivation from those. It needs the **active** item set: property flags × zone attributes
+(with `defaultsTrueFor` resolution) × `pin.*` / `house.*` refs × list gates × component
+inheritance chains. That is `activeRefs`, `effectiveAttributes`, `shows()` and
+`componentItemsFor` in `src/engine/v2/checklist.ts`. Deriving it in the binder means a **second
+implementation of the trigger engine**, whose failure mode is silent: the two apps disagree
+about whether an item was ever due, and nothing errors. One implementation, shipped as data.
+
+The *other* half of a gap — `na` carrying `feedsGapList` — **is** a plain join over
+`resolutions[]` and `config.snapshot.naReasons`, and remains the builder's.
+
+### Why the `zones[].audit` interim was offered and declined
+
+Widening the existing close-audit snapshot to all scopes was the cheap path. It was declined,
+and the reasoning is worth keeping because it generalises: **the audit is a summary of what is
+*unresolved*, not a statement of what was *due*.** Answering "unresolved" requires a
+classification call, so shipping it would put that call on the field side and force it to be
+undone at v4. Three bounds make it unusable as the source even temporarily:
+
+1. **Closed zones only.** It is recorded at `ZoneClosed`. On a real walk most zones are open at
+   the moment of import, so for those zones there is simply no record.
+2. **`standardUnresolved` is a bare count.** No ids, so nothing downstream can name the items.
+3. **Zone scope only.** Nothing at pin or session scope — the entire component checklist and
+   every session-wide item are absent.
+
+`zones[].audit` keeps its existing job: the advisory close-out snapshot, as recorded, for audit
+history. It is not a gap source and should not grow into one.
+
+### Shape
+
+A flat top-level array, matching `resolutions[]` so the two join on the same key
+(`itemScopeKey(scope) + itemId`):
+
+```ts
+activeItems: {
+  scope: ItemScope;   // {kind:"zone",zoneId} | {kind:"pin",pinId} | {kind:"session"}
+  itemId: string;
+  /** The field's own rendered-group key — advisory, for presentation parity. */
+  group: string;
+}[]
+```
+
+- **Ids only, never item bodies.** Text, `satisfy`, `attest`, `tier` and `unit` all live in
+  `config.snapshot`, which ships whole. Duplicating them would create a second copy that can
+  disagree with the first.
+- **Coverage:** every zone (open *and* closed), every non-retired pin carrying a non-stub
+  component list, and session scope once. The three derivation functions already exist —
+  `deriveZoneItems`, `deriveComponentItems`, `deriveSessionItems` — so the build is
+  serialisation, not new logic.
+- **Sizing:** a few hundred entries at roughly 100 bytes each. Immaterial beside media.
+
+**Snapshot semantics, stated so nobody assumes otherwise.** The active set is a function of
+session state, so it answers *what was due at export time* — not what was due at every moment
+of the visit. A pin created and then retired mid-walk had items due that the set will not
+show. The event log remains the record of what happened; the active set is the state it ended in.
+
+### One open question for the builder
+
+`DerivedItem` also carries a `status`, and one of its values is **not reconstructable
+downstream**: `proposed` — matching evidence exists on a pin and one human tap would confirm
+it. `satisfied` and `na` are joinable from `resolutions[]`; `unresolved` is their absence; but
+`proposed` comes from the field's proposal search over pins.
+
+This is beyond the literal ask, so it is **not** in the shape above. Adding it would ship an
+observation ("evidence exists"), not a judgment — the `attest: evidence` doctrine, exported.
+Builder's call: say whether v4 should carry `status`, and it goes in as a fourth key.
+
 ## Related
 
 - Component sub-type taxonomy request + regional analytics rationale:
   `CHECKLIST-MASTER-REVIEW.md` §8.
+- The `DESIGN-OBJECT-CONCERN-MODEL.md` v4 line scopes v4 as the concern media-owner change
+  only; that record is ratified and owner-governed, so it is **not** amended here. If the
+  active-item-set addition should appear there, it is a v1.1 of that document.
 - Vocabulary telemetry that feeds the taxonomy (freeform-type flag + nickname field in the
   export): `PLAN-STAGE-1.md` §7.
 - Video evidence: parked until after field test 3 (audio covers weird-noise cases; video

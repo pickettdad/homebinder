@@ -60,6 +60,24 @@ work I can't test" — the owner merges, which triggers the Netlify deploy to th
 device). Never leave commits stranded on the branch with no PR. Reuse the run's open PR
 if one already exists; otherwise open a fresh one.
 
+**Re-base before pushing; verify ancestry after (2026-07-31, after three strandings).**
+`git fetch origin main` and restart the branch from it **before** the first commit of any
+turn, then after pushing run `git merge-base --is-ancestor <sha> origin/main` — the
+one-command yes/no on whether the work actually reached main. Both, every turn.
+
+*Why this shape.* Three PRs stranded the same way (#65/#66, #67/#68, and one before). The
+tempting diagnosis is a race — the owner merging while a push is in flight — and the
+tempting fix is announcing "safe to merge" at the end of a message. **The timestamps refute
+it:** #67 merged at 01:34 UTC and the stranding commit was pushed at 12:33 UTC, eleven hours
+later, onto a branch this session had not re-fetched. The failure is at the *start* of a
+turn, not the end, so any end-of-turn signal misses it entirely. Announce "nothing further
+to push" anyway — it removes real ambiguity mid-turn — but it is not the fix and must not be
+mistaken for one. The owner merges on their own schedule between turns; that is correct and
+the local branch must assume it happened.
+
+*The general form:* **a PR's state is not a fact you can cache across a turn boundary.**
+Same class as reusing a stale config reading — checked once, quoted later as if verified.
+
 **Issue hygiene.** Docs (`REDESIGN-v2`, `PLAN-STAGE-*`, `CHECKLIST-MASTER-REVIEW`) carry
 *planned* work; the GitHub Issues tab carries *field defects that aren't fixed the same
 turn*. A defect found in testing and deferred becomes an issue; planned build steps never

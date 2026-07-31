@@ -307,6 +307,31 @@ under `media/<zone>/_canvas/`; zone-targeted media with no pin under
 `media/<zone>/_zone/`) · totals · orphanEvents · events
 ```
 
+**Pin flag vocabulary — declared here because this is its source (change request via owner,
+2026-07-31).** §7 listed `flag?` in the shape above and never said what it could hold, so a
+consumer transcribing this contract had nothing to transcribe. That is a defect in this
+document, and the correction is the **full form**, not a list of today's values:
+
+- **v3 vocabulary is `fine | monitor | issue`**, plus `null` for unflagged. Source of truth:
+  `PinFlag` in `src/engine/v2/events.ts`; all three are settable in the shipping app
+  (`PinScreen.tsx`). There is no config declaration — `propertyFlags[]` is an unrelated thing
+  (house-level intake facts like `well`, `septic`), so a consumer cannot read this vocabulary
+  out of the config snapshot and must take it from here.
+- **`monitor` and `fine` retire at v4**, per the ratified Object/Concern model §1: monitoring
+  is a severity decision about a *concern*, owned by the builder, not a property of an object;
+  and "I looked and it's fine" is what a satisfied checklist item already records. `issue`
+  decomposes the same way — object plus attached concern — so v4's pin flag is not a smaller
+  enum so much as a retired concept.
+- **Archived exports carry all three forever.** The event log is append-only and v3 exports are
+  immutable, so the retirement shrinks what is *emitted*, never what exists. A consumer whose
+  recognised set follows v4 will meet `monitor` and `fine` in historical data indefinitely, and
+  must fail open — preserve, display, count, mark as unrecognised; never drop, never guess.
+
+*Why the full form rather than the current list:* a contract stating three values today and two
+tomorrow is stale by design, and the retirement date is already ratified. The same applies to
+any vocabulary either side publishes — **state the schedule with the set, or the reader cannot
+tell a value they should reject from one they simply have not met yet.**
+
 **Vocabulary telemetry (owner req 2026-07-24, manifest-only — no UI).** The type field on
 each pin must make two things machine-identifiable so the component library can grow from
 real usage:

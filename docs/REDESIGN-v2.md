@@ -4,8 +4,9 @@
 it goes next, written after two field tests falsified the core UX of v0.5/v1a. It serves
 three audiences: a fresh Claude Code session starting the v2 build ("read this first"),
 the owner's Claude project for design discussions (upload this file as context), and the
-repo's own record. It supersedes the build-sequencing in docs/HANDOFF.md; the
-architecture foundations described there still stand.
+repo's own record. It supersedes the build-sequencing in
+docs/HISTORY-v0.5-v1a.md (was docs/HANDOFF.md); the architecture foundations described
+there still stand.
 
 ---
 
@@ -174,9 +175,11 @@ window/door counts into the zone record; manual rough-plan fallback.
 
 ## 9. How to use this doc
 
-**New Claude Code session:** "Read docs/REDESIGN-v2.md and docs/HANDOFF.md, then plan
-Stage 0 + Stage 1." The repo is the source of truth; HANDOFF.md covers the surviving
-foundations in detail.
+**New Claude Code session:** follow the orientation order in `CLAUDE.md` — this file,
+then docs/PLAN-STAGE-0.md / docs/PLAN-STAGE-1.md, then docs/CHECKLIST-MASTER.md. The repo
+is the source of truth. docs/HISTORY-v0.5-v1a.md (was docs/HANDOFF.md) is historical
+record only: it covers the surviving v0.5/v1a foundations in detail, but its build
+sequencing and UX descriptions are superseded.
 
 **Claude project (design discussions):** upload this file as project knowledge. It
 contains everything decided through 2026-07-22; anything not in it (or the linked repo

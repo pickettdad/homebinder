@@ -1,9 +1,29 @@
-# The Object / Concern Model — Cross-App Design Record (v1)
+# The Object / Concern Model — Cross-App Design Record (v1.1)
 
-**Date:** 2026-07-25
+**Version:** v1.1 · **Date:** 2026-07-31 · **Supersedes:** v1 (2026-07-25)
 **Status:** Ratified by owner. Binds both the Field app and the Binder Builder.
 **Why this exists:** this model spans two codebases and two Code sessions. Without a single record it gets re-litigated, and the two apps drift. Neither session invents changes to it; changes come back through the owner as a new version of this file.
 **Sequencing:** nothing here lands before the five-zone field test, which measures sweep capture, pick-lists, and checklist attention across zones. A model change first would confound all three readings.
+
+## Revision history
+
+**v1.1 (2026-07-31) — manifest v4 scope corrected. No model decision changed.**
+
+v1 named one v4 change. Manifest v4 now carries **three**, the other two ratified with the
+binder-builder session on 2026-07-30 and recorded in `PLAN-STAGE-2-NOTES.md`. That made §7's
+manifest paragraph wrong by omission — it read as a complete statement of the break and was
+not one. Amended once, with all three named together, rather than three separate revisions.
+
+What v1 said, verbatim, so the change is legible rather than silent:
+
+> **Manifest breaks cleanly to v4.** Concerns become a fifth media-owner kind needing a path segment. No dual support — v3 has exactly one real export and it is archived. The append-only event log does **not** break; new event types are additive.
+
+Nothing else in this file changed. The model, the seam, identity, retirement, the vocabulary
+streams, the exclusions and the build order all stand as ratified in v1.
+
+**A note on version numbering.** v1's closing line said changes return "as v2." This is v1.1
+because it decides nothing: it corrects a scope statement that became inaccurate when work
+elsewhere grew v4. A revision that changes what the model *is* remains a v2.
 
 ---
 
@@ -83,7 +103,13 @@ Same outcome, honest mechanism. This mirrors the existing N/A reason discipline,
 
 **Binder builder:** owns concern state and lifecycle · adopts field IDs · consumes retirement reasons for inclusion decisions · §18 project register holds coordination · emits the session plan carrying open concerns with their IDs.
 
-**Manifest breaks cleanly to v4.** Concerns become a fifth media-owner kind needing a path segment. No dual support — v3 has exactly one real export and it is archived. The append-only event log does **not** break; new event types are additive.
+**Manifest breaks cleanly to v4 — three changes (v1.1).** No dual support — v3 has exactly one real export and it is archived. The append-only event log does **not** break; new event types are additive.
+
+1. **Concerns become a fifth media-owner kind**, needing a path segment. (This model's own consequence; the other two are not.)
+2. **`activeItems[]` — the resolved active item set, per scope.** The field's own answer to *what was due here*, for every zone open and closed, every non-retired pin carrying a non-stub component list, and session scope once. Classification — what counts as a gap, what reaches the visit-two plan — stays with the binder builder. It ships because *unresolved* is not derivable downstream: it needs flags × zone attributes × `pin.*`/`house.*` refs × list gates × component inheritance, so deriving it in the binder would be a second implementation of the trigger engine, failing silently when the two disagree about whether an item was ever due.
+3. **`status` on each active item** — `unresolved` / `proposed` / `satisfied` / `na`. `resolutions[]` stays authoritative for `satisfied` and `na`; the builder reads only `proposed`, which is the one value it cannot reconstruct; disagreement between the two is reported, never silently resolved. Note `proposed` is narrow — 38 of 409 items at master v1.11 can ever hold it, and it means *a pin of a wanted component type exists in scope*, **not** that media exists.
+
+Full specification, the declined alternatives and the reasoning: `PLAN-STAGE-2-NOTES.md`, "Manifest v4 — the active item set ships per scope."
 
 **Known silent breakage:** Table D declares the `issues` layer as `flag = issue`. Promoting concerns to entities empties that predicate with no error. Fixed in the master in the same pass.
 
@@ -108,4 +134,5 @@ An object's photo becoming its own canvas with concern pins on it is the stronge
 
 ---
 
-**Status:** v1 ratified. Changes come through the owner as v2, never invented by either session.
+**Status:** v1.1 ratified. Changes come through the owner, never invented by either session — a
+correction of fact as a point revision, a change to the model itself as v2.

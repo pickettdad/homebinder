@@ -1,4 +1,11 @@
-# Project state — handoff
+# Historical record — v0.5 and v1a (superseded)
+
+> **This is not a handoff.** It was `docs/HANDOFF.md` until 2026-07-31 and was renamed
+> because the filename invited new sessions to read it as current state; the content had
+> already been capped as historical since 2026-07-22. **For current state read
+> `docs/REDESIGN-v2.md`, then `docs/PLAN-STAGE-0.md` / `docs/PLAN-STAGE-1.md`, per
+> `CLAUDE.md`.** Kept because it is the only narrative record of the v0.5 and v1a builds and
+> of what field tests 1 and 2 established.
 
 > **⚠ 2026-07-22: v2 REDESIGN ADOPTED — read docs/REDESIGN-v2.md FIRST.** Field test 2
 > (owner's house) falsified the slot-driven walk and the batch AI review. v2 replaces

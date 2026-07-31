@@ -215,7 +215,7 @@ photo answers this item*; an unconfirmed photograph honestly is not evidence yet
 sitting on pins that carry media**, the review pass is not happening in the field and binding
 must move earlier. Count it rather than guess.
 
-**One correction on method, because the obvious route does not work.** This is *not* computable
+**Method — ratified by the builder 2026-07-30; this is the route both sides use.** It is *not* computable
 from a v3 export downstream: "unresolved at pin scope" needs the active item set, which is the
 v4 addition this whole section exists to add. Re-deriving it in the binder to run the
 measurement would be the second trigger engine, measuring the thing it would be wrong about.

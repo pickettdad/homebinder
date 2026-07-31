@@ -418,6 +418,53 @@ carried explicitly.
 `has_mechanicals: true` and an item resolved `na`/`deferred`, exported and re-imported, must
 produce a mechanical checklist and a gap-list entry identical to the originating visit.
 
+### 7a-iii. Two measured facts the importer must be built against (2026-07-31)
+
+**Recorded for the same reason as 7a-ii: the import does not exist yet, but both facts are
+easier to design around than to discover afterwards.** Both were measured against the reference
+export (`config 1.2.1`) reviewing the binder's session-plan v0 contract, not assumed.
+
+**1. A plan cannot answer a question that did not exist at the visit — so `unanswered` must be
+computed at the RECEIVER, against the receiving config.**
+
+The v1.2.1 config declares **five** zone attributes: `finished`, `sleeping`, `has_stairs`,
+`has_plumbing`, `exterior_wall`. v1.11 declares **six** — `has_mechanicals` arrived in v1.6.1.
+So a zone rebuilt from a v1.2.1-era plan arrives with `has_mechanicals` **absent**, and that is
+the one attribute in the whole config carrying a `defaultsTrueFor` (→ `utility`). A basement
+with the furnace in the corner therefore lands in exactly 7a-ii's failure — absent, no default,
+empty mechanical checklist — and no emitter fix can prevent it, because the question did not
+exist when the house was walked.
+
+Consequence for the contract: an emitter cannot know the receiving config version, so an
+emitter-computed "unanswered" list is a claim it is not positioned to make. At the receiver the
+list is pure derivation — *attributes my config declares* minus *keys present in the verbatim
+attribute map* — and both terms are already in hand. **Take the verbatim map; derive the rest
+here.** (`defaultsTrueFor` is not merely empty in that config, it is an absent key — the field
+did not exist yet.)
+
+**2. `false` in a zone attribute map means "the box was not ticked," which is weaker than "the
+inspector said no."**
+
+Zone creation writes an explicit boolean for every `askAtCreation: true` attribute and nothing
+at all for the others (`WalkScreen.tsx`):
+
+```ts
+const attributes: Record<string, boolean> = {};
+for (const a of askAttrs) attributes[a.id] = attrs.has(a.id);
+```
+
+There is no skip path — the sheet is default-off toggles, so an untouched question and a
+considered negative are both written `false`. The reference export shows the consequence: its
+`bedroom` carries `finished: false, sleeping: false`, i.e. a bedroom that is neither finished
+nor slept in. Those are three toggles left alone, not three answers.
+
+This does **not** change the round-trip requirement — the verbatim map is still exactly right,
+because it preserves the field's own state including its ambiguity. What it forbids is any
+downstream text that renders `false` as *"we established there is none."* Only the field can
+make `false` mean that, and doing so is a field change — a tri-state, or a confirm step at zone
+close — **not** a plan-contract change. Scope it deliberately if the distinction ever needs to
+carry weight; it is not scoped today.
+
 ### 7b. Equipment-registry guarantees (future third product: regional equipment analytics)
 
 Cross-client regional equipment analytics is a future product; the manifest is its data

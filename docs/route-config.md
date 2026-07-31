@@ -1,4 +1,12 @@
-# Editing the inspection route
+# Editing the inspection route (v1 slot model)
+
+> **Scope — read this first.** This documents the **v1 slot model** (`route.baseline.ts`,
+> `configVersion 1.1.0`), which the v2 pin model superseded for all new work. It is **not**
+> stale documentation for dead code: `loadRoute()` still runs at app init
+> (`sessionStore.ts:215`) and `SetupScreen` can still start a v1 session, so these rules
+> still bind anyone editing that file. **New checklist content does not go here** — it goes
+> in `docs/CHECKLIST-MASTER.md`, which generates `src/config/checklists.generated.ts` and has
+> its own discipline in `CLAUDE.md`. Kept for the live v1 path, not as a model to follow.
 
 The whole inspection lives in **`src/config/route.baseline.ts`**. The process doc is the
 source of truth; this file renders it. The discipline: update the Baseline Inspection

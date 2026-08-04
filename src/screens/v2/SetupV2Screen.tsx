@@ -18,6 +18,23 @@ export function SetupV2Screen() {
     return [...bySource.entries()];
   }, [checklists]);
 
+  /**
+   * F-23: Table A's intake-source column was authored as an annotation and is rendered as a
+   * UI heading, so authoring marks reach the screen. The walk saw the literal
+   * `⚠ **not yet asked at intake** — see §9` — a spec cross-reference, asterisks included,
+   * on a screen a client can see. Strip authoring marks and spec references here; §8's
+   * vocabulary layer is the durable fix, and issue #64's generator guard stops the class.
+   * Not fixed in the master: that file is owner-authored and currently frozen.
+   */
+  const heading = (source: string): string => {
+    const clean = source
+      .replace(/[*`_]/g, "")
+      .replace(/\s*[—-]?\s*see\s+§\s*\d+\s*$/i, "")
+      .replace(/^\s*⚠\s*/, "")
+      .trim();
+    return clean || "Other";
+  };
+
   if (!checklists) return null;
 
   const toggle = (id: string) =>
@@ -52,7 +69,7 @@ export function SetupV2Screen() {
 
       {groups.map(([source, items]) => (
         <section key={source} className="flex flex-col gap-2">
-          <h2 className="font-semibold text-slate-300">{source}</h2>
+          <h2 className="font-semibold text-slate-300">{heading(source)}</h2>
           <div className="flex flex-wrap gap-2">
             {items.map((f) => (
               <button

@@ -303,6 +303,24 @@ export function buildAuditView(items: DerivedItem[]): AuditView {
   return { documentation: split("evidence"), tests: split("action") };
 }
 
+/**
+ * Whether an item may be resolved with a pass/fail verdict (F-22, spec §7.2).
+ *
+ * Exported and named ON PURPOSE. The spec's own diagnosis of this defect class is that
+ * "doctrine arrives through a button label rather than a data path, and no scan catches
+ * those" — twice before this one. A predicate can be scanned and tested; a JSX condition
+ * next to the word "Pass" cannot.
+ *
+ * The rule: a verdict is a judgement, so it belongs only where the concierge is the right
+ * person to make one. A door that will not latch is a fact they can attest to. A *number*
+ * is just a number — whether 26 inches of sill height is acceptable is an egress code call,
+ * and `identification, never assessment` (spec §0.1) puts it out of reach. `choice` was
+ * already excluded for the same reason at master v1.3 §2: the selection IS the record.
+ */
+export function offersVerdict(item: ChecklistItem): boolean {
+  return item.attest === "action" && item.satisfy !== "choice" && item.satisfy !== "measure";
+}
+
 /** The advisory-close snapshot recorded into ZoneClosed (never blocks). */
 export function auditSnapshot(items: DerivedItem[]): {
   coreUnresolved: string[];

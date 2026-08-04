@@ -5,14 +5,18 @@
  * Every collapsed heading still shows its open count and a core dot, so nothing urgent
  * hides behind a closed row.
  *
- * The attest rule is enforced at the interaction level too: evidence items offer
- * one-tap confirmation (including of a proposal); action items offer ONLY explicit
- * Pass/Fail. Nothing here can mark a test from software state.
+ * The attest rule is enforced at the interaction level too: evidence items offer one-tap
+ * confirmation (including of a proposal); action items require an explicit human tap and
+ * nothing here can mark a test from software state.
+ *
+ * A verdict (Pass/Fail) is NARROWER than "action" — see `offersVerdict` in engine/v2/
+ * checklist.ts, which is where that rule lives so it can be tested and scanned. `choice`
+ * and `measure` are action items that record a selection or a value and no verdict.
  */
 import { useState } from "react";
 import { useApp } from "../../store/sessionStore";
 import { BigButton, Sheet } from "../../ui/bits";
-import { buildAuditView, type DerivedItem } from "../../engine/v2/checklist";
+import { buildAuditView, offersVerdict, type DerivedItem } from "../../engine/v2/checklist";
 import type { ItemResolution } from "../../engine/v2/events";
 
 const isOpen = (d: DerivedItem) => d.status.kind === "unresolved" || d.status.kind === "proposed";
@@ -267,16 +271,33 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
           <>
             {item.satisfy === "measure" && (
               <>
-                <input
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  inputMode={isYear ? "numeric" : "decimal"}
-                  maxLength={isYear ? 4 : undefined}
-                  placeholder={isYear ? `Year (1900–${yearMax})` : item.unit ? `Reading (${item.unit})` : "Reading"}
-                  className={`rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 focus:ring-teal-500 ${
+                {/* F-21: the unit rides BESIDE the field, not in the placeholder. A
+                    placeholder vanishes on the first keystroke — i.e. exactly when the
+                    number starts existing and its unit starts mattering. The concierge
+                    typed `26` and had nothing on screen saying inches. Always from
+                    `item.unit` (Table H, via the config), never a literal. */}
+                <div
+                  className={`flex items-center gap-2 rounded-xl bg-slate-900 pr-3 ring-1 ${
                     yearBad ? "ring-rose-500" : "ring-slate-600"
                   }`}
-                />
+                >
+                  <input
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    inputMode={isYear ? "numeric" : "decimal"}
+                    maxLength={isYear ? 4 : undefined}
+                    placeholder={isYear ? `1900–${yearMax}` : "Reading"}
+                    className="flex-1 rounded-xl bg-transparent p-3 text-lg text-slate-100 outline-none"
+                  />
+                  {item.unit ? (
+                    <span className="shrink-0 text-lg font-semibold text-slate-300">{item.unit}</span>
+                  ) : (
+                    /* Fail open, and visibly: a measure with no declared unit is a content
+                       gap (three exist today — the moisture-meter items). Naming it beats a
+                       bare box that reads as "no unit needed". */
+                    <span className="shrink-0 text-sm text-amber-400">no unit declared</span>
+                  )}
+                </div>
                 {yearBad && (
                   <p className="text-sm text-rose-300">
                     Enter a 4-digit year between 1900 and {yearMax}.
@@ -318,8 +339,16 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
             {/* A choice+action item (attic/crawlspace access extent) records the SELECTED
                 EXTENT, not pass/fail — master v1.3 §2. Picking an option is itself the
                 deliberate human tap that attest:action requires, so it still never has a
-                software path. Pass/Fail would be meaningless for "how far did you get". */}
-            {isTest && item.satisfy !== "choice" ? (
+                software path. Pass/Fail would be meaningless for "how far did you get".
+                F-22 extends the same rule to `measure`, for the same reason one kind over:
+                a number is just a number. Recording `26` for sill height and tapping Pass
+                is the concierge asserting the sill height is ACCEPTABLE — an egress code
+                judgement, and not theirs (spec §0.1, identification never assessment). 13
+                measure items offered it, including fc.width and utl.pressure. Whether a
+                value is in range is a downstream flag against a declared threshold, not a
+                button in a room. Picking a measure still needs a human tap, so attest:action
+                is unaffected — only the verdict goes. */}
+            {offersVerdict(item) ? (
               <div className="flex gap-3">
                 <BigButton className="flex-1" disabled={yearBad} onClick={() => satisfied("pass")}>Pass</BigButton>
                 <BigButton variant="danger" className="flex-1" disabled={yearBad} onClick={() => satisfied("fail")}>
@@ -339,7 +368,15 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
               </BigButton>
             ) : (
               <BigButton disabled={blocked} onClick={() => satisfied()}>
-                {item.satisfy === "choice" ? (isTest ? "Record extent" : "Record selection") : "Mark satisfied"}
+                {item.satisfy === "choice"
+                  ? isTest
+                    ? "Record extent"
+                    : "Record selection"
+                  : item.satisfy === "measure"
+                    ? // F-22: says what it does. "Mark satisfied" on a number implies the
+                      // number was judged; "Record reading" is the whole act.
+                      "Record reading"
+                    : "Mark satisfied"}
               </BigButton>
             )}
 

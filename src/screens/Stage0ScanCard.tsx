@@ -68,7 +68,7 @@ export function Stage0ScanCard() {
   };
 
   return (
-    <section className="rounded-xl border border-teal-800/60 bg-slate-800/60 p-4">
+    <section className="rounded-xl border border-brass-800/60 bg-slate-800/60 p-4">
       <h2 className="text-lg font-semibold text-slate-200">Room scan (Stage 0 spike)</h2>
       <p className="mt-1 text-sm text-slate-400">
         Scans a room with Apple RoomPlan and shares the raw plan data. Scan the utility room (twice —

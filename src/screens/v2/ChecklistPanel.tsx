@@ -40,7 +40,7 @@ function StatusChip({ d }: { d: DerivedItem }) {
   if (s.kind === "satisfied") return <span className="text-emerald-400">✓</span>;
   if (s.kind === "na") return <span className="text-slate-400">N/A</span>;
   if (s.kind === "proposed")
-    return <span className="rounded-full bg-teal-900/70 px-2 py-0.5 text-xs font-semibold text-teal-300">pinned — confirm</span>;
+    return <span className="rounded-full bg-brass-900/70 px-2 py-0.5 text-xs font-semibold text-brass-300">pinned — confirm</span>;
   return d.item.tier === "core" ? (
     <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
   ) : (
@@ -230,7 +230,7 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
               onChange={(e) => setNote(e.target.value)}
               placeholder="Note (why it doesn't apply / couldn't be reached)"
               rows={2}
-              className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+              className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
             />
             <div className="flex flex-col gap-2">
               {v2Config.naReasons.map((r) => (
@@ -278,7 +278,7 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                     `item.unit` (Table H, via the config), never a literal. */}
                 <div
                   className={`flex items-center gap-2 rounded-xl bg-slate-900 pr-3 ring-1 ${
-                    yearBad ? "ring-rose-500" : "ring-slate-600"
+                    yearBad ? "ring-alert-500" : "ring-slate-600"
                   }`}
                 >
                   <input
@@ -299,7 +299,7 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                   )}
                 </div>
                 {yearBad && (
-                  <p className="text-sm text-rose-300">
+                  <p className="text-sm text-alert-300">
                     Enter a 4-digit year between 1900 and {yearMax}.
                   </p>
                 )}
@@ -315,7 +315,7 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                     onClick={() => setValue(value === opt ? "" : opt)}
                     className={`rounded-xl px-4 py-3 text-left font-medium ring-1 ${
                       value === opt
-                        ? "bg-teal-600 text-slate-950 ring-teal-400"
+                        ? "bg-brass-600 text-slate-950 ring-brass-400"
                         : "bg-slate-900 text-slate-100 ring-slate-600 active:bg-slate-800"
                     }`}
                   >
@@ -334,7 +334,7 @@ function ItemSheet({ d, readOnly, onClose }: { d: DerivedItem; readOnly: boolean
                   : "Note (optional — type or dictate)"
               }
               rows={2}
-              className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+              className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
             />
             {/* A choice+action item (attic/crawlspace access extent) records the SELECTED
                 EXTENT, not pass/fail — master v1.3 §2. Picking an option is itself the

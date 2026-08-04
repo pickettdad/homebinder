@@ -167,7 +167,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
             type="button"
             onClick={() => setLayerId(null)}
             className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ring-1 ${
-              layerId === null ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+              layerId === null ? "bg-brass-600 text-white ring-brass-500" : "bg-slate-800 text-slate-300 ring-slate-600"
             }`}
           >
             All ({anchored.length})
@@ -180,7 +180,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
                 type="button"
                 onClick={() => setLayerId(l.id)}
                 className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium ring-1 ${
-                  layerId === l.id ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+                  layerId === l.id ? "bg-brass-600 text-white ring-brass-500" : "bg-slate-800 text-slate-300 ring-slate-600"
                 }`}
               >
                 {l.label} ({n})
@@ -212,7 +212,7 @@ export function CanvasScreen({ canvasId, zoneId, placePinId }: { canvasId: strin
                     setAnchorSheet({ anchorId: anchor.anchorId, pinId: pin.pinId, number: pin.number });
                   }}
                   className={`absolute flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-sm font-bold text-white ring-2 ring-slate-950 ${
-                    pin.flag === "issue" ? "bg-rose-600" : pin.flag === "monitor" ? "bg-amber-600" : "bg-teal-600"
+                    pin.flag === "issue" ? "bg-alert-600" : pin.flag === "monitor" ? "bg-amber-600" : "bg-brass-600"
                   }`}
                   style={{ left: `${anchor.x * 100}%`, top: `${anchor.y * 100}%` }}
                 >

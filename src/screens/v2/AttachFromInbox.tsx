@@ -91,7 +91,7 @@ export function AttachFromInbox(props: {
                       onClick={() => toggle(m.mediaId)}
                       aria-pressed={on}
                       className={`relative overflow-hidden rounded-xl ring-2 ${
-                        on ? "ring-teal-400" : "ring-slate-700"
+                        on ? "ring-brass-400" : "ring-slate-700"
                       }`}
                     >
                       {m.mime.startsWith("audio") ? (
@@ -107,7 +107,7 @@ export function AttachFromInbox(props: {
                         />
                       )}
                       {on && (
-                        <span className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-teal-500 text-sm font-bold text-slate-950">
+                        <span className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-brass-500 text-sm font-bold text-slate-950">
                           ✓
                         </span>
                       )}

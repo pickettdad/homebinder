@@ -60,7 +60,7 @@ export function ZoneScreen({ zoneId }: { zoneId: string }) {
 
       {zone.intro && <p className="rounded-xl bg-slate-800/60 p-3 text-sm text-slate-300">{zone.intro}</p>}
       {zone.gate === "closed" && (
-        <p className="rounded-xl border border-teal-600/60 bg-teal-950/30 p-3 text-teal-200">
+        <p className="rounded-xl border border-brass-600/60 bg-brass-950/30 p-3 text-brass-200">
           Zone closed. Capturing again will require reopening at the gate.
         </p>
       )}

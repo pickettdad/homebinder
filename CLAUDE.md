@@ -96,6 +96,19 @@ pluggable frame source — native viewfinder when `isNativePlatform()` (`src/app
 post-capture path are shared. This is written here rather than left in a chat because an
 unstated decision gets rediscovered as a question.
 
+**Docs the design session needs — flag them and hand over the file (owner rule 2026-08-03).**
+Committing a doc to the repo does **not** deliver it. The design session does not read this
+repo; the owner carries files between tracks by hand. So any turn that **creates or edits a
+doc the design session needs to act on**, say so plainly and **attach the file**, rather than
+describing the change and leaving the PR to speak for it. A PR body is a record for whoever
+merges, not a delivery to another session.
+
+*Two failure modes this prevents, both already observed.* A doc created here that the owner
+has never seen looks, from their side, like an artifact that appeared without warning — and
+they have to ask what it is. And a decision written into a repo doc the design session never
+reads is invisible exactly where it was supposed to be binding, which is the "unstated
+decision" failure with an extra step.
+
 **Issue hygiene.** Docs (`REDESIGN-v2`, `PLAN-STAGE-*`, `CHECKLIST-MASTER-REVIEW`) carry
 *planned* work; the GitHub Issues tab carries *field defects that aren't fixed the same
 turn*. A defect found in testing and deferred becomes an issue; planned build steps never

@@ -14,6 +14,15 @@ criteria / design constraints; nothing here is built in Stage 1.
     pre-export integrity sweep. **The gate is not yet cleared:** it still requires
     *verified on-device* — i.e. run the export on the iPad, confirm the files land in Files, and
     confirm they re-open/verify. Until that on-device run happens, treat this as built-but-unproven.
+  - **CLEARED (2026-07-31) by the walk (F-28).** The five-zone walk ran on TestFlight build 13
+    — the native shell — and exported **163 media files** off the device at real scale. That is
+    precisely what the gate asked for: the on-device run, the files landing, the export
+    verifying. **Native is the shipping surface in fact**, and this record said otherwise for
+    three days.
+  - **The line above is kept, not deleted.** That this *was* a gate is part of why the native
+    shell can be trusted now — an unproven mitigation that later worked reads very differently
+    from one nobody ever doubted, and deleting the doubt deletes the evidence. The status is
+    superseded; the requirement stands as the reason.
 
 ## Canvas roles — two layers, not a hierarchy (owner, 2026-07-24)
 

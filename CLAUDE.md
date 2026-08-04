@@ -78,6 +78,24 @@ the local branch must assume it happened.
 *The general form:* **a PR's state is not a fact you can cache across a turn boundary.**
 Same class as reusing a stale config reading — checked once, quoted later as if verified.
 
+**The browser path is a control, not a shipping surface (2026-08-03).** The concierge runs
+the **native shell**; the walk that cleared the durability gate ran on TestFlight build 13.
+The browser/PWA path **stays runnable and does not stay at capture parity** — no position, no
+native viewfinder. It lands in the **declared no-position state** that Capture Mode spec §4
+already requires for rooms RoomPlan cannot scan, so it is not a second implementation of the
+same act; it is the degraded mode the contract carries anyway.
+
+*Why it stays runnable at all, and it is not convenience:* when the native app black-screened
+(#71), the question that halved the problem fastest was *"does the web version do the same?"*
+A dev path that cannot run the app is not a control. Keeping it working is cheap; keeping it
+at parity is not, and nothing requires it.
+
+**Do not spend effort on browser-side capture parity.** Build one capture component with a
+pluggable frame source — native viewfinder when `isNativePlatform()` (`src/app/platform.ts`),
+`<input capture>` otherwise — so only frame acquisition differs and the loop, buttons and
+post-capture path are shared. This is written here rather than left in a chat because an
+unstated decision gets rediscovered as a question.
+
 **Issue hygiene.** Docs (`REDESIGN-v2`, `PLAN-STAGE-*`, `CHECKLIST-MASTER-REVIEW`) carry
 *planned* work; the GitHub Issues tab carries *field defects that aren't fixed the same
 turn*. A defect found in testing and deferred becomes an issue; planned build steps never

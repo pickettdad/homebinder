@@ -545,6 +545,45 @@ source, so every **equipment pin** must carry, guaranteed:
 Steps 2–7 are the days-scale core; nothing blocks on Stage 0, and the moment step 3
 exists the owner can walk a real zone on the installed PWA.
 
+### 9a. Capture mode — build order (2026-08-03)
+
+Steps 1–8 above are **complete**. This is the continuation, against
+`HouseSteady_Field-App_Capture-Mode_BuildSpec_2026-08-03.md`. Capture mode is **not a new
+stage**: same data model, same manifest, one mode switch (orientation §5), so it belongs here
+rather than in a plan of its own.
+
+**§7's four defects are done** — the measure unit, the verdict on a measured value, the
+authoring marks on screen (#72), and the brand palette (#73).
+
+**Everything below is buildable without position (F-26/the Mac).** Ordering is Field Code's
+call, per the design session 2026-08-03:
+
+1. **Visit kind on `SessionInitialized`.** Nothing renders differently, but §1's mode has no
+   trigger without it and every other item is downstream. **No correction event** — a fact
+   about *what we came to do* is set by the schedule and never discovered in a basement, which
+   is what distinguishes it from `PropertyFlagsCorrected` (a fact about the *house* that
+   proved wrong on site). The log is append-only, so adding one later stays cheap if that is
+   ever wrong.
+2. **§5 notes internal by default.** Independent of everything, and the deliverable is a
+   *data-model guarantee* rather than a UI change — "no code path sets a note client-visible"
+   is a scan. It gets harder to assert once more note paths exist, so it is cheap now and
+   dearer later.
+3. **§2 the capture-mode screen, with §3's loop.** Not separable — the loop lives on the
+   screen. The bulk of the work, and the hard part is **§2.1's *absent***: checklist and
+   open-counts are currently woven through the zone screen rather than sitting in a panel that
+   can simply be omitted. That is the refactor, not the new screen.
+4. **§6 empty-zone reason at close**, with any existing resolution offered as a candidate and
+   **never pre-filled**.
+
+**Why this order:** 1 unblocks the rest; 2 is cheap now and dearer later; 3 is the bulk; 4
+touches zone close, which 3 will already have moved. **If the Mac arrives mid-way, F-26 slots
+into 3 without rework** — the pluggable frame source (CLAUDE.md, the browser-path rule) is the
+same seam either way.
+
+**Not in this sequence and deliberately so:** F-4's `scope[]` capture/inspection split is an
+owner-authored content pass; inspection mode needs the session plan, which has no receiver;
+the zone-attribute tri-state (F-20) is registered and out of scope.
+
 ## 10. Risks
 
 - **Checklist noise** is the load-bearing UX bet; the audit-sheet grouping + core cap

@@ -10,7 +10,7 @@ import { TypePicker, pinTypeLabel } from "./shared";
 /**
  * A photo canvas: pinch-zoom + pan, anchor dots with pin numbers, tap-to-pin.
  * - placePinId set → a tap places an anchor for that pin.
- * - Stamp mode → each tap creates a NEW typed pin (own permanent number) right there.
+ * - Stamp mode → each tap creates a NEW typed pin (own number) right there.
  *   Field test 3: "mark every receptacle" needs one identity per receptacle so a single
  *   one can be flagged monitor — stamping makes that a tap per outlet.
  * - Otherwise → a tap creates an untyped pin and opens it.

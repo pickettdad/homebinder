@@ -48,8 +48,9 @@ misc bucket** for anything captured between zones; everything is retaggable late
 fallback for rooms that scan poorly) and/or wide photos. Exterior zones are photo-canvas
 (RoomPlan doesn't work outdoors); a site-plan canvas is a future addition.
 
-**Pins** — the core object. Tap a canvas → numbered pin (#16), global sequence,
-**numbers are permanent, never reused or renumbered**. A pin has: a type from the
+**Pins** — the core object. Tap a canvas → numbered pin (#16), one sequence across all
+zones, **never reused or renumbered within a visit** — and session-scoped, so the next
+visit restarts at #1. `pinId` (uuid) is the cross-visit identity, not the number (F-29). A pin has: a type from the
 component library (water-heater, panel, receptacle, smoke-alarm, register, …, or
 freeform), an optional flag (fine / monitor / issue), and attached photos, text notes,
 voice notes, and AI chat threads.
@@ -155,7 +156,8 @@ window/door counts into the zone record; manual rough-plan fallback.
 2. AI on demand only, scoped to pin/zone, conversations recorded. No automatic reviews.
 3. Text + dictation primary input; voice notes optional.
 4. One pin, many anchors; plan anchor canonical; photo-only allowed but audited.
-5. Pin numbers are global, sequential, permanent (gaps OK after deletion).
+5. Pin numbers are session-scoped: sequential across zones within a visit, never reused
+   after a retire (gaps OK), restarting at #1 next visit. `pinId` is the identity.
 6. Session-level misc bucket + retag-later everywhere.
 7. RoomPlan ships early (Stage 0 spike), via Capacitor shell + cloud CI + TestFlight.
 8. Inspection tool and binder builder are separate products; manifest v3 is the contract.

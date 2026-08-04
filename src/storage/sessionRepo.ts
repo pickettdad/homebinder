@@ -31,7 +31,7 @@ const systemSource = (): Source => ({ ...deviceSource(), actor: "system", actorI
  * transaction from the session row — single-writer, no races (a Web Lock guards
  * multi-tab at the store layer).
  *
- * v2 addition: PinCreated payloads get their permanent global pinNumber stamped here,
+ * v2 addition: PinCreated payloads get their session-scoped pinNumber stamped here,
  * from the session row's lastPinNumber counter — the same in-transaction pattern as
  * seq. Callers pass pinNumber: 0 and read the stamped value off the returned event.
  */

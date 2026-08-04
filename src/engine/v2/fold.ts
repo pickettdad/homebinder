@@ -7,7 +7,8 @@
  *   checklist.ts from (config, state) — the fold only records resolutions.
  * - Unknown event types are ignored (forward compat). Events referencing unknown
  *   zones/pins/canvases/notes/media are diverted to orphanEvents, never dropped.
- * - Nothing is deleted: retired pins stay (numbers are permanent), discarded media
+ * - Nothing is deleted: retired pins stay (their numbers are never reused within the
+ *   visit), discarded media
  *   leaves the ref lists but the event trail remains in the log.
  */
 import type { Source } from "../schema/events";

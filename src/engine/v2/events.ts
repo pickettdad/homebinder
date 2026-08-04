@@ -112,7 +112,7 @@ export type V2SessionEvent =
   | (EventBase & { type: "ZoneAttributesSet"; zoneId: string; attributes: Record<string, boolean> })
   | (EventBase & { type: "ZoneClosed"; zoneId: string; note?: string; audit: ZoneAuditSnapshot })
   | (EventBase & { type: "ZoneReopened"; zoneId: string; note?: string })
-  // ---- pins (numbers global, permanent, never reused)
+  // ---- pins (numbers session-scoped: see the header — never a cross-visit key)
   | (EventBase & { type: "PinCreated"; pinId: string; pinNumber: number; zoneId?: string })
   | (EventBase & { type: "PinTyped"; pinId: string; pinType: PinTypeRef })
   /** Human sub-label / nickname — additive; the component type tag is unchanged. */

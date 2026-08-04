@@ -333,7 +333,7 @@ export const useApp = create<AppStore>((set, get) => ({
   async createPin(zoneId) {
     assertEditable(get().v2Session, zoneId);
     const pinId = uuidv7();
-    // pinNumber 0 is a placeholder — appendEvents stamps the real permanent number
+    // pinNumber 0 is a placeholder — appendEvents stamps the real session-scoped number
     // inside the transaction; the refold picks it up from the stored event.
     await get().dispatchV2([{ type: "PinCreated", pinId, pinNumber: 0, zoneId }]);
     return pinId;

@@ -29,7 +29,8 @@ export interface SessionRow {
   createdAt: string;
   updatedAt: string;
   lastEventSeq: number;
-  /** v2 only: the global permanent pin counter (lastEventSeq pattern). */
+  /** v2 only: the per-session pin counter (lastEventSeq pattern). Session-scoped by
+   *  construction — it lives on the session row, so visit two restarts at #1. */
   lastPinNumber?: number;
 }
 

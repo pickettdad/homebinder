@@ -113,8 +113,11 @@ Omit, UUIDv7 ids, and appendEvents stamping all apply unchanged.
   naCount: number}}` — payload replaces the v1 summary; `ZoneReopened` unchanged.
 
 **Pins and anchors:**
-- `PinCreated {pinId, pinNumber, zoneId?}` — `pinNumber` is the **global, permanent,
-  never-reused** sequence: assigned from a new `session.lastPinNumber` counter inside
+- `PinCreated {pinId, pinNumber, zoneId?}` — `pinNumber` is the **session-scoped**
+  sequence: one run across all zones **within a visit**, never reused after a retire, and it
+  **restarts at #1 on the next visit** because the counter lives on the session row. It is a
+  label for saying "pin #4" out loud, not a cross-visit key — `pinId` is the identity (§7b,
+  F-29). Assigned from a new `session.lastPinNumber` counter inside
   the same transaction, the `lastEventSeq` pattern (gaps after deletion are fine per
   REDESIGN Decision 5). One mechanical note: `seq` is stamped by `appendEvents` as an
   EventBase field, while `pinNumber` lives in the *payload* — so this is a small

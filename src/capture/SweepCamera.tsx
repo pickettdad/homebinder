@@ -211,7 +211,7 @@ export function SweepCamera(props: {
             value={zoom}
             onChange={(e) => void applyZoom(+e.target.value)}
             aria-label="Zoom"
-            className="h-2 flex-1 accent-teal-500"
+            className="h-2 flex-1 accent-brass-500"
           />
           <span className="text-xs text-slate-400">{zoomCaps.max.toFixed(0)}×</span>
         </div>

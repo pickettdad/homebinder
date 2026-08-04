@@ -61,7 +61,7 @@ export function ExceptionSheet(props: {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}
-            className="rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
             placeholder="e.g. blocked by stored boxes along north wall"
           />
           <div className="flex gap-3">

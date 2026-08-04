@@ -64,7 +64,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
           <button
             type="button"
             disabled={ro}
-            className="block truncate text-left text-xl font-bold text-teal-300 underline-offset-4 hover:underline disabled:no-underline"
+            className="block truncate text-left text-xl font-bold text-brass-300 underline-offset-4 hover:underline disabled:no-underline"
             onClick={() => setTypeSheet(true)}
           >
             {pinTypeLabel(pin.pinType)}
@@ -88,7 +88,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
             disabled={ro}
             onChange={(e) => setNick(e.target.value)}
             placeholder={pin.pinType?.kind === "component" ? `e.g. "chlorine tank" — keeps the ${pin.pinType.componentType} tag` : "e.g. “over the workbench”"}
-            className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500 disabled:opacity-60"
+            className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500 disabled:opacity-60"
           />
           {nickDirty && (
             <BigButton
@@ -111,7 +111,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
             className={`flex-1 rounded-xl px-3 py-3 font-semibold ring-1 disabled:opacity-60 ${
               pin.flag === f
                 ? f === "issue"
-                  ? "bg-rose-700 text-white ring-rose-500"
+                  ? "bg-alert-700 text-white ring-alert-500"
                   : f === "monitor"
                     ? "bg-amber-700 text-white ring-amber-500"
                     : "bg-emerald-700 text-white ring-emerald-500"
@@ -166,7 +166,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
               key={m.mediaId}
               type="button"
               onClick={() => setViewerId(m.mediaId)}
-              className="relative overflow-hidden rounded-xl ring-1 ring-slate-700 active:ring-teal-500"
+              className="relative overflow-hidden rounded-xl ring-1 ring-slate-700 active:ring-brass-500"
             >
               {m.mime.startsWith("audio") ? (
                 <span className="flex aspect-square w-full items-center justify-center bg-slate-800 text-slate-300">
@@ -228,7 +228,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
               onChange={(e) => setNoteDraft(e.target.value)}
               placeholder="Type or dictate a note…"
               rows={2}
-              className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+              className="flex-1 rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
             />
             <BigButton
               variant="secondary"
@@ -257,7 +257,7 @@ export function PinScreen({ pinId }: { pinId: string }) {
                 className="relative shrink-0 overflow-hidden rounded-xl ring-1 ring-slate-600"
               >
                 <Thumb mediaId={c.media.mediaId} className="h-24 w-36" />
-                <span className="absolute inset-x-0 bottom-0 bg-slate-950/70 py-0.5 text-center text-xs text-teal-300">
+                <span className="absolute inset-x-0 bottom-0 bg-slate-950/70 py-0.5 text-center text-xs text-brass-300">
                   {pin.anchors.some((a) => a.canvasId === c.canvasId) ? "placed" : ro ? "view" : "tap to place here"}
                 </span>
               </button>

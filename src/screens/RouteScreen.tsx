@@ -32,7 +32,7 @@ export function RouteScreen() {
             onClick={() => navigate({ name: "zone", zoneId: zone.zoneId })}
             className={`rounded-2xl border p-5 text-left transition-colors ${
               zone.gate === "closed"
-                ? "border-teal-600/60 bg-teal-950/30"
+                ? "border-brass-600/60 bg-brass-950/30"
                 : complete
                   ? "border-amber-500/60 bg-slate-800"
                   : "border-slate-700 bg-slate-800 active:bg-slate-700"

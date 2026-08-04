@@ -76,7 +76,7 @@ function GlobalCamera() {
         </button>
         <PhotoInput
           onPhoto={(file) => capturePhotoV2(target, file).then(saved("Photo")).catch(failed)}
-          className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-600 text-3xl shadow-lg active:bg-teal-500"
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-brass-600 text-3xl shadow-lg active:bg-brass-500"
         >
           📷
         </PhotoInput>

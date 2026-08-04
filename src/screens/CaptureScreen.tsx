@@ -155,9 +155,9 @@ export function CaptureScreen({ slotInstanceId, findingId }: { slotInstanceId: s
         </p>
       ) : recorder.state === "recording" ? (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between rounded-xl bg-rose-950/40 p-4 ring-1 ring-rose-500">
-            <span className="flex items-center gap-2 text-rose-200">
-              <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-rose-500" />
+          <div className="flex items-center justify-between rounded-xl bg-alert-950/40 p-4 ring-1 ring-alert-500">
+            <span className="flex items-center gap-2 text-alert-200">
+              <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-alert-500" />
               Recording — {formatDuration(recorder.elapsedMs)}
             </span>
             <BigButton variant="ghost" onClick={recorder.cancel}>Discard</BigButton>
@@ -199,7 +199,7 @@ export function CaptureScreen({ slotInstanceId, findingId }: { slotInstanceId: s
           <PhotoInput
             onPhoto={onPhoto}
             disabled={!unlocked || saving}
-            className="min-h-24 rounded-2xl bg-teal-500 text-2xl font-semibold text-slate-950 active:bg-teal-400 disabled:bg-slate-700 disabled:text-slate-500"
+            className="min-h-24 rounded-2xl bg-brass-500 text-2xl font-semibold text-slate-950 active:bg-brass-400 disabled:bg-slate-700 disabled:text-slate-500"
           >
             {saving ? "Saving…" : slot.photos.length > 0 ? "📷 Another photo" : "📷 Capture photo"}
           </PhotoInput>

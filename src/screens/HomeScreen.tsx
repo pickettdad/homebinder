@@ -39,7 +39,7 @@ export function HomeScreen() {
       </header>
 
       {checklistErrors.length > 0 && (
-        <div className="rounded-xl border border-rose-500 bg-rose-950/50 p-4 text-rose-200">
+        <div className="rounded-xl border border-alert-500 bg-alert-950/50 p-4 text-alert-200">
           <p className="font-semibold">The checklist config is invalid — sessions can't start until it's fixed:</p>
           <ul className="mt-2 list-disc pl-5 text-sm">
             {checklistErrors.map((e, i) => (<li key={i}>{e}</li>))}
@@ -120,7 +120,7 @@ export function HomeScreen() {
             value={tokenDraft}
             onChange={(e) => setTokenDraft(e.target.value)}
             placeholder="app token"
-            className="rounded-xl bg-slate-900 p-3 font-mono text-sm text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-900 p-3 font-mono text-sm text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           <BigButton
             disabled={!tokenDraft.trim()}

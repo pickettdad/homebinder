@@ -107,7 +107,7 @@ export function WalkScreen() {
                   {z.closedAt ? (
                     <span className="rounded-full bg-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">closed</span>
                   ) : (
-                    <span className="rounded-full bg-teal-900/60 px-3 py-1 text-xs font-semibold text-teal-300">open</span>
+                    <span className="rounded-full bg-brass-900/60 px-3 py-1 text-xs font-semibold text-brass-300">open</span>
                   )}
                 </button>
               );
@@ -208,7 +208,7 @@ export function WalkScreen() {
                   );
                 }}
                 className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${
-                  typeId === t.id ? "bg-teal-600 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+                  typeId === t.id ? "bg-brass-600 text-white ring-brass-500" : "bg-slate-800 text-slate-300 ring-slate-600"
                 }`}
               >
                 {t.id}
@@ -233,7 +233,7 @@ export function WalkScreen() {
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Label (what the owner calls it)"
-            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           {typeId && (
             <div className="flex flex-wrap gap-2">
@@ -243,7 +243,7 @@ export function WalkScreen() {
                   type="button"
                   onClick={() => setLevel(lvl)}
                   className={`rounded-full px-3 py-1.5 text-sm ring-1 ${
-                    level === lvl ? "bg-teal-700 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+                    level === lvl ? "bg-brass-700 text-white ring-brass-500" : "bg-slate-800 text-slate-300 ring-slate-600"
                   }`}
                 >
                   {lvl}
@@ -266,7 +266,7 @@ export function WalkScreen() {
                     })
                   }
                   className={`rounded-xl px-3 py-2 text-sm ring-1 ${
-                    attrs.has(a.id) ? "bg-teal-700 text-white ring-teal-500" : "bg-slate-800 text-slate-300 ring-slate-600"
+                    attrs.has(a.id) ? "bg-brass-700 text-white ring-brass-500" : "bg-slate-800 text-slate-300 ring-slate-600"
                   }`}
                 >
                   {a.label}
@@ -308,7 +308,7 @@ export function WalkScreen() {
             onChange={(e) => setReopenReason(e.target.value)}
             placeholder="Reason (e.g. “noticed something in the bathroom to log”)"
             rows={3}
-            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           <BigButton
             disabled={!reopenReason.trim()}

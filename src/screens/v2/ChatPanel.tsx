@@ -115,7 +115,7 @@ export function ChatPanel({ pinId, readOnly = false }: { pinId: string; readOnly
           key={i}
           className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
             m.role === "user"
-              ? "self-end bg-teal-900/50 text-teal-50"
+              ? "self-end bg-brass-900/50 text-brass-50"
               : "self-start bg-slate-800 text-slate-100"
           }`}
         >
@@ -133,7 +133,7 @@ export function ChatPanel({ pinId, readOnly = false }: { pinId: string; readOnly
       )}
 
       {thread?.lastFailure && (
-        <div className="flex items-center justify-between gap-2 rounded-xl bg-rose-950/50 p-3 text-sm text-rose-200">
+        <div className="flex items-center justify-between gap-2 rounded-xl bg-alert-950/50 p-3 text-sm text-alert-200">
           <span>Couldn't reach the assistant ({thread.lastFailure.code}).</span>
           {!readOnly && (
             <BigButton variant="secondary" onClick={() => void drainChatNow()}>Retry</BigButton>
@@ -150,7 +150,7 @@ export function ChatPanel({ pinId, readOnly = false }: { pinId: string; readOnly
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Ask about this pin (type or dictate)…"
             rows={2}
-            className="rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-800 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           <div className="flex items-center justify-between gap-2">
             {pin.photos.length > 0 ? (

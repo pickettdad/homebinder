@@ -177,7 +177,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
                 key={p.mediaId}
                 type="button"
                 onClick={() => setViewerId(p.mediaId)}
-                className="overflow-hidden rounded-lg ring-1 ring-slate-700 active:ring-teal-500"
+                className="overflow-hidden rounded-lg ring-1 ring-slate-700 active:ring-brass-500"
               >
                 <MediaThumb mediaId={p.mediaId} mime={p.mime} durationMs={p.durationMs} className="h-20 w-full" />
               </button>
@@ -254,7 +254,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             onChange={(e) => setCloseNote(e.target.value)}
             placeholder="Close note (optional — why leaving, what's pending)"
             rows={3}
-            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           <BigButton
             onClick={() => {
@@ -280,7 +280,7 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             onChange={(e) => setReopenReason(e.target.value)}
             placeholder="Reason (e.g. “forgot to test the GFCI”)"
             rows={3}
-            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+            className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           <BigButton
             disabled={!reopenReason.trim()}

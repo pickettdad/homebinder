@@ -1,5 +1,50 @@
 @import "tailwindcss";
 
+/*
+ * Brand palette (F-24, Capture Mode spec §7.4) — STOPGAP, deliberately narrow.
+ *
+ * The Brand Guide declares navy #15223B, brass #BE8A3D, ivory #FBF8F2. The app shipped a
+ * bright teal accent and a crimson Fail, neither of which appears in it — on a screen a
+ * homeowner can see. This replaces those two and nothing else.
+ *
+ * What this is NOT: the spec's ivory-based capture mode. That palette is for a mode that
+ * does not exist yet, and building it now would redress the inspection app in capture
+ * mode's clothes. The light-versus-dark call is deferred to a real kitchen and a real
+ * crawlspace (design session ruling, 2026-08-03).
+ *
+ * Named `brass`/`alert` rather than redefining `teal`/`rose`, which would have been a
+ * one-line change: a class reading `teal-500` that renders brass is the same defect as a
+ * button label carrying doctrine — right until somebody reads it.
+ *
+ * `alert` is a warm brick red chosen to sit with brass; the Brand Guide declares no error
+ * colour, so this is a choice, and it is one variable to change if the guide grows one.
+ * `amber` (core-open dots) and `emerald` (satisfied ticks) are left alone: conventional
+ * status affordances, not brand accents, and out of this fix's scope.
+ *
+ * The shell stays slate-950 rather than brand navy #15223B — the surface scale is used
+ * everywhere and swapping it belongs with the capture-mode palette decision, not here.
+ */
+@theme {
+  --color-brass-50: #fbf4e8;
+  --color-brass-200: #ebd3a6;
+  --color-brass-300: #dfbe7e;
+  --color-brass-400: #d0a45b;
+  --color-brass-500: #be8a3d; /* the Brand Guide's brass */
+  --color-brass-600: #9e7130;
+  --color-brass-700: #7d5926;
+  --color-brass-800: #5c411c;
+  --color-brass-900: #3d2b13;
+  --color-brass-950: #241a0c;
+
+  --color-alert-200: #f0bdb4;
+  --color-alert-300: #e39a8d;
+  --color-alert-500: #b0463a;
+  --color-alert-600: #93392f;
+  --color-alert-700: #762d25;
+  --color-alert-900: #451812;
+  --color-alert-950: #2a0f0b;
+}
+
 /* Dark-first field theme: basements, headlamps, gloves. */
 html {
   background: #020617; /* slate-950 */

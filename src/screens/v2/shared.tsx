@@ -103,7 +103,7 @@ export function pinFullLabel(pin: Pick<PinStateV2, "pinType" | "label">): string
 const FLAG_STYLES: Record<PinFlag, string> = {
   fine: "bg-emerald-900/60 text-emerald-300 ring-emerald-700",
   monitor: "bg-amber-900/60 text-amber-300 ring-amber-700",
-  issue: "bg-rose-900/60 text-rose-300 ring-rose-700",
+  issue: "bg-alert-900/60 text-alert-300 ring-alert-700",
 };
 
 export function FlagChip({ flag }: { flag: PinFlag | null }) {
@@ -117,7 +117,7 @@ export function FlagChip({ flag }: { flag: PinFlag | null }) {
 
 export function PinBadge({ number }: { number: number }) {
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-600 font-bold text-white">
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brass-600 font-bold text-white">
       {number}
     </span>
   );
@@ -167,7 +167,7 @@ export function TypePicker({
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Type to search — e.g. gar… for garage-door"
         autoFocus
-        className="rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+        className="rounded-xl bg-slate-900 p-3 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
       />
       <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
         {matches.map((t) => (
@@ -177,7 +177,7 @@ export function TypePicker({
             onClick={() => onPick({ kind: "component", componentType: t })}
             className={`rounded-xl px-4 py-3 text-left font-medium ring-1 ${
               current?.kind === "component" && current.componentType === t
-                ? "bg-teal-600 text-white ring-teal-500"
+                ? "bg-brass-600 text-white ring-brass-500"
                 : "bg-slate-800 text-slate-200 ring-slate-600"
             }`}
           >

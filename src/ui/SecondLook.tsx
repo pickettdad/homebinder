@@ -113,7 +113,7 @@ export function SecondLookPanel({ zone }: { zone: ZoneState }) {
             <span>Second look queued — will run when there's signal.</span>
           ) : elapsed < 60 ? (
             <span className="flex items-center gap-2">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-teal-400" />
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-500 border-t-brass-400" />
               Second look — reviewing… {elapsed}s
             </span>
           ) : (

@@ -63,7 +63,7 @@ export function SetupV2Screen() {
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="e.g. 41 Birch Lane"
-          className="rounded-xl bg-slate-800 p-4 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+          className="rounded-xl bg-slate-800 p-4 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
         />
       </label>
 
@@ -78,7 +78,7 @@ export function SetupV2Screen() {
                 onClick={() => toggle(f.id)}
                 className={`rounded-xl px-4 py-3 font-medium ring-1 ${
                   flags.has(f.id)
-                    ? "bg-teal-600 text-white ring-teal-500"
+                    ? "bg-brass-600 text-white ring-brass-500"
                     : "bg-slate-800 text-slate-300 ring-slate-600"
                 }`}
               >

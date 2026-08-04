@@ -108,7 +108,7 @@ export function InboxScreen() {
             type="button"
             onClick={() => setFilter(tab.key)}
             className={`shrink-0 rounded-full px-4 py-2 text-sm font-medium ${
-              filter === tab.key ? "bg-teal-600 text-slate-950" : "bg-slate-800 text-slate-300"
+              filter === tab.key ? "bg-brass-600 text-slate-950" : "bg-slate-800 text-slate-300"
             }`}
           >
             {tab.label} ({tab.n})
@@ -180,7 +180,7 @@ export function InboxScreen() {
                 onChange={(e) => setCaption(e.target.value)}
                 placeholder="Note on this capture (type or dictate) — travels with it when filed"
                 rows={2}
-                className="flex-1 rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+                className="flex-1 rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
               />
               <BigButton
                 variant="secondary"

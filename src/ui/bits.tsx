@@ -11,10 +11,10 @@ export function BigButton(props: {
 }) {
   const variant = props.variant ?? "primary";
   const styles = {
-    primary: "bg-teal-500 text-slate-950 font-semibold active:bg-teal-400 disabled:bg-slate-700 disabled:text-slate-500",
+    primary: "bg-brass-500 text-slate-950 font-semibold active:bg-brass-400 disabled:bg-slate-700 disabled:text-slate-500",
     secondary: "bg-slate-700 text-slate-100 active:bg-slate-600 disabled:opacity-40",
     ghost: "bg-transparent text-slate-300 border border-slate-600 active:bg-slate-800 disabled:opacity-40",
-    danger: "bg-rose-600 text-white active:bg-rose-500 disabled:opacity-40",
+    danger: "bg-alert-600 text-white active:bg-alert-500 disabled:opacity-40",
   }[variant];
   return (
     <button
@@ -31,7 +31,7 @@ export function BigButton(props: {
 export function StatusGlyph({ progress }: { progress: SlotProgress }) {
   switch (progress.kind) {
     case "captured":
-      return <span className="text-teal-400" aria-label="captured">●</span>;
+      return <span className="text-brass-400" aria-label="captured">●</span>;
     case "partial":
       return <span className="text-amber-400" aria-label="partial">{progress.have}/{progress.need}</span>;
     case "needs-voice":
@@ -47,7 +47,7 @@ export function ProgressBar({ value, max }: { value: number; max: number }) {
   const pct = max === 0 ? 0 : Math.round((value / max) * 100);
   return (
     <div className="h-2 w-full rounded-full bg-slate-700">
-      <div className="h-2 rounded-full bg-teal-500 transition-all" style={{ width: `${pct}%` }} />
+      <div className="h-2 rounded-full bg-brass-500 transition-all" style={{ width: `${pct}%` }} />
     </div>
   );
 }

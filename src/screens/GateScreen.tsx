@@ -36,7 +36,7 @@ export function GateScreen({ zoneId }: { zoneId: string }) {
 
       {zone.gate === "closed" ? (
         <div className="flex flex-col gap-4">
-          <p className="rounded-xl border border-teal-600/60 bg-teal-950/30 p-4 text-teal-200">
+          <p className="rounded-xl border border-brass-600/60 bg-brass-950/30 p-4 text-brass-200">
             Zone closed with {c.captured} captured · {c.excepted} excepted · {c.deferred} deferred.
           </p>
           <SecondLookPanel zone={zone} />

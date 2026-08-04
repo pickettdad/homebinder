@@ -58,7 +58,7 @@ export function SetupScreen() {
           value={propertyLabel}
           onChange={(e) => setPropertyLabel(e.target.value)}
           placeholder="e.g. 42 Concession Rd"
-          className="rounded-xl bg-slate-800 p-4 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-teal-500"
+          className="rounded-xl bg-slate-800 p-4 text-lg text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
         />
       </label>
 
@@ -73,7 +73,7 @@ export function SetupScreen() {
                 type="button"
                 onClick={() => setFlags((prev) => { const next = new Set(prev); on ? next.delete(f.id) : next.add(f.id); return next; })}
                 className={`min-h-16 rounded-xl border p-4 text-left text-lg transition-colors ${
-                  on ? "border-teal-400 bg-teal-500/15 text-teal-200" : "border-slate-600 bg-slate-800 text-slate-300"
+                  on ? "border-brass-400 bg-brass-500/15 text-brass-200" : "border-slate-600 bg-slate-800 text-slate-300"
                 }`}
               >
                 <span className="font-medium">{f.label}</span>

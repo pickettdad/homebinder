@@ -113,8 +113,11 @@ Omit, UUIDv7 ids, and appendEvents stamping all apply unchanged.
   naCount: number}}` — payload replaces the v1 summary; `ZoneReopened` unchanged.
 
 **Pins and anchors:**
-- `PinCreated {pinId, pinNumber, zoneId?}` — `pinNumber` is the **global, permanent,
-  never-reused** sequence: assigned from a new `session.lastPinNumber` counter inside
+- `PinCreated {pinId, pinNumber, zoneId?}` — `pinNumber` is the **session-scoped**
+  sequence: one run across all zones **within a visit**, never reused after a retire, and it
+  **restarts at #1 on the next visit** because the counter lives on the session row. It is a
+  label for saying "pin #4" out loud, not a cross-visit key — `pinId` is the identity (§7b,
+  F-29). Assigned from a new `session.lastPinNumber` counter inside
   the same transaction, the `lastEventSeq` pattern (gaps after deletion are fine per
   REDESIGN Decision 5). One mechanical note: `seq` is stamped by `appendEvents` as an
   EventBase field, while `pinNumber` lives in the *payload* — so this is a small
@@ -499,9 +502,44 @@ source, so every **equipment pin** must carry, guaranteed:
 - a **nameplate photo reference** (the mediaId of the nameplate shot);
 - any **age evidence** — install date, serial — captured as structured fields, not buried
   in a note.
-- **Longitudinal identity:** permanent pin numbers already give a pin the same identity
-  across visits — **preserve that explicitly in the manifest** (pin number is the join key
-  a cross-visit/cross-client aggregator relies on).
+- **Longitudinal identity: the join key is `pinId`, not the pin number (corrected 2026-08-04,
+  F-29).** `pinId` is a uuid, minted offline at creation, permanent, and **adopted by the
+  binder as canonical** rather than mapped to an id of its own — so there is no reconciliation
+  layer and no server round trip in a basement. That is the field a cross-visit or
+  cross-client aggregator joins on.
+
+  **The human-facing pin number is session-scoped and restarts at #1 every visit.** The
+  counter lives on the session row (`lastPinNumber`, stamped in-transaction by
+  `appendEvents`), so a second visit to the same house mints #1 again for a different object.
+  It is a label for saying *"pin #4"* out loud in a room, and it is sound for that.
+
+  **What actually carries identity across visits is the session-plan import** (§7a), which is
+  why the Object/Concern Model calls it the cross-visit identity mechanism rather than a
+  convenience: without it a five-year-old leak is minted fresh every visit and nothing lines
+  up.
+
+*Superseded wording, kept so the correction is legible rather than silent:* this section
+previously read *"permanent pin numbers already give a pin the same identity across visits."*
+That is false, and it contradicted `DESIGN-OBJECT-CONCERN-MODEL` v1.1 §3, which is ratified,
+binds both apps, and was verified in code. It survived because **nothing was built on it** —
+the false sentence sat in the document a fresh session would read to understand the subject,
+with the correction living in a header note somewhere else. Second instance in a fortnight of
+that exact shape.
+
+**Checked, not assumed (F-29 §4):** nothing in the field app reads or writes on the assumption
+that a pin number is stable across visits — every use is within one session. The number is
+displayed (`#N`), carried in the chat scope snapshot, used as an audit group label, and
+exported as `pins[].number`. **The field app has no cross-visit surface at all**, since the
+session-plan import does not exist yet, so there was nothing to break.
+
+**One consequence that follows, and belongs here because §7b is the aggregator's contract:**
+export media paths embed the pin number — `media/<zone-or-_misc>/pin-<number>/<mediaId>.<ext>`.
+Those paths are therefore **unique within one export and will collide across visits to the
+same property.** That is correct today (an export is one visit) and it means **an aggregator
+must key media on `mediaId` and the owning `pinId`, never on the path.** The path is for a
+human browsing a zip.
+
+The other four guarantees above are unaffected by this correction and stand as written.
 
 ## 8. Testing + acceptance
 
@@ -544,6 +582,45 @@ source, so every **equipment pin** must carry, guaranteed:
 
 Steps 2–7 are the days-scale core; nothing blocks on Stage 0, and the moment step 3
 exists the owner can walk a real zone on the installed PWA.
+
+### 9a. Capture mode — build order (2026-08-03)
+
+Steps 1–8 above are **complete**. This is the continuation, against
+`HouseSteady_Field-App_Capture-Mode_BuildSpec_2026-08-03.md`. Capture mode is **not a new
+stage**: same data model, same manifest, one mode switch (orientation §5), so it belongs here
+rather than in a plan of its own.
+
+**§7's four defects are done** — the measure unit, the verdict on a measured value, the
+authoring marks on screen (#72), and the brand palette (#73).
+
+**Everything below is buildable without position (F-26/the Mac).** Ordering is Field Code's
+call, per the design session 2026-08-03:
+
+1. **Visit kind on `SessionInitialized`.** Nothing renders differently, but §1's mode has no
+   trigger without it and every other item is downstream. **No correction event** — a fact
+   about *what we came to do* is set by the schedule and never discovered in a basement, which
+   is what distinguishes it from `PropertyFlagsCorrected` (a fact about the *house* that
+   proved wrong on site). The log is append-only, so adding one later stays cheap if that is
+   ever wrong.
+2. **§5 notes internal by default.** Independent of everything, and the deliverable is a
+   *data-model guarantee* rather than a UI change — "no code path sets a note client-visible"
+   is a scan. It gets harder to assert once more note paths exist, so it is cheap now and
+   dearer later.
+3. **§2 the capture-mode screen, with §3's loop.** Not separable — the loop lives on the
+   screen. The bulk of the work, and the hard part is **§2.1's *absent***: checklist and
+   open-counts are currently woven through the zone screen rather than sitting in a panel that
+   can simply be omitted. That is the refactor, not the new screen.
+4. **§6 empty-zone reason at close**, with any existing resolution offered as a candidate and
+   **never pre-filled**.
+
+**Why this order:** 1 unblocks the rest; 2 is cheap now and dearer later; 3 is the bulk; 4
+touches zone close, which 3 will already have moved. **If the Mac arrives mid-way, F-26 slots
+into 3 without rework** — the pluggable frame source (CLAUDE.md, the browser-path rule) is the
+same seam either way.
+
+**Not in this sequence and deliberately so:** F-4's `scope[]` capture/inspection split is an
+owner-authored content pass; inspection mode needs the session plan, which has no receiver;
+the zone-attribute tri-state (F-20) is registered and out of scope.
 
 ## 10. Risks
 

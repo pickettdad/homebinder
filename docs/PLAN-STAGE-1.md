@@ -499,9 +499,44 @@ source, so every **equipment pin** must carry, guaranteed:
 - a **nameplate photo reference** (the mediaId of the nameplate shot);
 - any **age evidence** — install date, serial — captured as structured fields, not buried
   in a note.
-- **Longitudinal identity:** permanent pin numbers already give a pin the same identity
-  across visits — **preserve that explicitly in the manifest** (pin number is the join key
-  a cross-visit/cross-client aggregator relies on).
+- **Longitudinal identity: the join key is `pinId`, not the pin number (corrected 2026-08-04,
+  F-29).** `pinId` is a uuid, minted offline at creation, permanent, and **adopted by the
+  binder as canonical** rather than mapped to an id of its own — so there is no reconciliation
+  layer and no server round trip in a basement. That is the field a cross-visit or
+  cross-client aggregator joins on.
+
+  **The human-facing pin number is session-scoped and restarts at #1 every visit.** The
+  counter lives on the session row (`lastPinNumber`, stamped in-transaction by
+  `appendEvents`), so a second visit to the same house mints #1 again for a different object.
+  It is a label for saying *"pin #4"* out loud in a room, and it is sound for that.
+
+  **What actually carries identity across visits is the session-plan import** (§7a), which is
+  why the Object/Concern Model calls it the cross-visit identity mechanism rather than a
+  convenience: without it a five-year-old leak is minted fresh every visit and nothing lines
+  up.
+
+*Superseded wording, kept so the correction is legible rather than silent:* this section
+previously read *"permanent pin numbers already give a pin the same identity across visits."*
+That is false, and it contradicted `DESIGN-OBJECT-CONCERN-MODEL` v1.1 §3, which is ratified,
+binds both apps, and was verified in code. It survived because **nothing was built on it** —
+the false sentence sat in the document a fresh session would read to understand the subject,
+with the correction living in a header note somewhere else. Second instance in a fortnight of
+that exact shape.
+
+**Checked, not assumed (F-29 §4):** nothing in the field app reads or writes on the assumption
+that a pin number is stable across visits — every use is within one session. The number is
+displayed (`#N`), carried in the chat scope snapshot, used as an audit group label, and
+exported as `pins[].number`. **The field app has no cross-visit surface at all**, since the
+session-plan import does not exist yet, so there was nothing to break.
+
+**One consequence that follows, and belongs here because §7b is the aggregator's contract:**
+export media paths embed the pin number — `media/<zone-or-_misc>/pin-<number>/<mediaId>.<ext>`.
+Those paths are therefore **unique within one export and will collide across visits to the
+same property.** That is correct today (an export is one visit) and it means **an aggregator
+must key media on `mediaId` and the owning `pinId`, never on the path.** The path is for a
+human browsing a zip.
+
+The other four guarantees above are unaffected by this correction and stand as written.
 
 ## 8. Testing + acceptance
 

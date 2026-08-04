@@ -11,9 +11,15 @@
  * disambiguated by the session's kind, never by sniffing the event.
  *
  * Key decisions encoded here:
- * - Pin numbers are global, sequential, permanent (gaps OK after retire). The number
- *   is stamped by appendEvents inside the storage transaction (lastPinNumber pattern);
- *   callers pass pinNumber: 0 as a placeholder and must read the stamped event back.
+ * - Pin numbers are SESSION-SCOPED: sequential and stable across zones WITHIN one visit,
+ *   never reused after a retire (gaps are fine), and they restart at #1 on the next visit
+ *   because the counter lives on the session row. They are a label for saying "pin #4" out
+ *   loud in a room — NOT a cross-visit key. `pinId` (uuid, minted offline) is the identity
+ *   the binder adopts as canonical; the session-plan import carries it between visits.
+ *   Said this precisely because the looser phrasing here ("global, permanent") is what
+ *   PLAN-STAGE-1 §7b read as cross-visit identity and asserted for weeks (F-29).
+ *   The number is stamped by appendEvents inside the storage transaction (lastPinNumber
+ *   pattern); callers pass pinNumber: 0 as a placeholder and must read the stamped event back.
  * - Checklist item RESOLUTION is recorded; item EXISTENCE is derived (checklist.ts) —
  *   so config or pin changes re-derive cleanly and nothing stale is persisted.
  * - attest discipline (master §2): "action" items may only ever be resolved by an

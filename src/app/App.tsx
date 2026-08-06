@@ -10,6 +10,8 @@ import { CaptureScreen } from "../screens/CaptureScreen";
 import { GateScreen } from "../screens/GateScreen";
 import { ExportScreen } from "../screens/ExportScreen";
 import { SetupV2Screen } from "../screens/v2/SetupV2Screen";
+import { CaptureModeScreen } from "../screens/v2/CaptureModeScreen";
+import { modeForVisit, visitKindOf } from "../engine/v2/checklist";
 import { WalkScreen } from "../screens/v2/WalkScreen";
 import { ZoneV2Screen } from "../screens/v2/ZoneV2Screen";
 import { PinScreen } from "../screens/v2/PinScreen";
@@ -86,7 +88,14 @@ function GlobalCamera() {
 }
 
 export function App() {
-  const { ready, screen, sessionId, toast, init, drainNow, drainChatNow, refreshReviewStatus } = useApp();
+  const { ready, screen, sessionId, toast, init, drainNow, drainChatNow, refreshReviewStatus, v2Session } = useApp();
+  /**
+   * Capture Mode spec §1: mode follows the visit kind and is never independently settable.
+   * Derived here, at the one place that decides what a route renders — so capture mode is a
+   * different SCREEN rather than the zone screen with things hidden, which is what §2.1's
+   * "absent, not collapsed" requires.
+   */
+  const captureMode = modeForVisit(v2Session ? visitKindOf(v2Session) : null) === "capture";
 
   useEffect(() => { void init(); }, [init]);
 
@@ -139,8 +148,9 @@ export function App() {
       {screen.name === "gate" && <GateScreen zoneId={screen.zoneId} />}
       {screen.name === "export" && <ExportScreen />}
       {screen.name === "setup2" && <SetupV2Screen />}
-      {screen.name === "walk" && <WalkScreen />}
-      {screen.name === "zone2" && <ZoneV2Screen zoneId={screen.zoneId} />}
+      {screen.name === "walk" && (captureMode ? <CaptureModeScreen /> : <WalkScreen />)}
+      {screen.name === "zone2" &&
+        (captureMode ? <CaptureModeScreen zoneId={screen.zoneId} /> : <ZoneV2Screen zoneId={screen.zoneId} />)}
       {screen.name === "pin" && <PinScreen key={screen.pinId} pinId={screen.pinId} />}
       {screen.name === "canvas" && (
         <CanvasScreen key={screen.canvasId} canvasId={screen.canvasId} zoneId={screen.zoneId} placePinId={screen.placePinId} />

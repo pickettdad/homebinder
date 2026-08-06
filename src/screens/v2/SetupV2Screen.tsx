@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../../store/sessionStore";
+import { VISIT_KINDS, visitKindLabel } from "../../engine/v2/checklist";
+import type { VisitKind } from "../../engine/v2/events";
 import { BigButton } from "../../ui/bits";
 
 /** v2 session setup: property label + intake property flags. No room enumeration —
@@ -9,6 +11,14 @@ export function SetupV2Screen() {
   const [label, setLabel] = useState("");
   const [flags, setFlags] = useState<Set<string>>(new Set());
   const [starting, setStarting] = useState(false);
+  /**
+   * Capture Mode spec §1: mode follows the visit kind, and the kind is picked ONCE, at the
+   * one moment it is unambiguous. Deliberately not a toggle anywhere else in the app — the
+   * named failure is a concierge on a busy morning capturing against an inspection screen.
+   * No default is pre-selected: a wrong kind is silent for the whole visit and permanent in
+   * the log, so this is one of the few places worth making the concierge choose.
+   */
+  const [visitKind, setVisitKind] = useState<VisitKind | null>(null);
 
   const groups = useMemo(() => {
     const bySource = new Map<string, { id: string; label: string }[]>();
@@ -57,6 +67,27 @@ export function SetupV2Screen() {
         </div>
       </header>
 
+      <section className="flex flex-col gap-2">
+        <span className="font-semibold text-slate-300">What is this visit?</span>
+        <div className="flex flex-wrap gap-2">
+          {VISIT_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setVisitKind(k)}
+              className={`rounded-xl px-4 py-3 font-medium ring-1 ${
+                visitKind === k
+                  ? "bg-brass-600 text-white ring-brass-500"
+                  : "bg-slate-800 text-slate-300 ring-slate-600"
+              }`}
+            >
+              {visitKindLabel(k)}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">Set once, here. It cannot be changed mid-visit.</p>
+      </section>
+
       <label className="flex flex-col gap-2">
         <span className="font-semibold text-slate-300">Property label</span>
         <input
@@ -90,10 +121,11 @@ export function SetupV2Screen() {
       ))}
 
       <BigButton
-        disabled={starting}
+        disabled={starting || !visitKind}
         onClick={() => {
+          if (!visitKind) return;
           setStarting(true);
-          startSessionV2({ propertyFlags: [...flags], propertyLabel: label.trim() || undefined })
+          startSessionV2({ propertyFlags: [...flags], propertyLabel: label.trim() || undefined, visitKind })
             .catch((err) => showToast(err instanceof Error ? err.message : "Could not start"))
             .finally(() => setStarting(false));
         }}

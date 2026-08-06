@@ -27,7 +27,7 @@ describe("v2 walk flow through the store", () => {
   it("start → zones → pins → canvas/anchor → inbox capture → retag → advisory close", async () => {
     const s = () => useApp.getState();
 
-    await s().startSessionV2({ propertyFlags: ["gas"], propertyLabel: "41 Birch Lane" });
+    await s().startSessionV2({ propertyFlags: ["gas"], propertyLabel: "41 Birch Lane", visitKind: "discovery" });
     expect(s().v2Session?.propertyLabel).toBe("41 Birch Lane");
     expect(s().screen).toEqual({ name: "walk" });
 
@@ -82,7 +82,7 @@ describe("v2 walk flow through the store", () => {
 
   it("field-test fixes: stamped pins, anchor removal, inbox captions, storey levels, complete visit", async () => {
     const s = () => useApp.getState();
-    await s().startSessionV2({ propertyFlags: [], propertyLabel: "41 Birch Lane" });
+    await s().startSessionV2({ propertyFlags: [], propertyLabel: "41 Birch Lane", visitKind: "discovery" });
 
     // Storey level rides along at creation and groups the walk screen.
     const utl = await s().createZone("utility", "Utility", { has_mechanicals: true }, "basement");
@@ -126,7 +126,7 @@ describe("v2 walk flow through the store", () => {
 
   it("complete → reopen (with reason) → re-complete cycles the session and logs it", async () => {
     const s = () => useApp.getState();
-    await s().startSessionV2({ propertyFlags: [], propertyLabel: "9 Elm" });
+    await s().startSessionV2({ propertyFlags: [], propertyLabel: "9 Elm", visitKind: "discovery" });
     await s().createZone("utility", "Utility", {});
     const sessionId = s().sessionId!;
 
@@ -149,7 +149,7 @@ describe("v2 walk flow through the store", () => {
 
   it("pin nicknames persist and ride into the checklist group heading", async () => {
     const s = () => useApp.getState();
-    await s().startSessionV2({ propertyFlags: [] });
+    await s().startSessionV2({ propertyFlags: [], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     const pin = await s().createPin(utl);
     await s().setPinType(pin, { kind: "component", componentType: "water-treatment" });
@@ -163,7 +163,7 @@ describe("v2 walk flow through the store", () => {
 
   it("a closed zone is locked: no new pins, canvases, or inbox filing until reopened (logged)", async () => {
     const s = () => useApp.getState();
-    await s().startSessionV2({ propertyFlags: [] });
+    await s().startSessionV2({ propertyFlags: [], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     const mediaId = await s().capturePhotoV2({ kind: "inbox" }, jpeg("nameplate"));
 
@@ -188,7 +188,7 @@ describe("v2 walk flow through the store", () => {
 
   it("a completed inspection refuses structural edits until reopened", async () => {
     const s = () => useApp.getState();
-    await s().startSessionV2({ propertyFlags: [] });
+    await s().startSessionV2({ propertyFlags: [], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     await s().completeSessionV2();
     await expect(s().createPin(utl)).rejects.toThrow(/completed/);
@@ -199,7 +199,7 @@ describe("v2 walk flow through the store", () => {
 
   it("egress lands in the sleeping guest room but not the utility room", async () => {
     const s = () => useApp.getState();
-    await s().startSessionV2({ propertyFlags: [] });
+    await s().startSessionV2({ propertyFlags: [], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     const bed = await s().createZone("living-space", "Guest room", { sleeping: true });
     const { deriveZoneItems } = await import("../../src/engine/v2/checklist");

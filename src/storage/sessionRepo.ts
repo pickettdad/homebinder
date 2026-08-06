@@ -6,7 +6,7 @@ import type { EventPayload, SessionEvent, Source } from "../engine/schema/events
 import { EVENT_SCHEMA_VERSION, type RoomInstance } from "../engine/schema/events";
 import type { RouteConfig } from "../engine/schema/routeConfig";
 import type { ChecklistConfig } from "../engine/schema/checklistConfig";
-import { EVENT_SCHEMA_VERSION_V2, type V2EventPayload } from "../engine/v2/events";
+import { EVENT_SCHEMA_VERSION_V2, type V2EventPayload, type VisitKind } from "../engine/v2/events";
 import { uuidv7 } from "../engine/ids";
 import { hashConfig } from "../engine/canonical";
 
@@ -172,8 +172,9 @@ export async function createSessionV2(args: {
   config: ChecklistConfig;
   propertyFlags: string[];
   propertyLabel?: string;
+  visitKind: VisitKind;
 }): Promise<string> {
-  const { config, propertyFlags, propertyLabel } = args;
+  const { config, propertyFlags, propertyLabel, visitKind } = args;
   const configHash = await hashConfig(config);
   const sessionId = uuidv7();
   const now = new Date().toISOString();
@@ -201,6 +202,7 @@ export async function createSessionV2(args: {
         configHash,
         propertyFlags,
         propertyLabel,
+        visitKind,
       },
     ]);
   });

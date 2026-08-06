@@ -20,6 +20,7 @@ import type {
   PinTypeRef,
   V2SessionEvent,
   ZoneAuditSnapshot,
+  VisitKind,
 } from "./events";
 import { itemScopeKey } from "./events";
 
@@ -138,6 +139,8 @@ export interface SessionStateV2 {
   configHash: string;
   propertyLabel?: string;
   propertyFlags: string[];
+  /** Absent on sessions created before visit kinds existed — see `visitKindOf`. */
+  visitKind?: VisitKind;
   zones: ZoneStateV2[];
   pins: PinStateV2[];
   /** Unassigned captures (target inbox), in capture order. */
@@ -196,6 +199,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
     configHash: init.configHash,
     propertyLabel: init.propertyLabel,
     propertyFlags: init.propertyFlags,
+    visitKind: init.visitKind,
     zones: [],
     pins: [],
     inbox: [],

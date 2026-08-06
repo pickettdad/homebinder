@@ -51,7 +51,7 @@ beforeEach(async () => {
 describe("v2 chat through the store", () => {
   it("ask is recorded even before a reply; drain applies the reply with AI provenance, idempotently", async () => {
     setAppToken("tok");
-    await s().startSessionV2({ propertyFlags: ["gas"] });
+    await s().startSessionV2({ propertyFlags: ["gas"], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     const pin = await s().createPin(utl);
     await s().setPinType(pin, { kind: "component", componentType: "water-heater" });
@@ -102,7 +102,7 @@ describe("v2 chat through the store", () => {
 
   it("a non-retryable failure records ChatFailed on the thread", async () => {
     setAppToken("tok");
-    await s().startSessionV2({ propertyFlags: [] });
+    await s().startSessionV2({ propertyFlags: [], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     const pin = await s().createPin(utl);
 
@@ -121,7 +121,7 @@ describe("v2 chat through the store", () => {
 
   it("a 2xx non-JSON response (wrong origin / SPA fallback) fails fast as 'misrouted', not forever", async () => {
     setAppToken("tok");
-    await s().startSessionV2({ propertyFlags: [] });
+    await s().startSessionV2({ propertyFlags: [], visitKind: "discovery" });
     const utl = await s().createZone("utility", "Utility", {});
     const pin = await s().createPin(utl);
 

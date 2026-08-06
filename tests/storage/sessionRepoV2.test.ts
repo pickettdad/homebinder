@@ -30,8 +30,7 @@ describe("createSessionV2 + appendEvents", () => {
     const sessionId = await createSessionV2({
       config,
       propertyFlags: ["gas", "well"],
-      propertyLabel: "Test House",
-    });
+      propertyLabel: "Test House", visitKind: "discovery" });
 
     const row = (await db.sessions.get(sessionId))!;
     expect(row.kind).toBe("v2");
@@ -49,7 +48,7 @@ describe("createSessionV2 + appendEvents", () => {
   });
 
   it("stamps global permanent pin numbers inside the transaction, across zones and appends", async () => {
-    const sessionId = await createSessionV2({ config, propertyFlags: [] });
+    const sessionId = await createSessionV2({ config, propertyFlags: [], visitKind: "discovery" });
 
     await appendEvents(sessionId, [
       { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
@@ -71,7 +70,7 @@ describe("createSessionV2 + appendEvents", () => {
   });
 
   it("writes target-addressed media rows atomically with their events", async () => {
-    const sessionId = await createSessionV2({ config, propertyFlags: [] });
+    const sessionId = await createSessionV2({ config, propertyFlags: [], visitKind: "discovery" });
     await appendEvents(sessionId, [
       { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "U", attributes: {} },
       { type: "PinCreated", pinId: "p1", pinNumber: 0, zoneId: "z1" },
@@ -102,7 +101,7 @@ describe("createSessionV2 + appendEvents", () => {
   });
 
   it("v2 events carry schemaVersion 2 and system provenance on init", async () => {
-    const sessionId = await createSessionV2({ config, propertyFlags: [] });
+    const sessionId = await createSessionV2({ config, propertyFlags: [], visitKind: "discovery" });
     const events = (await loadEvents(sessionId)) as V2SessionEvent[];
     expect(events[0]!.schemaVersion).toBe(2);
     expect(events[0]!.source.actor).toBe("system");

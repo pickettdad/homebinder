@@ -15,7 +15,7 @@
  */
 import type { ChecklistConfig, ChecklistItem, ChecklistWhen, ComponentList } from "../schema/checklistConfig";
 import { evaluateTrigger } from "../schema/checklistConfig";
-import type { ItemScope } from "./events";
+import type { ItemScope, VisitKind } from "./events";
 import { resolutionKey } from "./fold";
 import type { PinStateV2, SessionStateV2, ZoneStateV2 } from "./fold";
 
@@ -301,6 +301,46 @@ export function buildAuditView(items: DerivedItem[]): AuditView {
     return groups;
   };
   return { documentation: split("evidence"), tests: split("action") };
+}
+
+/**
+ * The visit kinds the app can start, in the order the setup screen offers them.
+ * Exported as data so the picker cannot drift from the type.
+ */
+export const VISIT_KINDS: readonly VisitKind[] = ["discovery", "inspection", "monthly"] as const;
+
+/** Concierge-facing wording. Not a config id on screen (spec §0.2). */
+export function visitKindLabel(kind: VisitKind): string {
+  if (kind === "discovery") return "Discovery — capture";
+  if (kind === "inspection") return "Inspection";
+  return "Monthly";
+}
+
+/**
+ * A session's visit kind, distinguishing "not recorded" from "discovery" (spec §0.3, fail
+ * open on vocabulary). Sessions created before 2026-08 carry no kind; that is a real state
+ * and it is not the same as a discovery visit. Returns null rather than guessing.
+ */
+export function visitKindOf(state: SessionStateV2): VisitKind | null {
+  return state.visitKind ?? null;
+}
+
+/**
+ * What is FOREGROUND for a visit (Capture Mode spec §1) — the whole reason visit kind is
+ * recorded. Mode is derived here and never stored, so it stays revisable while the kind
+ * stays the durable fact.
+ *
+ * `monthly` maps to `inspection` PROVISIONALLY. The monthly visit is its own design and has
+ * not been done (owner, 2026-08-05); it wants a targeted checklist plus a noticing pass, and
+ * that is neither of these modes. Mapping it here is a rendering decision that changes in one
+ * line — recording a monthly visit AS an inspection would have been a permanent lie in the
+ * log, which is why the kind carries `monthly` even though the mode does not.
+ *
+ * An unrecorded kind returns `inspection`, because that is what every pre-2026-08 session
+ * actually was: the app had no capture mode when they ran.
+ */
+export function modeForVisit(kind: VisitKind | null): "capture" | "inspection" {
+  return kind === "discovery" ? "capture" : "inspection";
 }
 
 /**

@@ -1,9 +1,34 @@
 name: CI
 
+# ONE run per commit, not two (2026-08-06).
+#
+# This previously read `push: branches: ["**"]` alongside `pull_request:`, so every push to a
+# branch with an open PR started TWO identical runs of the same job on the same commit. That
+# was harmless while runners were instant — thirty consecutive runs queued 0.0 minutes — and
+# it stops being harmless the moment runner capacity is scarce, which is exactly when the
+# doubled demand costs the most.
+#
+# The observed failure was misread twice, so the shape is worth recording: run 199 was
+# reported as "hung and cancelled at 15 minutes" and was in fact `status: queued`, created
+# 16:24 and not started by 17:52 — it never executed a step. A never-started run, a hung run
+# and a failed run are one red X in the PR checks UI, and telling them apart needs `status`
+# and `run_started_at`, not `conclusion`. That is why the first diagnosis was "the test suite
+# got too big" and the second was "a concurrency group where the loser waits" — this workflow
+# had no concurrency group at all.
+#
+# Coverage is unchanged by the narrowing: a push to a feature branch is covered by that
+# branch's `pull_request` run, a branch with no PR yet gets its first run when the PR opens,
+# and merges to main are covered by `push`.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+
+# A second push supersedes the first rather than queueing behind it. Without this, rapid
+# pushes stack, and under scarcity a stack is indistinguishable from a stall.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:

@@ -18,6 +18,7 @@ import { loadChecklists } from "../config/loadChecklists";
 import type { ChecklistConfig } from "../engine/schema/checklistConfig";
 import type {
   CaptureTarget, ItemResolution, ItemScope, PinFlag, PinTypeRef, V2EventPayload, V2SessionEvent,
+  VisitKind,
 } from "../engine/v2/events";
 import { foldV2, type SessionStateV2 } from "../engine/v2/fold";
 import { auditSnapshot, deriveZoneAudit } from "../engine/v2/checklist";
@@ -123,7 +124,7 @@ interface AppStore {
   abandonSession(sessionId: string): Promise<void>;
 
   // ---- v2 actions (the pin model). All dispatch through the same atomic append path.
-  startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string }): Promise<void>;
+  startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string; visitKind: VisitKind }): Promise<void>;
   dispatchV2(payloads: V2EventPayload[], media?: MediaRow[]): Promise<V2SessionEvent[]>;
   createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string): Promise<string>;
   renameZone(zoneId: string, label: string): Promise<void>;
@@ -304,10 +305,10 @@ export const useApp = create<AppStore>((set, get) => ({
 
   // ---- v2 pin model ------------------------------------------------------------
 
-  async startSessionV2({ propertyFlags, propertyLabel }) {
+  async startSessionV2({ propertyFlags, propertyLabel, visitKind }) {
     const checklists = get().checklists;
     if (!checklists) throw new Error("no valid checklist config");
-    const sessionId = await createSessionV2({ config: checklists, propertyFlags, propertyLabel });
+    const sessionId = await createSessionV2({ config: checklists, propertyFlags, propertyLabel, visitKind });
     await get().resumeSession(sessionId);
   },
 

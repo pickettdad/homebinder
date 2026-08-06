@@ -33,6 +33,27 @@ export const EVENT_SCHEMA_VERSION_V2 = 2;
 
 export type PinFlag = "fine" | "monitor" | "issue";
 
+/**
+ * What this visit came to do (Capture Mode spec §1). Set once at session start and never
+ * corrected.
+ *
+ * There is deliberately NO `VisitKindCorrected` event, and the distinction is not "we think
+ * it won't change" — it is that this is a different KIND of fact from the one that earned a
+ * correction event. `PropertyFlagsCorrected` exists because a fact about the HOUSE proved
+ * wrong on site: there is propane after all. Visit kind is a fact about what we came to do,
+ * decided by the schedule before anyone arrives, and never discovered in a basement. A visit
+ * whose kind changes is a different visit.
+ *
+ * If that is ever wrong it is cheap to revise: the log is append-only, so adding a correction
+ * event later is purely additive — new type, one fold case, no migration.
+ *
+ * `monthly` is here even though the monthly visit's shape is undesigned (owner, 2026-08-05),
+ * because the KIND is the durable fact and the log is permanent: recording a monthly visit as
+ * an inspection is unrecoverable, while the mode it renders as is derived and revisable. See
+ * `modeForVisit` in checklist.ts for that seam.
+ */
+export type VisitKind = "discovery" | "inspection" | "monthly";
+
 /** Where a pin's type comes from: the component library, or freeform (REDESIGN §3). */
 export type PinTypeRef =
   | { kind: "component"; componentType: string }
@@ -93,6 +114,9 @@ export type V2SessionEvent =
       configHash: string;
       propertyFlags: string[];
       propertyLabel?: string;
+      /** Optional so pre-2026-08 logs still fold; absent means a session that predates
+       *  visit kinds, NOT a discovery visit. `visitKindOf` distinguishes the two. */
+      visitKind?: VisitKind;
     })
   /** ses.triggers-confirmed: intake flags confirmed or corrected on site. Full replacement. */
   | (EventBase & { type: "PropertyFlagsCorrected"; propertyFlags: string[]; note?: string })

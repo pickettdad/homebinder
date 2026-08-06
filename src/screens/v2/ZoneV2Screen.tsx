@@ -11,10 +11,11 @@ import { AttachFromInbox } from "./AttachFromInbox";
 export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   const {
     v2Session, v2Config, navigate, createPin, addCanvas, capturePhotoV2,
-    closeZoneV2, reopenZoneV2, reassignMedia, showToast,
+    closeZoneV2, reopenZoneV2, reassignMedia, setZoneAttributes, showToast,
   } = useApp();
   const [closeSheet, setCloseSheet] = useState(false);
   const [closeNote, setCloseNote] = useState("");
+
   const [reopenSheet, setReopenSheet] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,6 +36,32 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   const coreOpen = auditItems.filter(
     (d) => d.item.tier === "core" && (d.status.kind === "unresolved" || d.status.kind === "proposed"),
   );
+
+  /**
+   * §6: a zone closing with NO media, and the candidate reason the checklist already holds.
+   *
+   * Counts every capture route that lands on a zone — photos (video rides in the same
+   * collection), voice notes, and canvases — so a zone photographed by any means needs no
+   * explanation and is never asked for one.
+   *
+   * The candidate is an item already resolved `na` on this zone: this walk's attic resolved
+   * `att.access-honesty = no access`, and that IS the answer. It is SHOWN and never
+   * pre-filled — pre-filling would let an existing resolution stand as the answer to a
+   * question nobody was asked, which is the same false continuity a restored item id makes.
+   * A concierge at a sealed hatch knows why; the same person at a desk three weeks later
+   * may not, which is why the asking happens here rather than there.
+   */
+  const noMedia =
+    zone.photos.length === 0 && zone.voiceNotes.length === 0 && zone.canvases.length === 0;
+  const emptyCandidate = (() => {
+    if (!noMedia) return null;
+    for (const d of auditItems) {
+      if (d.status.kind !== "na") continue;
+      const reason = v2Config.naReasons.find((r) => r.id === (d.status as { reasonId: string }).reasonId);
+      if (reason) return `${d.item.text} — ${reason.label}`;
+    }
+    return null;
+  })();
 
   const newPin = () => {
     setBusy(true);
@@ -126,6 +153,44 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
           </p>
         )}
       </section>
+
+      {/* Zone attributes, editable AFTER creation. Capture mode deliberately does not ask
+          them — they are classification, and an untouched toggle records the same `false` as
+          a considered "no" (F-20). That left capture-created zones with no path to set them
+          at all: ZoneAttributesSet was folded but nothing dispatched it. This is that path.
+          It matters most once the session-plan import lands: zones will arrive pre-created
+          from the Discovery Visit, so creation-time asking never runs for them, and a
+          basement without `has_mechanicals` shows an empty mechanical checklist (§7a-ii). */}
+      {!locked && (
+        <section className="flex flex-col gap-2">
+          <h2 className="font-semibold text-slate-300">About this zone</h2>
+          <div className="flex flex-wrap gap-2">
+            {v2Config.zoneAttributes.map((a) => {
+              const on = zone.attributes[a.id] === true;
+              const unset = !(a.id in zone.attributes);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() =>
+                    void setZoneAttributes(zoneId, { ...zone.attributes, [a.id]: !on })
+                  }
+                  className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 ${
+                    on
+                      ? "bg-brass-600 text-white ring-brass-500"
+                      : unset
+                        ? "bg-slate-800 text-slate-400 ring-dashed ring-slate-600"
+                        : "bg-slate-800 text-slate-300 ring-slate-600"
+                  }`}
+                >
+                  {a.label}
+                  {unset && <span className="ml-1 text-xs text-slate-500">not asked</span>}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold text-slate-300">Checklist</h2>
@@ -249,14 +314,41 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
               ))}
             </ul>
           )}
+          {/* §6: when a zone closes with NO media, ask why then and there. A concierge at a
+              sealed attic hatch knows; the same person at a desk three weeks later may not.
+              Only asked when it applies — a zone with photographs needs no explanation. */}
+          {noMedia && (
+            <div className="flex flex-col gap-2 rounded-xl border border-amber-700/50 bg-amber-950/30 p-3">
+              <p className="text-sm font-medium text-amber-200">Nothing was captured here. Why?</p>
+              {emptyCandidate && (
+                <>
+                  <p className="text-xs text-amber-200/70">From this zone's checklist:</p>
+                  <button
+                    type="button"
+                    onClick={() => setCloseNote(emptyCandidate)}
+                    className="rounded-lg bg-slate-900 px-3 py-2 text-left text-sm text-slate-200 ring-1 ring-slate-600"
+                  >
+                    {emptyCandidate}
+                  </button>
+                  {/* SHOWN, NEVER PRE-FILLED (§6). Pre-filling would make an existing
+                      resolution answer a question nobody asked — the same false continuity
+                      a restored item id would create. One tap accepts it; silence does not. */}
+                  <p className="text-xs text-slate-500">Tap to use it, or write your own.</p>
+                </>
+              )}
+            </div>
+          )}
           <textarea
             value={closeNote}
             onChange={(e) => setCloseNote(e.target.value)}
-            placeholder="Close note (optional — why leaving, what's pending)"
+            placeholder={
+              noMedia ? "Why nothing was captured here" : "Close note (optional — why leaving, what's pending)"
+            }
             rows={3}
             className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
           <BigButton
+            disabled={noMedia && !closeNote.trim()}
             onClick={() => {
               void closeZoneV2(zoneId, closeNote).then(() => {
                 setCloseSheet(false);

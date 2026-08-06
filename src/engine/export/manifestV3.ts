@@ -13,7 +13,7 @@
  * inbox/unassigned under `media/_misc/_inbox/…`.
  */
 import type { Source } from "../schema/events";
-import type { PinFlag, PinTypeRef, V2SessionEvent } from "../v2/events";
+import type { PinFlag, PinTypeRef, V2SessionEvent, VisitKind } from "../v2/events";
 import type {
   AnchorState,
   ChatMessage,
@@ -84,6 +84,9 @@ export interface ManifestV3<TConfig = unknown> {
     sessionId: string;
     propertyLabel?: string;
     flags: string[];
+    /** What this visit came to do. Absent on sessions predating visit kinds (2026-08);
+     *  absent is NOT discovery — see visitKindOf. */
+    visitKind?: VisitKind;
     startedAt?: string;
     completedAt?: string;
     /** Full complete/reopen history — re-work is auditable (owner req 2026-07-24). */
@@ -202,6 +205,7 @@ export function buildManifestV3<TConfig = unknown>(args: {
       sessionId: state.sessionId,
       propertyLabel: state.propertyLabel,
       flags: state.propertyFlags,
+      visitKind: state.visitKind,
       startedAt: state.startedAt,
       completedAt: state.completedAt,
       lifecycle: state.lifecycle,

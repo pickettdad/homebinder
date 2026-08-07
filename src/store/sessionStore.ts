@@ -127,6 +127,9 @@ interface AppStore {
   startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string; visitKind: VisitKind }): Promise<void>;
   dispatchV2(payloads: V2EventPayload[], media?: MediaRow[]): Promise<V2SessionEvent[]>;
   createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string): Promise<string>;
+  /** Set a zone's attributes AFTER creation. Capture mode does not ask them (they are
+   *  classification), so without this a capture-created zone could never have them set. */
+  setZoneAttributes(zoneId: string, attributes: Record<string, boolean>): Promise<void>;
   renameZone(zoneId: string, label: string): Promise<void>;
   createPin(zoneId?: string): Promise<string>;
   /** Create + type + anchor a pin in ONE transaction — the canvas tap and stamp-mode path. */
@@ -319,6 +322,10 @@ export const useApp = create<AppStore>((set, get) => ({
     const v2Events = [...get().v2Events, ...appended];
     set({ v2Events, v2Session: foldV2(v2Events) });
     return appended;
+  },
+
+  async setZoneAttributes(zoneId, attributes) {
+    await get().dispatchV2([{ type: "ZoneAttributesSet", zoneId, attributes }]);
   },
 
   async createZone(zoneType, label, attributes, level) {

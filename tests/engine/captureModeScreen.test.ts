@@ -96,3 +96,42 @@ describe("§1 — mode is derived at the routing seam, not settable", () => {
     }
   });
 });
+
+describe("§6 — an empty zone is asked why, and the candidate is offered not assumed", () => {
+  const zoneScreen = readFileSync("src/screens/v2/ZoneV2Screen.tsx", "utf8");
+
+  it("asks only when the zone has no media of any kind", () => {
+    // Photos (video rides here), voice notes AND canvases — a zone captured by any route
+    // needs no explanation, so all three count.
+    expect(zoneScreen).toMatch(/zone\.photos\.length === 0/);
+    expect(zoneScreen).toMatch(/zone\.voiceNotes\.length === 0/);
+    expect(zoneScreen).toMatch(/zone\.canvases\.length === 0/);
+  });
+
+  it("never pre-fills the close note from a resolution", () => {
+    // The candidate is rendered as a button the concierge taps. Pre-filling would let an
+    // existing resolution stand as the answer to a question nobody was asked.
+    const code = zoneScreen.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toMatch(/setCloseNote\(emptyCandidate\s*\?\?/);
+    expect(code).not.toMatch(/useState\(emptyCandidate/);
+    expect(code).toMatch(/onClick=\{\(\) => setCloseNote\(emptyCandidate\)\}/);
+  });
+
+  it("an empty zone cannot be closed silently", () => {
+    expect(zoneScreen).toMatch(/disabled=\{noMedia && !closeNote\.trim\(\)\}/);
+  });
+});
+
+describe("F-20 — a capture-created zone can still have its attributes set", () => {
+  it("ZoneAttributesSet has a dispatcher, not just a fold case", () => {
+    // Capture mode does not ask the toggles, so without a post-creation path a
+    // capture-created zone could never have them set at all.
+    expect(readFileSync("src/store/sessionStore.ts", "utf8")).toContain('type: "ZoneAttributesSet"');
+  });
+
+  it("an unset attribute renders as unset, not as false", () => {
+    // ABSENT is not FALSE (effectiveAttributes). The screen has to say so, or it recreates
+    // the ambiguity the capture-mode decision exists to avoid.
+    expect(readFileSync("src/screens/v2/ZoneV2Screen.tsx", "utf8")).toMatch(/not asked/);
+  });
+});

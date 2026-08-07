@@ -9,7 +9,33 @@ during planning; REDESIGN-v2 §6 is updated in the same commit.
 
 ---
 
-## 1. The Mac question — resolved
+## 1. The Mac question — resolved, then changed (2026-08-07)
+
+> **A capable Mac arrives Tuesday 2026-08-11: a 2026 MacBook Air, 16 GB.** That clears both
+> floors the analysis below rules against — Sequoia/Tahoe for Xcode 26, and the 8 GB practical
+> RAM floor with 16 GB being the recommended figure rather than the survivable one. **The
+> verdict below — "it plays no build, debug, or upload role" — is about the 2015 machine and
+> stops being true that day.**
+>
+> **What it unblocks:** F-26 (the native viewfinder returning image and position together),
+> RoomPlan, and with it the floorplan deliverable and desk-pass placement. Issue #36 parked
+> RoomPlan needing exactly one of two things — a plugin package that structurally cannot touch
+> the root view controller, **or a Mac for local native debugging.** The second arrives.
+>
+> **What does NOT change, and should not be simplified away on Tuesday: the cloud CI pipeline
+> stays.** `ios-testflight.yml` is what produces signed TestFlight builds reproducibly, from a
+> clean checkout, with no state on anyone's laptop — and it is what let the native black screen
+> (#71, #35) be diagnosed at all when there was no Mac. A local Mac adds *debugging*; it does
+> not replace *building*. Two people should be able to cut a build, and one of them is a
+> runner.
+>
+> **The retained lesson from the analysis below:** the 2015 verdict was right, and it was right
+> because it was checked against Apple's actual requirement dates rather than assumed from the
+> machine's age. The same check applies to the new one before anything depends on it — confirm
+> the shipped macOS takes Xcode 26 before Tuesday's work is planned around it.
+
+### 1a. The original analysis (2015 Air) — superseded, kept for its reasoning
+
 
 The owner's Mac is confirmed: **MacBook Air 13" Early 2015 (A1466), 1.6 GHz i5, 4 GB
 RAM, macOS Monterey 12.7.6** (its max stock macOS). Verdict: **it plays no build,

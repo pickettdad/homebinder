@@ -3,7 +3,7 @@
 **Role of this file:** the working map — where every track stands, what is waiting on whom, what is next. **Pointers and status, never content.**
 **Filename rule:** dated, replaced wholesale.
 
-**Status date:** 2026-08-06b
+**Status date:** 2026-08-07
 **Why this replaces a cut from four hours ago.** The 2026-08-06 roadmap was organised around the two build tracks, so **anything living *between* them appeared in neither.** The owner asked one question — does the direction to Field reflect that visit two is a pushed checklist — and the answer was not in the file.
 
 **The seams were not undocumented, and the first version of this header said they were.** Checked: the session plan appears in nine project documents, manifest v4 in four, position on capture in four. **Each is recorded by whichever document owns one end of it** — the Object/Concern Model, the Manifest Contract, the Field Track Orientation, the Capture Mode spec.
@@ -41,7 +41,7 @@
 
 **Build order in `PLAN-STAGE-1` §9a, none of it needing the Mac:** visit kind on session start · notes internal by default · the capture screen and its loop · the empty-zone reason at close. **Steps 1 and 2 in progress.**
 
-**One thing needs the Mac: F-26**, the native viewfinder returning image and position together.
+**One thing needs the Mac: F-26**, the native viewfinder returning image and position together. **The Mac arrives Tuesday 2026-08-11** — a 2026 MacBook Air, 16 GB, which clears the 8 GB practical floor that ruled out the 2015 Air. **RoomPlan, the floorplan deliverable and position on capture all unblock that day.**
 
 **Field issue #64 open.** Both halves land with the master bundle.
 
@@ -68,7 +68,7 @@
 | **Session plan** | binder — **built** | field — **not built** | **§3.1** |
 | **Manifest v4** | field — not built | binder | The concern register |
 | **Class → pin type** | binder — frame **built** | field types the pin | The Inspection Visit's list being *this house's* list |
-| **Position on capture** | field — **blocked on the Mac** | binder places the captures | Whether the desk pass is confirmation or data entry |
+| **Position on capture** | field — **unblocks 2026-08-11** | binder places the captures | Whether the desk pass is confirmation or data entry |
 | **Checklist Master → config** | design drafts, owner checks | field generates | All five bundle items |
 
 ### 3.1 · The session-plan import is the pivot's second half
@@ -77,7 +77,9 @@
 
 **The binder emits it; Increment 4 shipped the emitter. The field import is scoped in detail and not built**, and it is sequenced late.
 
-**What that costs is degradation, not breakage.** A concierge can pin at any visit, so tagging component lists `monthly` genuinely works today. **What does not work is continuity: pin numbers restart at 1 every visit, so the same water heater is re-pinned from scratch each month and nothing links this month's reading to last month's.**
+**What that costs is degradation, not breakage.** A concierge can pin at any visit, so tagging component lists `monthly` genuinely works today. **What does not work is continuity — and Field Code checked the code rather than the documents, which sharpened it:** the gap is not that pin numbers restart. **`pinId` is a fresh uuid on every re-pin**, and the Object/Concern Model has the binder adopting field-minted uuids as canonical. **So the same water heater arrives at the desk as a different object every month**, not as the same object renumbered — which is worse, and is the failure the import exists to prevent.
+
+**Stated separately because they size differently:** §9a's four steps make the monthly checklist *correct*. **They do not make it longitudinal.**
 
 **So the import is what makes visit two *visit two* rather than visit one again.** The Object/Concern Model says exactly this, and it is why F-29 mattered. **Late is defensible — Discovery and the desk pass must work before there is anything to push — but it should be sequenced deliberately rather than by default.**
 
@@ -89,7 +91,7 @@
 2. **The confirmation surface** — where a person accepts or corrects what the engine proposed.
 3. **The review queue** — what the frame got wrong, counted, from the first house.
 4. **The Home Profile render** — the first client-facing deliverable of the three-visit model.
-5. **The Mac lands** → placement, the floorplan, F-26.
+5. **The Mac lands Tuesday** → placement, the floorplan, F-26.
 6. **The session-plan import** → §3.1, and the monthly service becomes recurring rather than repeated.
 
 ---
@@ -98,7 +100,7 @@
 
 | | |
 |---|---|
-| **The Mac** | Position on capture, the floorplan, F-26 |
+| **The Mac** | **Arrives Tuesday 2026-08-11.** Position on capture, the floorplan, F-26 — and with it desk-pass placement, which decides whether stage two is confirmation or data entry |
 | **Photographs from the walk** | **The cheapest unblock on this list** — it is what turns the engine from specified into visible |
 | **Building fabric** | **Ratified.** ~30 classes — roof, cladding, foundation, ductwork, interior distribution. The largest remaining gap in the frame |
 | **Checklist Master bundle — five items, one version** | F-4's split · exterior and access measurements · **the monthly list, which is genuinely unwritten** · two unit rows · `flat_roof`'s Table A cell. **Design drafts; the owner checks the judgement calls** |
@@ -112,6 +114,9 @@
 - **An audience default rides every care category** — `owner`, `professional` or `both`. The concierge is not a value on that axis
 - **A zero-care ruling states why no care exists, never who would do it**
 - **Care describes; opportunity recommends**
+- **The finest read of an object is the authoritative one.** A canvas frame establishes that a thing is there; it cannot name a model, read a plate or assert a state — and it never supersedes a detail read of the same object. **Amendment 10, from three errors on a real mechanical room, none of which was missing evidence**
+- **A still is a member of a set; a frame is a member of a sequence.** Following a pipe needs the sequence, which is why video is sequenced into the pass rather than excluded from it
+- **The capture moment is the only time intent is free.** After it, intent is reconstructed — and a reconstruction that fails is what the mechanical room reading documents
 
 ## 7. Process rules — added since 2026-08-04
 

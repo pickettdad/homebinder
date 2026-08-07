@@ -85,7 +85,7 @@ function PostCapture({
 }
 
 export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
-  const { v2Session, v2Config, navigate, capturePhotoV2, addNote, createZone, showToast } = useApp();
+  const { v2Session, v2Config, navigate, capturePhotoV2, captionMedia, createZone, showToast } = useApp();
   const [pending, setPending] = useState<{ file: File | Blob; durationMs?: number } | null>(null);
   const [switching, setSwitching] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -104,12 +104,29 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
   const shotsThisVisit =
     zones.reduce((n, z) => n + z.photos.length, 0) + v2Session.pins.reduce((n, p) => n + p.photos.length, 0);
 
+  /**
+   * The note travels ON the photograph, not beside it (Amendment 10 §D).
+   *
+   * This first wrote the note as a zone-scoped NoteAdded, which was wrong in a way that
+   * defeated the point: a dozen photographs in a mechanical room and a dozen zone notes with
+   * no correspondence between them. The failure it exists to prevent is exactly that — a
+   * shot the owner framed deliberately to show a chlorine injection point, read downstream as
+   * a corner of a room, because the intent lived in his head and nowhere in the file. Putting
+   * it in the file *near* the photograph does not fix it; whoever identifies the object is
+   * looking at one image.
+   *
+   * `MediaCaptioned` is the mechanism built for this and it rides through to
+   * `manifest.media[].caption`, so the caption reaches the identification call attached to
+   * the frame it explains.
+   *
+   * "The capture moment is the only time intent is free" — after it, intent is reconstructed.
+   */
   const save = (note?: string) => {
     if (!pending || !zone) return;
     const { file, durationMs } = pending;
     setPending(null);
     void capturePhotoV2({ kind: "zone", id: zone.zoneId }, file, undefined, durationMs)
-      .then(() => (note ? addNote({ kind: "zone", id: zone.zoneId }, note) : undefined))
+      .then((mediaId) => (note ? captionMedia(mediaId, note) : undefined))
       .catch((e) => showToast(e instanceof Error ? e.message : "Could not save"));
   };
 

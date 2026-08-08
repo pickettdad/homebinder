@@ -171,3 +171,38 @@ describe("Amendment 10 §D — a capture note rides ON the photograph", () => {
     expect(src).toMatch(/capturePhotoV2\([\s\S]{0,120}\.then\(\(mediaId\)/);
   });
 });
+
+describe("the intake capture prompt — information, never debt (owner 2026-08-08)", () => {
+  it("says what the household mentioned and offers nothing to resolve", () => {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toContain("The household mentioned");
+    // No count of any kind, no resolvable state, no gate. The walk's failure was not that
+    // the concierge lacked a list — it was that the list was debt, and a "3 of 5 captured"
+    // here would rebuild the open count that ended it with a friendlier label.
+    for (const debt of ["remaining", "outstanding", "captured of", "still to", "todo", "toResolve"])
+      expect(code, `the prompt must not compute ${debt}`).not.toContain(debt);
+    // §10's scans already forbid an open count in this file; this asserts the prompt did not
+    // arrive with one of its own.
+    expect(code).not.toMatch(/promptFlags\.length\s*[-+]/);
+  });
+
+  it("is dismissible, and dismissal is UI state — never an event", () => {
+    // Dismissing a prompt is not something that happened to the house. It rides in
+    // localStorage exactly as ChatPanel's per-pin collapse does.
+    expect(src).toContain("localStorage");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code, "dismissal must not become an event").not.toMatch(/dispatchV2|type: "[A-Z]\w*Dismissed"/);
+  });
+
+  it("is keyed by session, so a dismissal says nothing about the next visit", () => {
+    expect(src).toMatch(/hs-intake-prompt-dismissed:\$\{sessionId\}/);
+  });
+
+  it("renders at walk-top on both capture states, not per-zone below the camera", () => {
+    // Walk-top on the no-zone-yet screen AND above the zone switcher. Two call sites, and
+    // neither is inside the media grid or the post-capture loop.
+    expect([...src.matchAll(/<IntakePrompt /g)]).toHaveLength(2);
+    const cameraAt = src.indexOf("Photograph this room");
+    for (const m of src.matchAll(/<IntakePrompt /g)) expect(m.index!).toBeLessThan(cameraAt);
+  });
+});

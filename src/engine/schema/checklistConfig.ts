@@ -219,7 +219,7 @@ export const RESERVED_ITEM_CLASSES = [".unit", ".wide"] as const;
  * An ARRAY, not an enum, because several flags are genuinely both: `pool` prompts the walk to
  * photograph the pool AND tells the binder to carry pool equipment into the session plan.
  *
- * The column exists because eight of eighteen flags were asked at intake and referenced by
+ * The column exists because eight of seventeen flags were asked at intake and referenced by
  * nothing, and from inside the config a deliberate binder-only fact (`pre_1990` conditions
  * report language, not a checklist row) is INDISTINGUISHABLE from an oversight. Declaring the
  * consumer turns a silence into a checkable claim.

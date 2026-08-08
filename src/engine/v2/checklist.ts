@@ -361,7 +361,25 @@ export function offersVerdict(item: ChecklistItem): boolean {
   return item.attest === "action" && item.satisfy !== "choice" && item.satisfy !== "measure";
 }
 
-/** The advisory-close snapshot recorded into ZoneClosed (never blocks). */
+/**
+ * The advisory-close snapshot recorded into ZoneClosed (never blocks).
+ *
+ * **`naCount` is a bare total, and after master v1.12 it grows on a WELL-KEPT house** (register
+ * #82). Three retired option values — `pol.heater = none`, `irr.type = none observed`,
+ * `hum.season = no damper` — now resolve through the N/A path as `none-present`, which is
+ * `recordsFinding: true`. *No pool heater, no irrigation, no damper* is three findings, all of
+ * them good facts, where before it was three answered dropdowns. A simple house scores higher
+ * than a complicated one on this number.
+ *
+ * That is correct as data and misleading as a total. **This snapshot is the field's only
+ * composed count, so the note lives here**: anything rendering `naCount` on its own is saying
+ * *more was not applicable* where the honest reading is *more was confirmed absent*. The
+ * separation exists in the config — `recordsFinding` against `feedsGapList` — so a consumer
+ * that wants a headline splits on the reason rather than totalling the kinds together.
+ *
+ * The field does not currently render it to a client; it rides to the binder in
+ * `zones[].audit`, which is where a bare total would actually be seen.
+ */
 export function auditSnapshot(items: DerivedItem[]): {
   coreUnresolved: string[];
   standardUnresolved: number;

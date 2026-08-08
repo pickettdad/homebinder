@@ -111,6 +111,18 @@ pluggable frame source — native viewfinder when `isNativePlatform()` (`src/app
 post-capture path are shared. This is written here rather than left in a chat because an
 unstated decision gets rediscovered as a question.
 
+**The capture prompt names objects and places, never conditions (doctrine 2026-08-08).** The
+Discovery capture prompt reads the property flags declaring `field` in Table A, and what it may
+name is bounded: *pool*, *EV charger*, *generator*, *secondary suite* — **things that exist and
+can be photographed.** It may not name a condition. `prior_water_entry` is the case that fixes
+the line: a prompt reading *prior water entry* sends the concierge looking for damage, **which
+is inspection wearing a capture label**, on the one visit that is deliberately capture-only. It
+declares `binder`, and the fact reaches the desk where looking hard at basement photographs is
+the right job.
+
+*This is the test every future flag gets*, and it is the guard on a column that would otherwise
+quietly re-import the classification-during-capture the three-visit redesign removed.
+
 **A copy stays only if it has a named consumer (design ruling 2026-08-08).** The repo keeps **no
 copy of a document that is replaced wholesale** — roadmaps, registers, State of Understanding
 cuts. `docs/reference/` held one such copy, the 2026-08-07 roadmap, and was removed the next day

@@ -322,6 +322,22 @@ receiver's job against the config snapshot in the same manifest — §7a-iii's r
 `unanswered`, applied to the same shape. A binder that wants the visit-two list reads
 `closeReasonId` against `config.snapshot.naReasons`.
 
+**`zones[].audit.naCount` is a bare total and it grows on a well-kept house (register #82,
+2026-08-08).** Master v1.12 retired three option values that meant *this does not exist*, so
+`pol.heater = none`, `irr.type = none observed` and `hum.season = no damper` now resolve through
+the N/A path as `none-present` — `recordsFinding: true`. **A house with no pool heater, no
+irrigation and no damper records three findings, all of them good facts**, where before it
+recorded three answered dropdowns.
+
+**The emitter's obligation is only to keep them separable, and it does:** `resolutions[]` carries
+the full `ItemResolution` including `reasonId`, and the config snapshot carries `recordsFinding`
+and `feedsGapList` beside it. **So a consumer can always split *confirmed absent* from *not
+reached*.** What it must not do is render `naCount` alone — that says *more was not applicable*
+where the honest reading is *more was confirmed absent*, and **it makes a simpler house look
+worse than a complicated one.** (`apm.vent`'s retirement lands as `not-applicable`, which is in
+neither stream — the countertop fact now lives only in `resolutions[]`, recorded here so nobody
+later reads its absence from the findings as a bug.)
+
 **Pin flag vocabulary — declared here because this is its source (change request via owner,
 2026-07-31).** §7 listed `flag?` in the shape above and never said what it could hold, so a
 consumer transcribing this contract had nothing to transcribe. That is a defect in this

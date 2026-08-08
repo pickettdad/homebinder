@@ -23,6 +23,13 @@ export function SetupV2Screen() {
   const groups = useMemo(() => {
     const bySource = new Map<string, { id: string; label: string }[]>();
     for (const f of checklists?.propertyFlags ?? []) {
+      // No intake source = NOT ASKED (master v1.12, Table A `—`). `flat_roof` is derived from
+      // exterior capture, so it must be absent from the question list rather than described
+      // in it — issue #63's real fix. Describing it was the bug: this screen renders one
+      // group per source, so "not yet asked at intake" became a client-visible heading with a
+      // live toggle under it, and a sentence saying "not asked (v1.12)" would have done the
+      // same thing in better words.
+      if (!f.intakeSource) continue;
       bySource.set(f.intakeSource, [...(bySource.get(f.intakeSource) ?? []), f]);
     }
     return [...bySource.entries()];

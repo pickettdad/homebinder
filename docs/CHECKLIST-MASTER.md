@@ -1,11 +1,12 @@
-# HouseSteady Field Assistant — Checklist Master (v1.11)
+# HouseSteady Field Assistant — Checklist Master (v1.12)
 
-**Version:** v1.11 · **Date:** 2026-07-28 · **Supersedes:** v1.10 (2026-07-28)
+**Version:** v1.12 · **Date:** 2026-08-08 · **Supersedes:** v1.11 (2026-07-28)
+**Status: CUT 2026-08-08.** Drafted by the design session, **cut by field Code as custodian** (owner delegation 2026-08-08). §10.2's five owner-routed surfaces — Table A, choice option values, Table G, measure units, a new declaration site — all carry owner rulings or design-session rulings already given. **Two Table A cells were corrected at the cut and are marked in §A; nothing else in the draft was changed.**
 **Governance:** this file is a **governed cross-app contract** — see §10. Field is custodian; the binder builder and the equipment registry are consumers with ratifying interest on named surfaces.
 **What this is:** the source-of-truth content for v2's verification checklists — the human-editable master that `scripts/gen-checklists.mts` generates config from. Never edited downstream.
 
 
-**Authored from:** v1.5.1, per the whole-file transfer rule.
+**Authored from:** v1.11, whole file, per the whole-file transfer rule. **The rule earned its keep in this revision** — see the v1.12 changelog's first entry.
 
 
 **Changelog v1.5 → v1.5.1** (housekeeping + alias content, applied 2026-07-27):
@@ -38,6 +39,31 @@ Also corrected: §6's prose claimed *"that attribute, not the zone type, is what
 
 
 
+
+**Changelog v1.11 → v1.12 — the consumer column, four option retirements, three units, and one recommendation the file itself overturned.**
+
+**1. Reading the whole file overturned a third of the bundle, and this is the entry worth keeping.** The bundle arrived recommending that **six** mixed-class choice items lose their escape options, on a measured defect: `statusOf` returns `satisfied` for any resolution that is not `na`, so an attic answered `att.access-honesty = no access` records as a **satisfied item — no reason id, not in `naCount`, not a gap** — while the same fact recorded as N/A `no-access` feeds the gap list. *Same fact, opposite record, decided by which affordance was nearer.* The defect is real and measured.
+
+**But two of the six are not the same shape, and §2 already adjudicated them on 2026-07-26:** *`att.access-honesty` and `crw.access-honesty` — `no access` **is** the answer, not an evasion; "unknown" would be incoherent, since the inspector always knows how far they went.* Both are `action` items attesting to **how far the inspector actually went.** `no access` is an **extent value**, not an absence. Retiring it would delete the honest answer to the question the item exists to ask, **and it is the value the binder's *not inspected / not accessible* honesty label reads.**
+
+**So the option is right and the consequence is missing.** Four items are retired below; two gain a declared consequence instead — **new Table J**. *Four consecutive revisions of this file shipped the prose-versus-tables defect class; this is the first time the file's own record stopped a change from outside.*
+
+**2. Table A gains a `consumers` column — and it is all-or-nothing.** `field` / `binder` / both. Field-side schema, generator and validator support shipped in field #80; **the master had adopted nothing, and a cross-app register row briefly said otherwise.** Two validator rules: **once any flag declares, all must** — partial adoption is ambiguous between *not filled in* and *declared as having none* — and **triggered implies `field`.** The converse is deliberately not a rule: the intake capture prompt is a field consumer that triggers nothing.
+
+**The sorting principle is not *does anything trigger on this*. It is *can a capture-only visit produce this fact*.** Eight of the seventeen flags are asked at intake and referenced by zero item triggers and zero list gates — **and eight of the nine that cannot be field-set are not observations at all.** Pool, generator, solar, EV and secondary suite are what the household tells us; `pre_1990` is a document fact; `seasonal_vacancy` is how the household lives and the concierge cannot see it. **They were never oversights. Asking the concierge to tick them is the classification-during-capture the three-visit redesign removed.**
+
+**3. Three property flags added, all three already asked at intake with nowhere to land.**
+- **`attached_garage`** — owner-ruled 2026-08-08. **The Ontario CO requirement is conditional on a fuel-burning appliance *or* an attached garage; the fuel half has flags and the garage half did not, so a life-safety condition could not be evaluated.** ⚑ **The flag alone unblocks nothing: `ses.alarm-coverage` carries no trigger at all — it fires every visit and the three CO conditions live in its prose. Its consumer is the binder's session-plan generation, and that is what the `consumers` cell records.**
+- **`prior_water_entry`** — a household fact with real inspection consequences, not observable at capture.
+- **`year_built_unknown`** — *Year built* is a single toggle today, so leaving it off means either *1990 or later* or *we never found out*. Pairs with `pre_1990` under `anyOf`. **Rewording `pre_1990` to be honest under both would rob a genuinely 1955 house of the stronger sentence it is owed.**
+
+**4. `flat_roof` resolved, and §9.6 closes.** It was declared for Master Spec §15 with **no intake question**, and it renders today as a **client-visible toggle under a sanitized warning heading** — field issue #63. **A flat or low-slope section is observable from the exterior, so it is capture-derived rather than asked.**
+
+⚑ **Corrected at the cut, because the draft's fix would not have closed #63.** The draft replaced the warning heading with the sentence *"Derived from exterior capture — not asked (v1.12)"* — **and the intake screen renders one group per intake source, so that sentence would have become a heading with a live toggle under it.** Better wording, same defect: a client reading *not asked* above a control the concierge can tap. **The cell is `—`, and the generator now emits no `intakeSource` at all for it; the screen skips a flag that has none.** *A flag that is not asked has to be absent from the question list, not described in it.*
+
+**5. Table H — the duplicate `in` row removed, three units added.** `in` was declared twice with two different glosses (field issue #64). **The generator has no uniqueness guard, so the duplicate must be removed in the same pass that adds rows — adding to a table that already proves the guard is missing is the wrong order.** `m2`, `m` and `deg` are declared for the exterior and access set. ⚑ **They have no item consumer yet, which is this file's own eleventh-instance class — §9.16 carries the trigger.**
+
+**6. F-4's third part, recorded because it has no owner.** **`item.scope` is consumed by nothing.** Parsed by the generator, validated by the schema, emitted into `checklists.generated.ts` — and **read by no derivation, no screen, no filter.** `[baseline]` 402 · `[baseline, monthly]` 6 · `[baseline, seasonal:spring]` 1. **So a Monthly Visit renders the full 409-item baseline checklist today, and a perfectly authored monthly list would render identically until something reads `scope`.** *The largest instance of the declared-and-unconsumed class, because `scope` is the mechanism the whole visit-kind split rests on.* **§9.15 carries the ruling that has to precede the content pass.**
 
 **Changelog v1.10 → v1.11 — the last two provenance candidates, and the distinction that resolved them.**
 
@@ -261,7 +287,7 @@ Both are the same defect: the library was built from mechanical systems outward 
   - measure units in parens — `measure (psi)`, `measure (year)`
   - choice options in parens, pipe-separated — `choice (ball|gate|other|unknown)`
 - **Trigger cells:** `|` means anyOf; ids after the first inherit the prefix of the first (`property.gas|propane` ⇒ `property.gas` OR `property.propane`).
-- Vocabulary tables (A–I at end): columns as declared per table. **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
+- Vocabulary tables (A–J at end): columns as declared per table. **Table A is four columns as of v1.12** — `id | label | intake source | consumers` — and **adoption is all-or-nothing: once any row declares `consumers`, every row must.** A blank cell is ambiguous between *not filled in* and *declared as having none*, which is the ambiguity the column exists to remove. **An unrecognised consumer word fails the build rather than being dropped, because a dropped consumer reads downstream as "declared to have none."** **Table E rows are `alias | canonical type` — aliases are free text (spaces, capitals, punctuation), never ids.**
 - Malformed rows fail closed.
 
 ---
@@ -1119,7 +1145,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | id | text | satisfy | tier | attest |
 |---|---|---|---|---|
 | `apm.mount` | Mounting secure (over-range units) | check | standard | action |
-| `apm.vent` | Vent configuration if over-range | choice (ducted to exterior\|recirculating\|n/a — countertop\|unknown) | standard | evidence |
+| `apm.vent` | Vent configuration if over-range | choice (ducted to exterior\|recirculating\|unknown) | standard | evidence |
 
 ### `dock`
 | id | text | satisfy | tier | attest |
@@ -1150,7 +1176,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `hum.pad` | Pad/filter size recorded | note | core | evidence |
 | `hum.water` | Supply line and drain condition | check | core | action |
 | `hum.setting` | Humidistat setting recorded | note | standard | evidence |
-| `hum.season` | Damper/bypass seasonal position | choice (winter/open\|summer/closed\|no damper\|unknown) | standard | evidence |
+| `hum.season` | Damper/bypass seasonal position | choice (winter/open\|summer/closed\|unknown) | standard | evidence |
 
 ### `dehumidifier`
 | id | text | satisfy | tier | attest |
@@ -1208,7 +1234,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 | `pol.disconnect` | Electrical disconnect located | check | core | action |
 | `pol.barrier` | Barrier and self-closing, self-latching gate operate | check | core | action |
 | `pol.pump` | Pump nameplate photographed | photo | standard | evidence |
-| `pol.heater` | Heater type | choice (natural gas\|propane\|electric\|heat pump\|none\|unknown) | standard | evidence |
+| `pol.heater` | Heater type | choice (natural gas\|propane\|electric\|heat pump\|unknown) | standard | evidence |
 | `pol.season` | Current seasonal state | choice (open/operating\|closed/winterized\|unknown) | standard | evidence |
 
 *`pol.barrier` is core and is `action`: it is a life-safety test, and pool barrier requirements are municipal. **Confirmed present and operating — never assessed as compliant.** Compliance is an inspector's determination.*
@@ -1218,7 +1244,7 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 |---|---|---|---|---|
 | `irr.unit` | Backflow device photographed | photo | core | evidence |
 | `irr.shutoff` | Irrigation shutoff located | check | core | action |
-| `irr.type` | Device type | choice (RPZ\|double check\|pressure vacuum breaker\|atmospheric vacuum breaker\|none observed\|unknown) | standard | evidence |
+| `irr.type` | Device type | choice (RPZ\|double check\|pressure vacuum breaker\|atmospheric vacuum breaker\|unknown) | standard | evidence |
 | `irr.test-tag` | Backflow test/certification tag photographed if present | photo | standard | evidence |
 | `irr.test-record` | Last certification/test date recorded | note | standard | evidence |
 | `irr.blowout` | Winterization/blow-out evidence noted | note | standard | evidence |
@@ -1234,27 +1260,52 @@ Dialect: `id | text | satisfy | tier | attest`. Inheritance declared in the head
 
 ## A. Property flags (`property.*`)
 
-| id | label | intake source |
-|---|---|---|
-| `municipal_water` | Municipal water | Water source |
-| `well` | Private well | Water source |
-| `municipal_sewer` | Municipal sewer | Sewage |
-| `septic` | Septic system | Sewage |
-| `gas` | Natural gas service | Fuel on property |
-| `propane` | Propane on property | Fuel on property |
-| `oil` | Oil on property | Fuel on property |
-| `wood_heat` | Wood-burning appliance | Wood-burning appliance |
-| `pool` | Pool or hot tub | Pool/hot tub |
-| `generator` | Generator | Generator |
-| `waterfront` | Waterfront/shoreline | Waterfront |
-| `pre_1990` | Built before ~1990 | Year built |
-| `solar` | Solar/battery | Solar/battery/EV |
-| `ev` | EV charging | Solar/battery/EV |
-| `seasonal_vacancy` | Seasonal or periodically vacant | Occupancy (v1.6) |
-| `secondary_suite` | Secondary suite / in-law / rental unit | Secondary suite (v1.6) |
-| `flat_roof` | Flat or low-slope roof section | ⚠ **not yet asked at intake** — see §9 |
+**Four columns as of v1.12.** `consumers` is `field`, `binder`, or both — **and adoption is all-or-nothing: once any row declares it, every row must**, because a blank cell is ambiguous between *not filled in* and *declared as having none*, which is the ambiguity the column exists to remove.
 
-*`seasonal_vacancy` drives Master Spec §16 departure, during-absence and return procedures. `secondary_suite` changes alarm coverage and egress requirements. Both were **already asked on the intake form** and had no flag — the question was collected and the vocabulary never received the answer. Worth a sweep of the intake form for others in that state.*
+| id | label | intake source | consumers |
+|---|---|---|---|
+| `municipal_water` | Municipal water | Water source | field, binder |
+| `well` | Private well | Water source | field, binder |
+| `municipal_sewer` | Municipal sewer | Sewage | binder |
+| `septic` | Septic system | Sewage | field, binder |
+| `gas` | Natural gas service | Fuel on property | field, binder |
+| `propane` | Propane on property | Fuel on property | field, binder |
+| `oil` | Oil on property | Fuel on property | field, binder |
+| `wood_heat` | Wood-burning appliance | Wood-burning appliance | field, binder |
+| `pool` | Pool or hot tub | Pool/hot tub | field, binder |
+| `generator` | Generator | Generator | field, binder |
+| `waterfront` | Waterfront/shoreline | Waterfront | field, binder |
+| `pre_1990` | Built before ~1990 | Year built | binder |
+| `solar` | Solar/battery | Solar/battery/EV | field, binder |
+| `ev` | EV charging | Solar/battery/EV | field, binder |
+| `seasonal_vacancy` | Seasonal or periodically vacant | Occupancy (v1.6) | binder |
+| `secondary_suite` | Secondary suite / in-law / rental unit | Secondary suite (v1.6) | field, binder |
+| `flat_roof` | Flat or low-slope roof section | — | binder |
+| `attached_garage` | Attached garage | Garage (attached/detached/carport/none) | binder |
+| `prior_water_entry` | Prior water entry in the building | Water history | binder |
+| `year_built_unknown` | Year built not established | Year built | binder |
+
+**Corrected at the cut, and the correction is the prose rather than the cells.** The draft's cells said `field, binder` for pool, generator, solar and EV while the paragraph below them argued all four were `binder` — **the prose-versus-tables class this file's own changelog has now named five times.** The cells were right.
+
+**The sorting principle that produced the contradiction:** *"can a capture-only visit produce this fact?"* That is the wrong question, and answering it would have emptied the capture prompt of the two things it was built for. **The prompt's canonical example is literally *the household mentioned a pool, an EV charger*.** Nobody is asking the concierge to *set* the flag — the flag is *read*, to point a camera. **Can the concierge produce this fact** and **does the field consume this fact** are different questions with different answers.
+
+**So the rule, stated to survive the next flag:**
+
+> **A `field` consumer means the flag changes what a visit does** — it gates an item, it gates a list, **or it names something to point a camera at**. `binder` means the fact travels in the manifest and is read at the desk. Most flags are both.
+
+**And the capture prompt names OBJECTS AND PLACES, never conditions.** `pool`, `generator`, `solar`, `ev`, `secondary_suite` name things that exist and can be photographed. `prior_water_entry` names a *condition*, and a prompt that says *prior water entry* asks the concierge to go looking for damage — **which is inspection wearing a capture label**, on the one visit that is capture-only. It stays `binder`. *That line is what keeps this column from quietly re-importing the classification the redesign removed.*
+
+**Two cells changed from the draft, both under that rule:**
+- **`secondary_suite` → `field, binder`.** A suite is *rooms to walk* — the most capture-directing fact on the list, and the one most likely to be skipped as "not really part of the house."
+- **`flat_roof` → intake source `—`.** See below; it is not asked, so it cannot appear in a prompt built from what was asked.
+
+**The eight that are `binder` alone are not a judgement about importance.** `municipal_sewer` has nothing to photograph; `pre_1990` and `year_built_unknown` are document facts; `seasonal_vacancy` is how the household lives; `prior_water_entry` is a condition; `attached_garage` is owner-ruled; `flat_roof` is not asked. **Asking the concierge to tick any of them is the classification-during-capture the redesign removed.**
+
+⚑ **`municipal_sewer` is a candidate for retirement rather than assignment** — it is the complement of `septic`, and asking both invites them to disagree. Left declared here; **owner's call.**
+
+⚑ **`attached_garage`'s consumer is the binder, and that is the point of recording it.** `ses.alarm-coverage` fires every visit with no trigger and its three CO conditions live in its prose. **The flag connects to nothing in the field, and a CO condition evaluated at the desk is where the life-safety intent actually lands.**
+
+*`seasonal_vacancy` drives Master Spec §16 departure, during-absence and return procedures. `secondary_suite` changes alarm coverage and egress requirements. Both were **already asked on the intake form** and had no flag — the question was collected and the vocabulary never received the answer. **The v1.12 sweep found three more in exactly that state**, which is what a periodic sweep of the intake form is for.*
 
 ## B. Zone attributes (`zone.*`)
 
@@ -1381,9 +1432,22 @@ Where a retired item's content went. **Software must not use this to join a seri
 
 Option values follow the item-id lifecycle (§2): never renamed, only retired and replaced. This table is where a downstream consumer finds what happened to a value its conditions used to match.
 
+**The first four retirements, v1.12, and they are all one defect.** `statusOf` returns `satisfied` for any resolution that is not `na`. **So an option meaning *this does not exist* records the item as answered, carries no reason id, is not counted in `naCount`, and never reaches the gap list — while the identical fact recorded through the N/A path does.** *Same field fact, opposite record, decided by which affordance was nearer.* **An option list must carry values of one class: what the thing is. Absence and inapplicability belong to the N/A path, which already declares their consequences in Table C.**
+
 | item | retired value | version | replacement | reason |
 |---|---|---|---|---|
-| — | — | — | — | *No option values retired to date. This table exists so the first retirement has a home rather than being invented under pressure.* |
+| `apm.vent` | `n/a — countertop` | v1.12 | — | **No replacement option: resolve the item N/A with reason `not-applicable`.** An inapplicability inside a value list. The N/A path already carries it, with a reason id the manifest can route |
+| `pol.heater` | `none` | v1.12 | — | **No replacement option: resolve the item N/A with reason `none-present`.** An absence inside a value list. `none-present` records it as a finding; the option recorded it as satisfied |
+| `irr.type` | `none observed` | v1.12 | — | **No replacement option: resolve the item N/A with reason `none-present`.** As above — and *observed* made it read as a reading rather than an absence |
+| `hum.season` | `no damper` | v1.12 | — | **No replacement option: resolve the item N/A with reason `none-present`.** As above |
+
+**All four values are removed from their items' authored option sets.** *A retirement recorded in Table G and left in the option set is the declared-versus-applied gap this revision spent its length on — the table would say retired and the generator would ship it anyway.* **Verified at the cut: none of the four survives in its item's `choice (…)` cell.**
+
+⚑ **The `replacement` column broke the parse in the draft, and the break was informative.** All four rows carried *"Resolve the item N/A, reason `x`"* as the replacement. **`replacement` is not prose — the validator reads it as *another live option on the same item*, and rejects one that is not.** All four failed, correctly: **there is no replacement option, which is the entire point of the retirement.** The routing moved to `reason`, which is free text, and the cells now read `—`.
+
+*Worth keeping because it is the good version of the failure.* The column meant something narrower than it reads, the draft used it in the wider sense, and **the schema said so at generation time rather than shipping four retirements pointing at values that do not exist.*
+
+**Two items were recommended for the same treatment and are deliberately not retired.** `att.access-honesty` and `crw.access-honesty` keep `no access`. **§2 adjudicated on 2026-07-26 that `no access` *is* the answer, not an evasion** — both are `action` items attesting to **how far the inspector actually went**, so the value is an *extent*, not an absence, and it is what the binder's *not inspected / not accessible* honesty label reads. **Retiring it would delete the honest answer to the question the item exists to ask.** The measured defect is real for them too, and it is fixed as a **consequence** rather than a retirement — **Table J**.
 
 ## H. Measure units (v1.7)
 
@@ -1391,12 +1455,16 @@ Units are declared inline on the item — `measure (psi)` — and this table is 
 
 | unit | means | used by |
 |---|---|---|
-| `in` | inches | `rgh.insulation`, `att.insulation-depth` |
+| `in` | inches | `rgh.insulation`, `att.insulation-depth`, `liv.egress-width`, `liv.egress-height`, `liv.egress-sill`, `sit.measurements` |
 | `psi` | pounds per square inch | `utl.pressure`, `blr.pressure` |
 | `%RH` | relative humidity, percent | `bsm.humidity` |
 | `year` | four-digit calendar year (gated 1900–current) | `wh.age`, `ft.age`, `wsf.age`, `apw.hose-age` |
 | `mm` | millimetres | `fc.width` |
-| `in` | inches (lengths) | `liv.egress`, `sit.measurements` |
+| `m` | metres — linear runs | ⚑ *reserved for the exterior and access set — see §9.16* |
+| `m2` | square metres — areas | ⚑ *reserved for the exterior and access set — see §9.16* |
+| `deg` | degrees — slope and pitch | ⚑ *reserved for the exterior and access set — see §9.16* |
+
+**`in` was declared twice, v1.7 to v1.11**, with two different glosses and two different user lists — field issue #64. **The generator has no uniqueness guard, so nothing caught it and nothing would have.** Merged into one row here, **in the same pass that adds rows, because adding to a table that already proves the guard is missing is the wrong order.** *The guard is field's to build; this row is the master's half.*
 
 **Deliberately unitless (3), pending an instrument:** `int.moisture-suspect` · `rgh.moisture` · `wet.surround-moisture`. All three record a moisture-meter reading, and **the scale is a property of the meter, not of the checklist** — %WME, %MC and relative 0–100 are not interchangeable. Declaring one before the instrument exists would guarantee the corruption this table prevents. **Enforce the "every measure item declares a unit" rule once these three are answered, not before.**
 
@@ -1421,12 +1489,30 @@ Every item recording a value **transcribed or decoded from a physical artifact**
 
 ***The declaration must travel.*** *An N/A-sourced value has to carry that fact through the manifest to every consumer. Dropped in an aggregation layer, an unverifiable value re-enters the fleet indistinguishable from a verified one — which is the exact failure Table I exists to prevent, reintroduced downstream of the fix.*
 
+## J. Choice options carrying an N/A-equivalent consequence (v1.12)
+
+**Why this table exists, and it is §2's declaration-site rule applied to a case the dialect had no home for.** Almost every option meaning *this does not exist* belongs in the N/A path and is retired in Table G. **Two do not.** `att.access-honesty` and `crw.access-honesty` are `action` items recording **how far the inspector went**, and `no access` is a genuine extent value that §2 adjudicated as the correct answer. **But its downstream consequence is identical to N/A reason `no-access`: the space was not inspected, and that belongs on the visit-two list.**
+
+**Without a declaration site the fact lives in prose and nothing routes it** — which is how *the attic was never entered* records as a satisfied item today. **This is a mapping, so it gets a table.**
+
+| item | option value | equivalent N/A reason | consequence |
+|---|---|---|---|
+| `att.access-honesty` | `no access` | `no-access` | Lands on the visit-two gap list |
+| `crw.access-honesty` | `no access` | `no-access` | Lands on the visit-two gap list |
+
+**Parser-enforceable:** the item must exist and be a `choice`, the option value must appear in that item's authored option set, and the reason id must appear in Table C.
+
+**State the invariant, not the inventory.** *Every option value whose real-world meaning is that a space or object was not reached carries an equivalent N/A reason here — or it is retired to the N/A path in Table G. An option that means neither is a value, and needs no row.* **Two rows today; the rule holds at twenty.**
+
+⚑ **The partial extents are deliberately not in this table.** `from hatch only` and `from access point only` are real inspections of a limited scope, not absences. **Whether a partial extent should also carry a consequence is a live question and belongs to the binder** — it holds the record of what a full traverse would have covered. Recorded in §9.17 rather than guessed here.
+
 ---
 
 ## 8. Deferred content passes
 
-- **Guidance text** — the `guidance` field is authored in the schema and almost entirely empty. This is the layer that teaches a backup operator *why* an item matters and *how* to check it. Biggest remaining content task.
-- **Monthly-scope coherence** — `scope: monthly` tags are seeded but the monthly list has never been reviewed as a standalone visit. Needed before the monthly visit can run on this engine.
+- **Guidance text** — the `guidance` field is authored in the schema and **empty on all 409 items: zero carry the key.** This is the layer that teaches a **hired** concierge *why* an item matters and *how* to check it, and it matters more than when it was first deferred, because the concierge is now a role rather than the founder. ⚑ **And the pass is larger than a content pass: the field generator never parses `guidance`.** It is present in the schema and rendered in the panel — **a rendered field with no producer.** Authoring it in this master surfaces nothing until the generator work ships, **so the generator work is part of the ask, not free.**
+- **The exterior and access measurement set** — specified, not authored, and the split is the whole point. **Most quotable attributes are derivable from evidence already captured, and because the manifest is immutable evidence kept forever, derivation can happen later.** What cannot be recovered is the **ground-level access set**: *an overhead image shows the gap; it does not show whether anyone can get through it.* **Proposed, each to be tested against hour-three fatigue under §10.5 before any of it is authored:** side-yard access and whether it is passable or gated · the narrowest pinch-point width on that route · where a work vehicle parks and whether a trailer fits · the ground surface at each elevation and whether a ladder can stand · which openings are operable from inside · second-storey openings reachable from ground level · anything fixed, painted shut or requiring removal · ceiling height where non-standard. **Counts, never grades** — *twelve windows, six operable* is measurement; *windows in poor condition* is assessment. **And a derived count is a proposal until a human confirms it, with the photograph shown first.**
+- **Monthly-scope coherence** — `scope: monthly` tags are seeded but the monthly list has never been reviewed as a standalone visit. ⚑ **And v1.12 records why authoring it alone would change nothing: `item.scope` is consumed by nothing** — see §9.15. **A perfectly authored monthly list renders identically to today until something reads the tag.** The standing half of that list is also a **service-design question before it is a checklist question**, and it wants a working session rather than a draft.
 - **Seasonal mapping** — Master Spec §15 seasonal lists not yet converted to items.
 - **Stub components** — thirteen types reserved with no items.
 - **Binder traceability** — no item currently carries its Master Spec section reference.
@@ -1440,7 +1526,7 @@ Every item recording a value **transcribed or decoded from a physical artifact**
 3. **Choice vs. multi-select** — everything here is single-select. If a genuine multi case appears, it's a new type, not a widened `choice`.
 4. **Table D layer rewrite** — must land with the concern entity, not before (see Table D note).
 5. **Pin nicknames** — v1.4 removes most of the reason they existed: nicknames were covering for missing component types. Recommend keeping them through the next field walk, then reviewing whether they still earn their place. Don't retire them in the same pass that adds the types, or you remove the workaround and the gap together and can't tell which mattered.
-6. **Intake form needs a question it does not ask.** `flat_roof` is declared in Table A because Master Spec §15's trigger table depends on it, but nothing sets it — the intake form has no flat/low-slope roof question. Add it there, or drop the flag; a flag no input can set is worse than an absent one. **And sweep the intake form the other way:** `seasonal_vacancy` and `secondary_suite` were asked for weeks and had no flag, which is how this class of gap hides.
+6. **`flat_roof` — RESOLVED (v1.12), and the third option was the right one.** The question was *add it to intake, or drop the flag.* **Neither: a flat or low-slope section is observable from the exterior, so it is capture-derived and declared `binder` in Table A.** Asking a homeowner about roof slope invites a wrong answer to a question a photograph settles. **The warning marker in the intake-source cell goes with it** — it renders today as a client-visible toggle under a sanitized heading (field issue #63), which is a flag nothing can set displayed to the person least able to set it. **The reverse sweep it called for was run and found three more in that state** — `attached_garage`, `prior_water_entry` and `year_built_unknown`, all asked at intake with no flag, all added in v1.12. *Asked-but-unflagged and flagged-but-unasked are the same gap from two ends, and this file has now shipped both.*
 
 7. **The moisture-meter decision — a purchase with a permanent schema consequence.** Three items (`int.moisture-suspect`, `rgh.moisture`, `wet.surround-moisture`) record a meter reading and stay unitless until an instrument exists. **The scale is set by the meter, and it is set once:** readings taken in %WME cannot be compared to readings in %MC or on a relative 0–100 scale, so switching instruments later corrupts every series retroactively. Decide the meter deliberately, declare its unit in Table H, and treat replacing it as a breaking change requiring a new item rather than a changed unit. *(A pinned meter reading %WME is the common inspection convention, but the choice is the owner's and the declaration follows the instrument, not the other way round.)*
 
@@ -1459,6 +1545,20 @@ Every item recording a value **transcribed or decoded from a physical artifact**
 13. **§1 emergency-sheet coverage is the master's acceptance test.** Every entry on Master Spec §1's shutoff-and-control list must have somewhere in this library to land. v1.5 closes it; **any future component type should be checked against §1 before it is called done.** Remaining partial: propane appliance valves and oil-tank shutoff are covered only by `fuel-tank` generally, and a separate main electrical disconnect (where it exists apart from the panel) has no item. Both are candidates for v1.6 if the field shows they matter.
 
 14. **Vocabulary — "pin" now means the marker, not the entity.** Per the Object/Concern design record: an Object has a pin; a Concern has a pin. This master says "pinned" throughout, which remains correct under that reading. Entity words are Object and Concern.
+
+15. **`item.scope` is consumed by nothing, and F-4 is three parts rather than two.** Parsed by the generator, validated by the schema, emitted into `checklists.generated.ts` — **and read by no derivation, no screen, no filter.** `[baseline]` 402 · `[baseline, monthly]` 6 · `[baseline, seasonal:spring]` 1. **A Monthly Visit renders the full 409-item baseline list today**, and the six monthly items are six among 409, indistinguishable on screen. **So the third part is a consumer, and it has no owner.**
+
+    **One ruling has to precede the content pass, not accompany it. Capture mode is test-enforced to reach no checklist machinery**, so a `capture` tag **cannot** mean *render this during a Discovery Visit* — nothing renders there. Two readings, and they produce different content passes:
+    - **Desk-facing** — *answerable from a photograph at the desk*, against *needs a person in the house with a meter*. **The only reading consistent with capture-only Discovery and with completeness being proposed by the desk.**
+    - **Field-facing** — contradicts the spec directly.
+
+    **Ruled desk-facing (design session, 2026-08-08).** *Tagging four hundred items under the other reading is expensive to undo, which is why this is a ruling rather than a deduction.*
+
+    ⚑ **Constraint that rides with it: F-4 must not become a second mode mechanism.** **`scope` selects which items exist for a visit; visit kind selects which screen the visit runs on.** Two mechanisms answering one question is the ambiguity §3 exists to prevent, arriving in a new place.
+
+16. **Three units are declared with no item consuming them, and that is this file's own most common defect.** `m`, `m2` and `deg` are declared in Table H for the exterior and access set, on two independent requirements — the access items in §8, and the scaled exterior capture that derives roof facet areas, eave runs and pitch. **Neither consumer exists yet.** *A declared thing that nothing consumes is indistinguishable from an oversight from the inside, which is exactly why the `consumers` column was added to Table A in the same revision.* **Trigger: they are consumed in the same cut that authors the exterior and access items, or they come back out.** Reserved is a state with an expiry, not a resting place.
+
+17. **Should a partial access extent carry a consequence?** Table J routes `no access` on the two honesty items to the gap list. **`from hatch only` and `partial traverse` are real inspections of a limited scope — not absences — so they are deliberately absent from Table J.** But a partial traverse leaves items unreached that a full one would have covered, and **nothing currently records which.** *This belongs to the binder rather than here: it holds the record of what a full traverse would have covered, and the field cannot know it.* Routed, not guessed.
 
 ## 10. Governance (v1.7)
 
@@ -1479,6 +1579,8 @@ This file is a **governed cross-app contract**, alongside the Manifest Contract 
 8. **Measure units** (Table H) — the longitudinal comparison backbone
 9. **Table D layers** — the shutoffs layer *is* the §1 emergency map and the comparison layer *is* the §10 protocol; a predicate change silently changes a rendered binder artifact
 10. **Attest semantics** — `evidence`/`action` ride in the manifest; a new class needs builder handling
+11. **Table A's `consumers` column (v1.12)** — it declares which repo reads each flag, so a wrong cell sends the other side building against a fact it will never receive
+12. **Table J (v1.12)** — an option value's N/A-equivalent consequence decides what reaches the gap list, which is the same surface as item 6
 
 **10.3 · Three consumers, and the blast radii differ in kind.**
 
@@ -1498,6 +1600,14 @@ The registry reads component types (the fleet dimension), option values (the pre
 
 ---
 
-**Status:** v1.11 — **closes the Table I provenance sweep.** Seven values sourced (`wh.age`, `ft.age`, `apw.hose-age`, `wsf.age`, `pnl.service`, `pnl.brand`, `fp.sweep`, `irr.test-record`), one deliberately excluded and recorded as such, none deferred. Adds `fp.sweep-tag` and `irr.test-tag`. Carries v1.10's boundary test and co-visibility invariant, v1.9's Table I, v1.8's egress split, v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
+**Status:** **v1.12 DRAFT — for owner ratification. Do not generate from this file.** Adds the Table A `consumers` column across twenty flags · three flags already asked at intake and never declared · **Table J**, a new declaration site for option values carrying an N/A-equivalent consequence · four option-value retirements, the first entries Table G has ever held · the duplicate `in` removed and three units reserved · and two rulings recorded that a content pass cannot proceed without.
+
+**One recommendation was overturned by reading the file it proposed to change.** Six option values were proposed for retirement; **four are retired and two are not, because §2 adjudicated in July that `no access` is the answer rather than an evasion.** *The whole-file transfer rule exists for exactly this, and it is the first time this file's own record has stopped a change arriving from outside.*
+
+**Nothing here is a content edit.** Five of the changes sit on §10.2 binding surfaces, two of which this revision adds. **Field remains custodian; the owner ratifies; the builder reviews.**
+
+---
+
+**Superseded status line, v1.11 — closes the Table I provenance sweep.** Seven values sourced (`wh.age`, `ft.age`, `apw.hose-age`, `wsf.age`, `pnl.service`, `pnl.brand`, `fp.sweep`, `irr.test-record`), one deliberately excluded and recorded as such, none deferred. Adds `fp.sweep-tag` and `irr.test-tag`. Carries v1.10's boundary test and co-visibility invariant, v1.9's Table I, v1.8's egress split, v1.7's governance (§10). **One id retired since v1.5 (`liv.egress`); no ids renamed; no option values retired ever.**
 
 *Five stability rules share one cause — **a consistency check cannot catch a transformation applied uniformly.** Item ids, option values, measure units and derived-value provenance each needed a check against something external: the master's literal text, or a captured artifact. Corollaries earned across this run, each from a real failure: **a fix for that class must be tested on the class, not the instance** · **a number carries false precision** — a wrong pass/fail is visibly a category error, a wrong number just looks like a measurement · **an unverifiable value is indistinguishable from a verified one**, which is why provenance is an invariant and why the unverifiable declaration must survive aggregation · **existence is not provenance** — the artifact must be capturable on the same object · **proposing items is not separable from proposing where they render**, because the core cap is per rendered group · and **state the invariant, not the inventory** — a check that enumerates what exists fires on every legitimate addition.*

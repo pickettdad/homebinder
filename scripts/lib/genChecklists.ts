@@ -257,6 +257,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
     configId: "checklists-baseline",
     configVersion,
     propertyFlags: [],
+    naEquivalents: [],
     zoneAttributes: [],
     zoneTypes: [],
     baseLists: [],
@@ -273,7 +274,8 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
 
   type Section =
     | "none" | "taxonomy" | "base" | "zone" | "session" | "component" | "stubs"
-    | "flags" | "attrs" | "na" | "layers" | "aliases" | "retired-options" | "units" | "provenance";
+    | "flags" | "attrs" | "na" | "layers" | "aliases" | "retired-options" | "units" | "provenance"
+    | "na-equivalents";
   let section: Section = "none";
   let currentList: { ids: string[]; note?: string; inherits?: string; gate?: string } | null = null;
   let currentGroup: string | undefined;
@@ -298,6 +300,7 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
         : /^## G\./.test(line) ? "retired-options"
         : /^## H\./.test(line) ? "units"
         : /^## I\./.test(line) ? "provenance"
+        : /^## J\./.test(line) ? "na-equivalents"
         : "none";
       currentList = null;
       currentGroup = undefined;
@@ -406,8 +409,12 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           const entry: NonNullable<ChecklistConfigInput["propertyFlags"]>[number] = {
             id: stripTicks(row.cells[0] ?? "", row.line),
             label: (row.cells[1] ?? "").trim(),
-            intakeSource: (row.cells[2] ?? "").trim(),
           };
+          // `—` means NOT ASKED AT INTAKE (v1.12, `flat_roof`). Absent rather than empty:
+          // the intake screen renders one group per source, so a flag carrying a sentence
+          // about not being asked still renders a live toggle — issue #63's exact shape.
+          const srcCell = (row.cells[2] ?? "").trim();
+          if (srcCell !== "" && srcCell !== "—" && srcCell !== "-") entry.intakeSource = srcCell;
           const consCell = (row.cells[3] ?? "").trim();
           if (consCell !== "" && consCell !== "—" && consCell !== "-") {
             // Authored as "field, binder" / "field + binder" / "binder". Parsed strictly:
@@ -496,8 +503,12 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           const itemId = stripTicks(row.cells[0] ?? "", row.line);
           // The seeded placeholder row exists so the first retirement has a home; skip it.
           if (!itemId || itemId === "—" || itemId === "-") continue;
-          const value = (row.cells[1] ?? "").trim();
-          const replacement = (row.cells[3] ?? "").trim();
+          // stripTicks, NOT trim. The value must equal the authored option EXACTLY, or the
+          // schema's "a retired value must not still be live" check compares `none` against
+          // none and can never fire — rule 11b, a check whose two sides cannot disagree has
+          // not been passing. Table G was empty until v1.12, so nothing exercised it.
+          const value = stripTicks(row.cells[1] ?? "", row.line);
+          const replacement = stripTicks(row.cells[3] ?? "", row.line);
           const reason = (row.cells[4] ?? "").trim();
           cfg.retiredOptions!.push({
             itemId,
@@ -518,6 +529,19 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           const src = (row.cells[2] ?? "").match(/`([^`]+)`/)?.[1]?.trim() ?? "";
           if (!src) throw new MasterParseError(row.line, `Table I: ${itemId} names no source item`);
           cfg.provenance!.push({ itemId, derivedFrom: (row.cells[1] ?? "").trim(), sourceItemId: src });
+        }
+      } else if (section === "na-equivalents") {
+        // Table J (v1.12) — an option value whose consequence is an N/A reason's. Parsed here;
+        // the three referential checks are the schema's, beside Table G's and Table I's.
+        if (table.header.join("|") !== "item|option value|equivalent n/a reason|consequence")
+          throw new MasterParseError(table.line, `unexpected Table J header: ${table.header.join(" | ")}`);
+        for (const row of table.rows) {
+          const itemId = stripTicks(row.cells[0] ?? "", row.line);
+          const value = stripTicks(row.cells[1] ?? "", row.line);
+          const reasonId = stripTicks(row.cells[2] ?? "", row.line);
+          if (!itemId || !value || !reasonId)
+            throw new MasterParseError(row.line, "Table J needs item, option value and reason id");
+          cfg.naEquivalents!.push({ itemId, value, reasonId });
         }
       } else if (section === "units") {
         if (table.header.join("|") !== "unit|means|used by")

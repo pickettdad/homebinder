@@ -204,6 +204,30 @@ export type RetiredOption = z.output<typeof retiredOptionSchema>;
 const measureUnitSchema = z.object({ unit: z.string().min(1), means: z.string().min(1) });
 export type MeasureUnit = z.output<typeof measureUnitSchema>;
 
+/**
+ * Table J (v1.12) — a choice option whose real-world consequence is an N/A reason's.
+ *
+ * `att.access-honesty = no access` is not an evasion — §2 adjudicated in July that it IS the
+ * answer, since an `action` item recording *how far the inspector went* has `no access` as a
+ * genuine extent value. So it is not retired to the N/A path like the four in Table G. **But
+ * its consequence is identical to reason `no-access`: the space was not inspected.** Without a
+ * declaration site that fact lives in prose and nothing routes it, so an attic nobody entered
+ * records as a satisfied item.
+ *
+ * The field's job is to declare and emit it. The **binder** resolves it — the config snapshot
+ * travels in the manifest, so the gap report is derived there against `naReasons`, exactly as
+ * `zones[].closeReasonId` is. Naming that consumer is the point: a mapping with no named
+ * consumer would make this table instance twelve of the class the revision exists to close.
+ */
+const naEquivalentSchema = z.object({
+  itemId: idSchema,
+  /** Must be a live option on that item — a retired value here would map nothing. */
+  value: z.string().min(1),
+  /** Must name a Table C reason. */
+  reasonId: idSchema,
+});
+export type NaEquivalent = z.output<typeof naEquivalentSchema>;
+
 /** Reserved item-id suffixes (v1.7 §2) — DECLARED classes, not naming conventions, because
  *  downstream consumers bind to them. `.unit` = condition baseline · `.wide` = locating photo.
  *  Both are always photo + evidence. */
@@ -230,8 +254,16 @@ export type FlagConsumer = (typeof FLAG_CONSUMERS)[number];
 const propertyFlagSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_]*$/, "property flag ids are lowercase snake"),
   label: z.string().min(1),
-  /** Intake-question grouping, e.g. "Water source", "Fuel on property". */
-  intakeSource: z.string().min(1),
+  /**
+   * Intake-question grouping, e.g. "Water source", "Fuel on property".
+   *
+   * **ABSENT means the flag is not asked at intake** (master v1.12, authored `—`). `flat_roof`
+   * is the first: it is derived from exterior capture, so there is no question to group it
+   * under. The distinction has to be data, because the intake screen renders one group per
+   * source — a flag whose "source" is a sentence saying it is not asked still renders a live
+   * toggle a client can see, which is field issue #63 with better wording.
+   */
+  intakeSource: z.string().min(1).optional(),
   /** Table A col 4. Optional so a pre-column master still validates; see the rules below. */
   consumers: z.array(z.enum(FLAG_CONSUMERS)).min(1).optional(),
 });
@@ -293,6 +325,8 @@ const checklistConfigObject = z.object({
   retiredOptions: z.array(retiredOptionSchema).default([]),
   /** Table H (v1.7). Closed set; empty means "not declared" (pre-v1.7 config). */
   measureUnits: z.array(measureUnitSchema).default([]),
+  /** Table J (v1.12). Empty until the first mapping (pre-v1.12 config). */
+  naEquivalents: z.array(naEquivalentSchema).default([]),
   /** Table I (v1.9). Empty means "not declared" (pre-v1.9 config). */
   provenance: z.array(provenanceSchema).default([]),
   naReasons: z.array(naReasonSchema).min(1),
@@ -396,6 +430,44 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
         `Table I: ${p.itemId} names source ${p.sourceItemId}, which is not reachable from the same list ` +
           `(inheritance included) — the photo would never be captured alongside the value`,
       );
+  }
+
+  /**
+   * Table H uniqueness (field issue #64, closed at master v1.12). `in` was declared twice
+   * from v1.7 to v1.11 with two different glosses, and nothing caught it: the drift gate, the
+   * schema and the round-trip test all compare the config to itself, so a table that disagrees
+   * with itself is internally consistent. A unit is part of an item's identity, so two rows for
+   * one unit is two answers to "what does this measurement mean".
+   */
+  const seenUnits = new Set<string>();
+  for (const u of cfg.measureUnits) {
+    if (seenUnits.has(u.unit)) issue(`Table H: unit '${u.unit}' is declared more than once`);
+    seenUnits.add(u.unit);
+  }
+
+  /**
+   * Table J (v1.12). Three checks, exactly as the master declares them parser-enforceable.
+   * Written against `choiceItems`, which is already collected above for Table G.
+   */
+  const naReasonIds = new Set(cfg.naReasons.map((r) => r.id));
+  const seenEquivalents = new Set<string>();
+  for (const e of cfg.naEquivalents) {
+    const key = `${e.itemId} ${e.value}`;
+    if (seenEquivalents.has(key))
+      issue(`Table J: ${e.itemId} maps '${e.value}' more than once`);
+    seenEquivalents.add(key);
+    const opts = choiceItems.get(e.itemId);
+    if (!opts) {
+      // Covers both "no such item" and "exists but is not a choice" — either way there is no
+      // option set for the value to live in, which is the thing that must be true.
+      issue(`Table J: '${e.value}' names ${e.itemId}, which is not a choice item`);
+    } else if (!opts.includes(e.value)) {
+      // The retirement trap: a value retired in Table G and still mapped here would declare a
+      // consequence for something the generator no longer ships.
+      issue(`Table J: '${e.value}' is not a live option on ${e.itemId}`);
+    }
+    if (!naReasonIds.has(e.reasonId))
+      issue(`Table J: ${e.itemId} maps to unknown N/A reason ${e.reasonId}`);
   }
 
   const seenAliases = new Set<string>();

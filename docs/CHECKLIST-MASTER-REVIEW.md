@@ -1857,3 +1857,98 @@ a scope filter in `activeRefs`/`shows`, gated on the session's visit kind — bu
 difference between the split existing and the split *working*. Shipping the tags alone would
 add a twelfth row to the declared-and-consumed-by-nothing list, and it would be the one that
 looked most like it was finished.
+
+
+---
+
+## 29. v1.12 cut — three defects found at the cut, and one guard that had never been able to fire (2026-08-08)
+
+**Custody changed with this version.** The owner delegated the cut to field Code; the design
+session drafted, this side cut. §10.2's owner-routed surfaces all carried rulings already given.
+**Two Table A cells were changed at the cut and nothing else in the draft's content was.**
+
+### 29.1 The three asks, answered
+
+**1 · Table A `consumers` — two cells changed, and the correction was the PROSE.** The draft's
+cells said `field, binder` for `pool`, `generator`, `solar` and `ev`; the paragraph beneath them
+argued all four were `binder`. The cells were right — **the capture prompt's canonical example
+is literally *the household mentioned a pool, an EV charger*.** The prose's sorting principle,
+*"can a capture-only visit produce this fact"*, is a different question from *"does the field
+consume this fact"*, and answering the first would have emptied the prompt of the two things it
+was built for. **Fifth instance of this file's prose-versus-tables class.**
+
+Changed: **`secondary_suite` → `field, binder`** (a suite is rooms to walk — the most
+capture-directing fact on the list and the likeliest to be skipped as "not really the house")
+and **`flat_roof` → intake source `—`** (§29.2).
+
+**The line that keeps the column honest, recorded in §A:** *the capture prompt names objects
+and places, never conditions.* `prior_water_entry` stays `binder` under it — a prompt reading
+*prior water entry* sends the concierge looking for damage, **which is inspection wearing a
+capture label, on the one visit that is capture-only.**
+
+**2 · The four retirements — applied, and the `replacement` column broke the parse.** All four
+values are gone from their items' option sets, verified against the generated config, and
+pinned by a test asserting the invariant rather than the four rows. The break: every row
+authored *"Resolve the item N/A, reason `x`"* in `replacement`, but **`replacement` means
+*another live option on this item***, and the validator rejected all four — correctly, because
+**there is no replacement option; that is the whole point of the retirement.** Routing moved to
+`reason`, which is free text. *The good version of the failure: the column meant something
+narrower than it reads, and the schema said so at generation time.*
+
+**3 · Table J parses — it did not, and it failed in the worst available way.** `## J.` fell to
+the parser's `"none"` section, whose comment reads *"tables in prose sections are not config —
+skip"*. **So the draft parsed clean and Table J was silently dropped:** a declaration site,
+introduced by the revision about declared-versus-applied gaps, declaring nothing. Now parsed,
+schema-typed, and carrying its three checks as authored. **Table H's duplicate `in` is gone and
+#64's uniqueness guard shipped in the same pass**, exactly as the master required.
+
+### 29.2 `flat_roof` — the draft's fix would not have closed #63
+
+The draft replaced the warning heading with *"Derived from exterior capture — not asked
+(v1.12)"*. **The intake screen renders one group per intake source**, so that sentence would
+have become a client-visible heading with a live toggle under it. Better wording, same defect.
+
+**A flag that is not asked has to be ABSENT from the question list, not described in it.** The
+cell is `—`, the generator emits no `intakeSource`, `intakeSource` became optional in the
+schema, and the screen skips a flag without one. #63 closes on the mechanism rather than on the
+wording.
+
+### 29.3 The guard that had never been able to fire
+
+Table G's rule — *a retired value must not still be live* — has shipped since v1.7. **It could
+never have fired.** The generator read the value cell with `.trim()` rather than `stripTicks`,
+so it compared `` `none` `` — backticks included — against the option list, which holds `none`.
+**Four versions of a check whose two sides could not disagree**, invisible because Table G had
+no rows until this one.
+
+*Rule 11b, and the general form is worth more than the instance:* **an unexercised guard is not
+a passing guard.** The four retirements are the first rows this table has ever carried, and they
+found it on contact. There is now a test asserting a retired value carries no backticks —
+stated that way rather than as "the four values are correct", because it is the *comparability*
+that was broken, not the values.
+
+### 29.4 Tests rewritten, not loosened — seven fired on a legitimate change
+
+Seven existing tests failed on the v1.12 cut, **every one an inventory assertion**:
+`toEqual` on Table H's exact five units (v1.12 declares three more, deliberately ahead of the
+items that will use them), `toEqual([])` on Table G, a consumers fixture that built the partial
+state by *adding* a declaration to a baseline where nothing declared, and four generator
+fixtures whose regex pinned the **three-column** Table A header.
+
+**The fourth is the one worth recording.** Those fixtures matched nothing once the master went
+four-column, so `masterText.replace(...)` returned the master untouched and every assertion ran
+against a file it had never edited — **and three of the four still passed.** A fixture that
+no-ops is worse than one that fails. The rebuilt version throws if the swap does not take.
+
+*This is CLAUDE.md's standing rule collecting its bill in a single afternoon: a test that
+enumerates what exists fires on every legitimate addition.* All seven now state the invariant —
+containment where a floor is wanted, construction of the negative case from whatever the master
+currently is.
+
+### 29.5 What v1.12 does NOT do, stated so it is not assumed
+
+`m`, `m2` and `deg` are **declared and used by no item** — deliberately, ahead of the exterior
+set. Table J's consumer is the **binder**: the field declares and emits the mapping in the
+config snapshot travelling with the manifest, and the gap report is derived there against
+`naReasons`, exactly as `zones[].closeReasonId` is. **`item.scope` is still consumed by
+nothing** — F-4's third part is unbuilt and v1.12 does not change that.

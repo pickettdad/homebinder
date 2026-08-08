@@ -135,3 +135,22 @@ describe("F-20 — a capture-created zone can still have its attributes set", ()
     expect(readFileSync("src/screens/v2/ZoneV2Screen.tsx", "utf8")).toMatch(/not asked/);
   });
 });
+
+describe("Amendment 10 §D — a capture note rides ON the photograph", () => {
+  it("captions the media rather than adding a zone note", () => {
+    // The mechanical-room failure: a shot framed deliberately to show a chlorine injection
+    // point, read downstream as a corner of a room. A zone-scoped note puts the intent in
+    // the file but not on the frame — a dozen photos and a dozen notes, no correspondence.
+    // `MediaCaptioned` rides through to manifest.media[].caption, which is what the
+    // identification call is looking at.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toContain("captionMedia(mediaId, note)");
+    expect(code, "a capture note must not become a zone note").not.toMatch(/addNote\(/);
+  });
+
+  it("the caption is taken from the same tap that saves the photo", () => {
+    // One act, not two. A separate captioning step is a second decision in the room, which
+    // is what capture mode exists to remove.
+    expect(src).toMatch(/capturePhotoV2\([\s\S]{0,120}\.then\(\(mediaId\)/);
+  });
+});

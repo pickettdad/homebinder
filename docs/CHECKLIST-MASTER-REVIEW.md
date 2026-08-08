@@ -1449,7 +1449,13 @@ there is no cooling intake group at all.
 
 **Confirmed, in the flag direction, and larger than reported.** A flag asked at intake that
 nothing consumes is the same defect the harvest was reaching for, and there are **eight of
-eighteen** — the concierge answers, and the answer changes nothing:
+seventeen** — the concierge answers, and the answer changes nothing:
+
+> **Count correction, 2026-08-08.** This section first said *eight of eighteen*, and the
+> denominator was wrong: Table A declares **seventeen** rows and `checklists.generated.ts`
+> carries seventeen, verified against both. The numerator — eight — is right. Corrected here
+> and everywhere it propagated; it also reached the Build Roadmap §3.1 and State of
+> Understanding v3 as "eighteen toggles", which is the same error travelling.
 
 | flag | intake group | item triggers | list gates |
 |---|---|---|---|
@@ -1627,7 +1633,7 @@ import replaces that, and the derivation is not a placeholder for anything.
 There is **no property entity anywhere in the local database** — `db.ts` declares `sessions`,
 `events`, `media`, `configSnapshots`, `outbox`, `reviewJobs`, `chatJobs` and nothing else, and
 `activeRefs` reads `state.propertyFlags`, which is populated only from `SessionInitialized`.
-Every session is an island. On visit two the concierge re-answers all eighteen toggles from
+Every session is an island. On visit two the concierge re-answers all seventeen toggles from
 memory or from the client, and a mis-remembered answer silently changes the scope of the whole
 visit's checklist.
 
@@ -1636,7 +1642,7 @@ is written as if something were carried in to confirm. **Nothing is.** So the it
 asks the concierge to confirm their own answer from twenty minutes earlier.
 
 **And at Discovery the flags reach nothing at all.** Capture mode never imports any derivation
-(spec §10, test-enforced), so on a Discovery Visit the eighteen toggles feed *no* UI — they ride
+(spec §10, test-enforced), so on a Discovery Visit the seventeen toggles feed *no* UI — they ride
 into `session.flags` in the manifest and stop. Which is what makes §27.3 the first field
 consumer they have ever had.
 
@@ -1686,10 +1692,30 @@ thing at the end of the walk as at the start. A concierge who has already shot t
 sees "pool" listed. That is the price of not counting, and it is the right price, but it means
 the prompt has to read as a *reminder of what the household said*, never as a list to work.
 
-**One decision needed before building:** shown **once at the top of the walk**, or **persistent
-on every zone screen**? Recommendation: **walk-level, dismissible.** Per-zone it becomes ambient
+**Decision taken (owner, 2026-08-08): walk-top and dismissible.** Per-zone it becomes ambient
 nagging — a fixed list repeated on every screen reads as a list to clear, which is the failure
-capture mode exists to remove, arriving through a different door.
+capture mode exists to remove, arriving through a different door. **And the no-tracking half
+was settled with a reason rather than accepted as a limitation:** the prompt does not need to
+know whether the pool was photographed, because **completeness is proposed by the desk.** It is
+not a blind spot in the prompt; it is a function that lives somewhere else.
+
+**Built this turn.** `IntakePrompt` renders at the top of both capture states — the
+no-zone-yet screen (literally the first screen of a Discovery Visit) and above the zone
+switcher — with a Dismiss control. Dismissal is **UI state in `localStorage`, keyed by
+session**, never an event: dismissing a prompt is not something that happened to the house,
+and keying it by session means dismissing it on one visit says nothing about the next. Tested
+for the absence of any count, any resolvable state and any gate, and mutation-checked.
+
+**Which flags it shows, and why that is not a list in the screen.** `capturePromptFlags` reads
+the config: **once any flag declares `consumers` it filters to `field`; until then it shows
+every flag the session declared.** An honest superset today, exact the day the column lands,
+and never a hardcoded set of capture-worthy ids — which would be the second vocabulary beside
+the config that the zone-close picker is also tested against. It is the same "once declared, it
+is closed" shape as Table H's unit check.
+
+**So `pre_1990` appears in the prompt today and will stop appearing the moment Table A declares
+it `binder`.** That is the column paying for itself on its first consumer rather than in the
+abstract.
 
 **This also revises §26.1.** That sweep asked *"does anything trigger on this flag"*, which is
 an inspection-mode question. The capture prompt is a **Discovery-mode consumer that needs no

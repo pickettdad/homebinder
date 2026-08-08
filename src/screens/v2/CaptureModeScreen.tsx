@@ -22,7 +22,91 @@ import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { BigButton, Sheet } from "../../ui/bits";
 import { MediaThumb, MediaViewer, ZONE_LEVELS } from "./shared";
+import type { ChecklistConfig } from "../../engine/schema/checklistConfig";
 
+// Dismissal is UI state, not inspection data — localStorage, never the event log, exactly as
+// ChatPanel's per-pin collapse. Keyed by session so dismissing it on one visit says nothing
+// about the next, and so it survives switching between zones (the screen remounts on every
+// zone change, and a prompt that reappeared each time would be the nagging this must not be).
+const promptKey = (sessionId: string) => `hs-intake-prompt-dismissed:${sessionId}`;
+const readDismissed = (sessionId: string): boolean => {
+  try {
+    return localStorage.getItem(promptKey(sessionId)) === "1";
+  } catch {
+    return false;
+  }
+};
+const writeDismissed = (sessionId: string): void => {
+  try {
+    localStorage.setItem(promptKey(sessionId), "1");
+  } catch {
+    /* private mode — it just won't stay dismissed */
+  }
+};
+
+/**
+ * Which intake flags are worth pointing a camera at.
+ *
+ * Once Table A declares `consumers` the answer is data: show the ones read in the field.
+ * Until then show them all — an honest superset, and deliberately NOT a list of
+ * capture-worthy ids written into this screen. A hardcoded subset here would be a second
+ * vocabulary beside the config, which is the drift the config-is-data discipline exists to
+ * prevent; the same rule that makes the zone-close picker read `naReasons`.
+ *
+ * The "once declared, it is closed" shape is already used by Table H's unit check.
+ */
+export function capturePromptFlags(
+  config: Pick<ChecklistConfig, "propertyFlags">,
+  sessionFlags: readonly string[],
+): { id: string; label: string }[] {
+  const selected = config.propertyFlags.filter((f) => sessionFlags.includes(f.id));
+  const declared = config.propertyFlags.some((f) => f.consumers?.length);
+  return (declared ? selected.filter((f) => f.consumers?.includes("field")) : selected).map((f) => ({
+    id: f.id,
+    label: f.label,
+  }));
+}
+
+/**
+ * The intake capture prompt (State of Understanding v3 §2; owner 2026-08-08).
+ *
+ * *The household mentioned a pool, an EV charger.* This is the attention-directing function
+ * the checklist used to perform and nothing has replaced — the walk's failure was not that
+ * the concierge lacked a list, it was that the list was **debt**.
+ *
+ * So: INFORMATION, NEVER DEBT. No count, no resolvable state, nothing to tick, and it gates
+ * nothing. It cannot tell whether the pool was photographed and deliberately does not try —
+ * **completeness is proposed by the desk** (owner ruling). Tracking it here would rebuild the
+ * open-count that ended the walk, with a friendlier label.
+ *
+ * Walk-top and dismissible, not per-zone: a fixed list repeated on every screen reads as a
+ * list to clear, which is the same failure arriving through a different door.
+ */
+function IntakePrompt({ flags, onDismiss }: { flags: { id: string; label: string }[]; onDismiss: () => void }) {
+  if (!flags.length) return null;
+  return (
+    <section className="flex flex-col gap-2 rounded-xl border border-slate-700 bg-slate-800/60 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium text-slate-200">The household mentioned</p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-slate-400 ring-1 ring-slate-600"
+        >
+          Dismiss
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {flags.map((f) => (
+          <span key={f.id} className="rounded-full bg-slate-900 px-3 py-1 text-sm text-slate-200 ring-1 ring-slate-600">
+            {f.label}
+          </span>
+        ))}
+      </div>
+      <p className="text-xs text-slate-500">Nothing to tick. Worth a photograph if you pass one.</p>
+    </section>
+  );
+}
 
 /** The three-button post-capture step (§3). The third fires on roughly one capture in ten,
  *  so it is present and unobtrusive rather than prominent. */
@@ -92,9 +176,20 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const [newType, setNewType] = useState<string | null>(null);
   const [newLevel, setNewLevel] = useState<string>("main");
+  const [promptDismissed, setPromptDismissed] = useState(() =>
+    v2Session ? readDismissed(v2Session.sessionId) : false,
+  );
   const recorder = useVoiceRecorder();
 
   if (!v2Session || !v2Config) return null;
+
+  const promptFlags = promptDismissed
+    ? []
+    : capturePromptFlags(v2Config, v2Session.propertyFlags);
+  const dismissPrompt = () => {
+    writeDismissed(v2Session.sessionId);
+    setPromptDismissed(true);
+  };
 
   const zones = v2Session.zones;
   const zone = zones.find((z) => z.zoneId === zoneId) ?? zones[zones.length - 1];
@@ -136,6 +231,9 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
         <h1 className="text-2xl font-bold text-slate-100">Start where you're standing</h1>
         <p className="text-sm text-slate-400">Name the room you're in and start photographing it.</p>
+        {/* Walk-top, and this IS the top of the walk — the first screen of a Discovery Visit,
+            before any zone exists. */}
+        <IntakePrompt flags={promptFlags} onDismiss={dismissPrompt} />
         <BigButton onClick={() => setSwitching(true)}>Add a zone</BigButton>
         {switching && (
           <ZoneSheet
@@ -177,6 +275,10 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
           Finish
         </BigButton>
       </header>
+
+      {/* Above the zone switcher and the camera, so it reads before the walk starts and is
+          out of the way once dismissed. Dismissal persists for the visit. */}
+      <IntakePrompt flags={promptFlags} onDismiss={dismissPrompt} />
 
       {/* Fast switcher to any other zone, and a fast way to add one (§2). */}
       <div className="flex gap-2 overflow-x-auto pb-1">

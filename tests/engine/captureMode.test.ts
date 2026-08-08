@@ -10,6 +10,7 @@ import type { Source } from "../../src/engine/schema/events";
 import type { V2EventPayload, V2SessionEvent, VisitKind } from "../../src/engine/v2/events";
 import { foldV2 } from "../../src/engine/v2/fold";
 import { VISIT_KINDS, modeForVisit, visitKindLabel, visitKindOf } from "../../src/engine/v2/checklist";
+import { capturePromptFlags } from "../../src/screens/v2/CaptureModeScreen";
 import { buildManifestV3 } from "../../src/engine/export/manifestV3";
 import { loadChecklists } from "../../src/config/loadChecklists";
 
@@ -157,5 +158,42 @@ describe("§9a step 2 — notes are internal, and there is nothing to make them 
     });
     expect(m.notes).toHaveLength(1);
     expect(m.notes[0]!.text).toBe("wants the hallway painted");
+  });
+});
+
+describe("capturePromptFlags — the list is config, never a list in the screen", () => {
+  const cfg = (flags: { id: string; label: string; consumers?: ("field" | "binder")[] }[]) => ({
+    propertyFlags: flags.map((f) => ({ intakeSource: "x", ...f })),
+  });
+
+  it("shows only the flags this session actually declared", () => {
+    const c = cfg([
+      { id: "pool", label: "Pool or hot tub" },
+      { id: "ev", label: "EV charging" },
+      { id: "septic", label: "Septic system" },
+    ]);
+    expect(capturePromptFlags(c, ["pool", "ev"]).map((f) => f.id)).toEqual(["pool", "ev"]);
+  });
+
+  it("with no consumer column declared, shows them all — an honest superset", () => {
+    // A hardcoded capture-worthy subset here would be a second vocabulary beside the config,
+    // which is the drift the naReasons picker is also tested against.
+    const c = cfg([{ id: "pre_1990", label: "Built before ~1990" }, { id: "pool", label: "Pool" }]);
+    expect(capturePromptFlags(c, ["pre_1990", "pool"]).map((f) => f.id)).toEqual(["pre_1990", "pool"]);
+  });
+
+  it("once ANY flag declares consumers, the column filters to `field`", () => {
+    // "Once declared, it is closed" — the same shape as Table H's unit check. `pre_1990` is a
+    // document fact: real, binder-consumed, and nothing to point a camera at.
+    const c = cfg([
+      { id: "pre_1990", label: "Built before ~1990", consumers: ["binder"] },
+      { id: "pool", label: "Pool", consumers: ["field", "binder"] },
+      { id: "ev", label: "EV charging", consumers: ["field"] },
+    ]);
+    expect(capturePromptFlags(c, ["pre_1990", "pool", "ev"]).map((f) => f.id)).toEqual(["pool", "ev"]);
+  });
+
+  it("an empty selection yields an empty prompt, not an empty box", () => {
+    expect(capturePromptFlags(cfg([{ id: "pool", label: "Pool" }]), [])).toEqual([]);
   });
 });

@@ -15,6 +15,8 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
   } = useApp();
   const [closeSheet, setCloseSheet] = useState(false);
   const [closeNote, setCloseNote] = useState("");
+  /** Table C reason id for a zone closing with nothing captured (ruling 2026-08-08). */
+  const [closeReasonId, setCloseReasonId] = useState<string | null>(null);
 
   const [reopenSheet, setReopenSheet] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
@@ -58,10 +60,17 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
     for (const d of auditItems) {
       if (d.status.kind !== "na") continue;
       const reason = v2Config.naReasons.find((r) => r.id === (d.status as { reasonId: string }).reasonId);
-      if (reason) return `${d.item.text} — ${reason.label}`;
+      // Carries the REASON ID as well as the sentence: tapping the candidate must land the
+      // routable half too, or the one-tap path would be the only path that produces an
+      // unroutable close — the affordance most likely to be used, doing the least.
+      if (reason) return { reasonId: reason.id, text: `${d.item.text} — ${reason.label}` };
     }
     return null;
   })();
+  /** Table C's own `note` policy decides how hard to ask — not this screen's opinion of it. */
+  const noteRecommended =
+    v2Config.naReasons.find((r) => r.id === closeReasonId)?.note === "recommended" &&
+    !closeNote.trim();
 
   const newPin = () => {
     setBusy(true);
@@ -87,7 +96,10 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
         ) : zone.closedAt ? (
           <BigButton variant="secondary" onClick={() => { setReopenReason(""); setReopenSheet(true); }}>Reopen</BigButton>
         ) : (
-          <BigButton variant="secondary" onClick={() => { setCloseNote(""); setCloseSheet(true); }}>
+          <BigButton
+            variant="secondary"
+            onClick={() => { setCloseNote(""); setCloseReasonId(null); setCloseSheet(true); }}
+          >
             Close
           </BigButton>
         )}
@@ -101,7 +113,11 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
 
       {zone.closedAt && (
         <div className="rounded-xl border border-slate-600 bg-slate-800/60 p-4 text-sm text-slate-300">
-          Closed{zone.closeNote ? ` — “${zone.closeNote}”` : ""}. Recorded:{" "}
+          Closed
+          {zone.closeReasonId
+            ? ` — ${v2Config.naReasons.find((r) => r.id === zone.closeReasonId)?.label ?? zone.closeReasonId}`
+            : ""}
+          {zone.closeNote ? ` — “${zone.closeNote}”` : ""}. Recorded:{" "}
           {zone.audit?.coreUnresolved.length ?? 0} core unresolved, {zone.audit?.standardUnresolved ?? 0}{" "}
           standard, {zone.audit?.naCount ?? 0} N/A.
         </div>
@@ -325,16 +341,46 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
                   <p className="text-xs text-amber-200/70">From this zone's checklist:</p>
                   <button
                     type="button"
-                    onClick={() => setCloseNote(emptyCandidate)}
+                    onClick={() => {
+                      setCloseNote(emptyCandidate.text);
+                      setCloseReasonId(emptyCandidate.reasonId);
+                    }}
                     className="rounded-lg bg-slate-900 px-3 py-2 text-left text-sm text-slate-200 ring-1 ring-slate-600"
                   >
-                    {emptyCandidate}
+                    {emptyCandidate.text}
                   </button>
                   {/* SHOWN, NEVER PRE-FILLED (§6). Pre-filling would make an existing
                       resolution answer a question nobody asked — the same false continuity
                       a restored item id would create. One tap accepts it; silence does not. */}
-                  <p className="text-xs text-slate-500">Tap to use it, or write your own.</p>
+                  <p className="text-xs text-slate-500">Tap to use it, or answer below.</p>
                 </>
+              )}
+              {/* Table C at ZONE scope (ruling 2026-08-08). The four reasons are the config's,
+                  not this screen's — a hardcoded list here would be the second vocabulary the
+                  config-is-data discipline exists to prevent, and it would drift the moment
+                  Table C gains a row. */}
+              <p className="text-xs text-amber-200/70">What kind of gap is this?</p>
+              <div className="flex flex-wrap gap-2">
+                {v2Config.naReasons.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setCloseReasonId(r.id)}
+                    className={`rounded-lg px-3 py-2 text-sm font-medium ring-1 ${
+                      closeReasonId === r.id
+                        ? "bg-brass-600 text-white ring-brass-500"
+                        : "bg-slate-900 text-slate-200 ring-slate-600"
+                    }`}
+                  >
+                    {r.label}
+                    {r.feedsGapList ? " → visit two" : ""}
+                  </button>
+                ))}
+              </div>
+              {noteRecommended && (
+                <p className="text-xs text-amber-200/70">
+                  A note is recommended with this reason — say what was in the way.
+                </p>
               )}
             </div>
           )}
@@ -347,10 +393,14 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
             rows={3}
             className="rounded-xl bg-slate-900 p-3 text-slate-100 outline-none ring-1 ring-slate-600 focus:ring-brass-500"
           />
+          {/* An empty zone still cannot close silently — but "not silent" now means a Table C
+              reason, not a typed string. That is stricter, not looser: the old gate accepted
+              any keystroke and produced a record nothing downstream could route. Free text
+              stays optional beside it, per the reason's own `note` policy. */}
           <BigButton
-            disabled={noMedia && !closeNote.trim()}
+            disabled={noMedia && !closeReasonId}
             onClick={() => {
-              void closeZoneV2(zoneId, closeNote).then(() => {
+              void closeZoneV2(zoneId, closeNote, closeReasonId ?? undefined).then(() => {
                 setCloseSheet(false);
                 navigate({ name: "walk" });
               });

@@ -1428,3 +1428,175 @@ once on real content.
 
 Per §24: the binder is unblocked by the manifest v3 contract it already has. The next
 blocking work is manifest v4 for the object/concern model, sequenced behind the field test.
+
+---
+
+## 26. Design-session harvest sweep — measured against v1.11 (2026-08-08)
+
+Seven harvested items routed here for verify-or-kill, plus two rulings. Everything below was
+**measured against `src/config/checklists.generated.ts` at configVersion 1.11.0** (409 items,
+18 property flags, 6 zone attributes, 33 choice items), not recalled.
+
+### 26.1 The option-list sweep — the defect is real, and it points the other way
+
+**Killed as stated:** *"an option reaching no flag."* There is no such mechanism. A choice
+item's `options` are **plain strings** (`z.array(z.string().min(1))`, schema line 82) and
+nothing anywhere maps an option value to a property flag. An option cannot reach a flag, so it
+cannot fail to. No intake question is a choice item either: intake is a flat **multi-select of
+the 18 flags**, grouped by Table A's `intakeSource` column (`SetupV2Screen.tsx:23–29`). "Water
+source", "Sewage", "Generator" and "Cooling" are **intake groups or absent**, not option lists —
+there is no cooling intake group at all.
+
+**Confirmed, in the flag direction, and larger than reported.** A flag asked at intake that
+nothing consumes is the same defect the harvest was reaching for, and there are **eight of
+eighteen** — the concierge answers, and the answer changes nothing:
+
+| flag | intake group | item triggers | list gates |
+|---|---|---|---|
+| `municipal_sewer` | Sewage | 0 | 0 |
+| `pool` | Pool/hot tub | 0 | 0 |
+| `generator` | Generator | 0 | 0 |
+| `pre_1990` | Year built | 0 | 0 |
+| `solar` | Solar/battery/EV | 0 | 0 |
+| `ev` | Solar/battery/EV | 0 | 0 |
+| `seasonal_vacancy` | Occupancy (v1.6) | 0 | 0 |
+| `secondary_suite` | Secondary suite (v1.6) | 0 | 0 |
+
+So `seasonal_vacancy` and `secondary_suite` are **not a separate finding** — they are two rows
+of this table. The other ten flags are consumed (`septic` ×2, `gas` ×2, `propane` ×2,
+`municipal_water`, `well`, `oil`, `wood_heat`, `waterfront`).
+
+Some of the eight are defensible as **binder-side** facts that never need to gate a field item —
+`pre_1990` conditions asbestos/knob-and-tube language in the report, not a checklist row. That is
+a real answer, but it has to be *stated*, because from inside the config the two cases are
+identical. **Recommendation: Table A gains a fourth column declaring each flag's consumer** —
+`field` (something triggers on it) or `binder` (it travels in the manifest and is read
+downstream). Then "consumed by nothing" becomes a checkable claim instead of a silence, and the
+validator guard can land against the declaration rather than against a hardcoded allow-list.
+
+**`flat_roof` — corrected.** It is *not* "declared with no intake question." It renders as a
+**live toggle a client can see**, under the sanitized heading `not yet asked at intake`
+(issue #63; the `heading()` sanitizer strips `⚠`, `**` and `— see §9`, and the invariant is
+pinned by `captureDefects.test.ts` §7.3). Nothing triggers on it either, so it is the ninth row
+of the table above with a broken heading on top. The master fix is one Table A cell.
+
+**Also dead, and not in the harvest: two zone attributes.** `has_plumbing` and `exterior_wall`
+are `askAtCreation: false` — so nothing asks them — and nothing triggers on them, so nothing
+reads them. They are declared and inert at both ends. (`has_mechanicals` ×24, `sleeping` ×4,
+`finished` ×1, `has_stairs` ×1 are live.)
+
+### 26.2 The mixed-class option list — confirmed, and the consequence is measurable
+
+**Confirmed.** Six option lists carry an escape that duplicates Table C's `naReasons`:
+
+| item | in-list escape | duplicates |
+|---|---|---|
+| `att.access-honesty` | `no access` | `no-access` (**`feedsGapList: true`**) |
+| `crw.access-honesty` | `no access` | `no-access` (**`feedsGapList: true`**) |
+| `apm.vent` | `n/a — countertop` | `not-applicable` |
+| `pol.heater` | `none` | `none-present` (**`recordsFinding: true`**) |
+| `irr.type` | `none observed` | `none-present` (**`recordsFinding: true`**) |
+| `hum.season` | `no damper` | `none-present` |
+
+**Why it is a defect rather than a style question, measured.** `statusOf`
+(`checklist.ts:111–118`) returns `{kind: "satisfied"}` for *any* recorded resolution that is not
+`na`. So an attic answered `att.access-honesty = no access` is a **satisfied item**: it carries
+no `reasonId`, it is not counted in `naCount`, and nothing marks it. The same inspector at the
+same sealed hatch who instead resolves the item N/A with reason `no-access` produces an `na`
+status carrying `feedsGapList: true`. **Same field fact, opposite downstream record, and the
+concierge picks by which affordance they happened to tap.** That is the strongest form of the
+defect: not a missing value, a *silently divergent* one.
+
+Deliberately **not** on that list, and worth saying so: `sol.storage`'s `none` (the honest
+answer to "battery storage present"), `ch.liner`'s `unlined` (a real and reportable liner
+state), `deh.drainage`'s `bucket — manual`, `fp.type`'s `decorative — non-functional`. An option
+naming a *state of the thing* is not an escape; only an option naming *the question's own
+inapplicability* is.
+
+**Recommendation for the bundle:** drop the six escapes and let Table C carry those cases. The
+option lists get an `unknown` where they lack one; `att.access-honesty` and `crw.access-honesty`
+keep their three degrees of access and lose the fourth pseudo-degree. This retires option values,
+so it needs **Table G rows** (`retiredOptions`) — the schema already enforces that a retired
+value is not still live, and Table G is currently empty, so this would be its first use.
+
+### 26.3 Table H — ruling recorded, and the duplicate rides with it
+
+**Ruling accepted and recorded for the bundle:** `m2`, `m` and `deg` are added **regardless of
+the canvas/anchor decision**, because §5.4's exterior/access measurement set needs them
+independently. v1.11 declares five units and no more:
+
+```
+in · psi · %RH · year · mm          (+ a second `in` row — issue #64)
+```
+
+Items actually use `in ×6, year ×5, psi ×2, %RH ×1, mm ×1`. The duplicate `in`
+(`"inches"` / `"inches (lengths)"`) is issue #64 and **must land in the same pass** as the three
+new rows: the generator has no uniqueness guard on Table H, so a fourth row added beside a
+duplicate would be added to a table that already proves the guard is missing.
+
+### 26.4 The three vocabulary items — specified here, deliberately NOT applied
+
+None of the three exist in v1.11. They are Table A rows, and Table A is authored in the master —
+so per CLAUDE.md's whole-file rule these are **change-requests, not edits**. Applying three
+dictated cells here is exactly the shape that forked v1.2.1.
+
+| proposed flag | label | intakeSource | notes |
+|---|---|---|---|
+| `attached_garage` | Attached garage | Attached garage | see the correction below |
+| `prior_water_entry` | Known prior water entry | History | nothing comparable exists in v1.11 |
+| `year_built_unknown` | Year built unknown | Year built | joins `pre_1990` in an existing group |
+
+**`year_built_unknown` — verified as a real fix, and for a reason already on the record.**
+"Year built" today renders as a **single toggle** (`pre_1990`). Leaving it off means *either*
+"built 1990 or later" *or* "we never found out", and nothing distinguishes them. That is
+precisely `PLAN-STAGE-1` §7a-iii(2): *"`false` means the box was not ticked, which is weaker
+than the inspector said no."* Same class, new place.
+
+**`attached_garage` — one correction, and it changes what the bundle has to contain.**
+The claim was that its absence *"blocks `ses.alarm-coverage` from evaluating a life-safety
+condition."* The premise is right — the app has names for fuel-burning appliances
+(`property.gas/propane/oil`) and for a fireplace (`fireplace` pin type), but **no name for an
+attached garage**: `garage` is a zone *type*, and a zone typed `garage` may be detached. The
+conclusion needs one more step, though:
+
+> **`ses.alarm-coverage` carries no trigger at all** (`trigger: undefined`) — it is a session
+> item that fires on every visit, and the three CO conditions live in its prose. Adding the flag
+> does not connect to it, because there is nothing there to connect to.
+
+So the flag alone would become the **ninth** unconsumed flag in §26.1's table. To actually cash
+the life-safety intent, the bundle needs the flag **and** a consumer — the straightforward one
+being a CO-alarm item gated on `property.attached_garage`, so the coverage question is *asked*
+where the condition holds rather than left inside a sentence a human has to re-read. That is an
+owner content decision, which is why it is written here rather than built.
+
+### 26.5 The zone-close ruling — landed in code this turn
+
+*"An uncaptured zone is a gap — reuse `naReasons` at zone scope so the close carries a reason id
+beside the free text; the candidate mechanism stays."* Built:
+
+- `ZoneClosed` gains `reasonId?`; folds to `zone.closeReasonId`; cleared on reopen.
+- The empty-zone block renders **Table C's four reasons from the config**, never a list written
+  into the screen; `feedsGapList` rows are marked "→ visit two".
+- The candidate button now carries **both halves** — the sentence *and* the reason id. The
+  one-tap path was otherwise the only path producing an unroutable close.
+- The close gate moved from `!closeNote.trim()` to `!closeReasonId`. **Stricter, not looser:**
+  the old gate accepted any keystroke and produced a record nothing downstream could route.
+  Free text stays optional beside it, following each reason's own `note` policy.
+- `manifestV3` emits `zones[].closeReasonId` — the **id only**, never a pre-resolved gap flag.
+  Per §7a-iii the emitter cannot know the receiving config, so the binder resolves the id
+  against the config snapshot travelling in the same manifest. Additive and optional, exactly
+  as `session.visitKind` was; no schema-version bump.
+
+### 26.6 One finding nobody asked for: `recordsFinding` is consumed nowhere
+
+Table C declares `feedsGapList` and `recordsFinding`. In v2, `feedsGapList` reaches the UI as a
+label only (`ChecklistPanel.tsx:243`, and now the zone-close picker); **`recordsFinding` is read
+by nothing at all** outside the schema. The only code that filters on `feedsGapList` is
+`selectors.ts`, and that reads `config.exceptionReasons` — the **v1 route config**, a different
+vocabulary (`not-accessible` / `not-applicable` / `defer-visit-two`).
+
+This is the same shape as `guidance` (schema + renderer, no producer) and as `ZoneAttributesSet`
+before #77 (fold case, no dispatcher): **a declared field with no consumer reads as working.**
+It is not urgent — the manifest carries the reason ids and the binder derives — but "confirmed
+absent" being real inspection data (§22.2) currently has no effect anywhere in the field app,
+and that was an explicit design intent.

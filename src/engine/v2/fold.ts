@@ -59,6 +59,8 @@ export interface ZoneStateV2 {
   attributes: Record<string, boolean>;
   closedAt?: string;
   closeNote?: string;
+  /** A Table C reason id (`naReasons`), when the zone closed with nothing captured. */
+  closeReasonId?: string;
   audit?: ZoneAuditSnapshot;
   canvases: CanvasState[];
   photos: MediaRef[];
@@ -341,6 +343,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
         else {
           z.closedAt = e.at;
           z.closeNote = e.note;
+          z.closeReasonId = e.reasonId;
           z.audit = e.audit;
         }
         break;
@@ -351,6 +354,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
         else {
           z.closedAt = undefined;
           z.closeNote = undefined;
+          z.closeReasonId = undefined;
           z.audit = undefined;
           state.lastActiveZoneId = e.zoneId;
         }

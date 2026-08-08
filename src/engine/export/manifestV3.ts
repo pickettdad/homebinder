@@ -103,6 +103,18 @@ export interface ManifestV3<TConfig = unknown> {
     attributes: Record<string, boolean>;
     closedAt?: string;
     closeNote?: string;
+    /**
+     * Table C reason id for a zone that closed with nothing captured (2026-08-08). Additive
+     * and optional, exactly as `session.visitKind` was — absent on every zone closed before
+     * the ruling, and absent on any zone that actually captured something.
+     *
+     * The gap list is DERIVED HERE-DOWNSTREAM, not emitted: `feedsGapList` and
+     * `recordsFinding` live in the config snapshot travelling with this manifest, so the
+     * binder resolves the id against the config the visit actually ran on. Emitting a
+     * pre-computed gap flag would bake this config's opinion into a record the receiver
+     * re-reads under its own — the same mistake PLAN-STAGE-1 §7a-iii forbids for `unanswered`.
+     */
+    closeReasonId?: string;
     canvases: { canvasId: string; kind: "photo"; retired: boolean; mediaId: string; file: string }[];
     /** The close-out audit snapshot recorded at ZoneClosed, if the zone was closed. */
     audit?: { coreUnresolved: string[]; standardUnresolved: number; naCount: number };
@@ -221,6 +233,7 @@ export function buildManifestV3<TConfig = unknown>(args: {
       attributes: z.attributes,
       closedAt: z.closedAt,
       closeNote: z.closeNote,
+      closeReasonId: z.closeReasonId,
       canvases: z.canvases.map((c) => ({
         canvasId: c.canvasId,
         kind: c.kind,

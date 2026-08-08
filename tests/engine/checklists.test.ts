@@ -828,9 +828,16 @@ describe("zone-type attribute defaults (master v1.6.1 Table B col 4)", () => {
 describe("v1.7 declared structure", () => {
   const cfg = validConfig();
 
-  it("Table H is the closed set, and every declared unit is used by a real item", () => {
+  it("Table H is the closed set: every unit an item uses is declared", () => {
+    // CONTAINMENT, not equality. This asserted the exact five units of v1.7 and fired on
+    // v1.12 adding `m`, `m2` and `deg` — which are deliberately DECLARED AHEAD of the
+    // exterior set that will use them. The invariant is one-directional: an item may not use
+    // an undeclared unit. A declared unit with no user yet is a content state, not a defect,
+    // and a test that forbids it forbids exactly the "declare the vocabulary first" move the
+    // master keeps making on purpose.
     const declared = new Set(cfg.measureUnits.map((u) => u.unit));
-    expect(declared).toEqual(new Set(["in", "psi", "%RH", "year", "mm"]));
+    for (const floor of ["in", "psi", "%RH", "year", "mm"])
+      expect(declared, `${floor} must never be un-declared`).toContain(floor);
     const used = new Set<string>();
     const walk = (o: unknown): void => {
       if (Array.isArray(o)) return o.forEach(walk);
@@ -885,8 +892,10 @@ describe("v1.7 declared structure", () => {
     expect(validateChecklistConfig(bad).ok).toBe(false);
   });
 
-  it("Table G is empty but parsed, and a retired value may not still be live", () => {
-    expect(cfg.retiredOptions).toEqual([]);
+  it("a retired value may not still be live", () => {
+    // Was "Table G is empty but parsed" and asserted `toEqual([])`. v1.12 made its first four
+    // retirements and the test fired on the feature working. The rule it was really guarding
+    // is below and holds at zero rows and at forty.
     const bad = JSON.parse(JSON.stringify(checklistsBaseline)) as typeof checklistsBaseline;
     // Claim a still-live option is retired — retirement means gone, not deprecated-in-place.
     (bad as { retiredOptions: unknown[] }).retiredOptions = [
@@ -1145,7 +1154,16 @@ describe("Table A consumers — who reads this flag", () => {
   it("rejects PARTIAL adoption — one flag declaring makes the column mandatory", () => {
     // The worst available state: an undeclared flag becomes ambiguous between "not filled in"
     // and "declared as having no consumer", which is the silence the column exists to remove.
-    const r = validateChecklistConfig(withConsumers({ pool: ["binder"] }));
+    //
+    // Built by REMOVING a declaration, not adding one. The first version added `pool: binder`
+    // to a baseline where nothing declared — correct at v1.11, vacuous at v1.12 where every
+    // flag declares, so it asserted a valid config was invalid. The fixture has to construct
+    // the partial state from whatever the master currently is.
+    const partial = structuredClone(checklistsBaseline) as unknown as {
+      propertyFlags: { id: string; consumers?: unknown }[];
+    };
+    delete partial.propertyFlags[0]!.consumers;
+    const r = validateChecklistConfig(partial as unknown as Record<string, unknown>);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.join("\n")).toMatch(/all-or-nothing/);
   });
@@ -1182,16 +1200,38 @@ describe("Table A consumers — who reads this flag", () => {
 });
 
 describe("generator — Table A's 4th column parses, and parses strictly", () => {
-  /** The real master with Table A swapped for a 4-column version. Everything else intact, so
-   *  a failure here is about the column and not about some unrelated section drifting. */
-  const withColumn = (rows: string): string =>
-    masterText.replace(
-      /## A\. Property flags \(`property\.\*`\)\n\n\| id \| label \| intake source \|\n\|---\|---\|---\|\n(\| .*\n)+/,
-      `## A. Property flags (\`property.*\`)\n\n| id | label | intake source | consumers |\n|---|---|---|---|\n${rows}`,
+  /**
+   * Table A, swapped for an authored fixture. Everything else in the master stays intact, so
+   * a failure here is about the column and not about some unrelated section drifting.
+   *
+   * Rebuilt at v1.12 and the reason is the lesson: the first version pinned the THREE-column
+   * header in its regex, so the day the master adopted the column the replace silently matched
+   * nothing and every assertion ran against the untouched master. Three of the four still
+   * passed. A fixture that no-ops is worse than one that fails — it reports on a file it never
+   * edited. This version locates the table by its heading and asserts the swap took.
+   */
+  const swapTableA = (headerRow: string, sepRow: string, rows: string): string => {
+    const out = masterText.replace(
+      /(## A\. Property flags \(`property\.\*`\)\n[\s\S]*?\n)\| id \|[^\n]*\n\|[-|]+\|\n(?:\| .*\n)+/,
+      `$1${headerRow}\n${sepRow}\n${rows}`,
     );
+    if (out === masterText) throw new Error("fixture did not replace Table A — the anchor moved");
+    return out;
+  };
+  const withColumn = (rows: string) =>
+    swapTableA("| id | label | intake source | consumers |", "|---|---|---|---|", rows);
 
-  it("the 3-column master still parses — adopting the column is not forced", () => {
-    expect(parseMaster(masterText).propertyFlags!.every((f) => f.consumers === undefined)).toBe(true);
+  it("a 3-column master still parses — adopting the column is not forced", () => {
+    // The compatibility guarantee, now that the real master is 4-column: an older master
+    // regenerates with no consumers rather than failing.
+    const three = swapTableA(
+      "| id | label | intake source |",
+      "|---|---|---|",
+      "| `well` | Private well | Water source |\n| `gas` | Natural gas service | Fuel on property |\n",
+    );
+    const flags = parseMaster(three).propertyFlags!;
+    expect(flags.length).toBe(2);
+    expect(flags.every((f) => f.consumers === undefined)).toBe(true);
   });
 
   it("parses `field`, `binder` and both, in any of the authored separators", () => {
@@ -1224,8 +1264,164 @@ describe("generator — Table A's 4th column parses, and parses strictly", () =>
   it("rejects a 5th column outright", () => {
     expect(() =>
       parseMaster(
-        masterText.replace("| id | label | intake source |\n|---|---|---|", "| id | label | intake source | consumers | x |\n|---|---|---|---|---|"),
+        swapTableA(
+          "| id | label | intake source | consumers | x |",
+          "|---|---|---|---|---|",
+          "| `well` | Private well | Water source | field | y |\n",
+        ),
       ),
     ).toThrow(/unexpected property-flags header/);
+  });
+
+  it("an em-dash intake source means NOT ASKED, and parses to absent (v1.12)", () => {
+    // Absent, not empty string: the intake screen renders one group per source, so a flag
+    // that is not asked has to be missing from the question list rather than described in it.
+    const flags = parseMaster(
+      withColumn(
+        "| `well` | Private well | Water source | field |\n| `flat_roof` | Flat roof section | — | binder |\n",
+      ),
+    ).propertyFlags!;
+    expect(flags.find((f) => f.id === "well")!.intakeSource).toBe("Water source");
+    expect(flags.find((f) => f.id === "flat_roof")!.intakeSource).toBeUndefined();
+  });
+});
+
+/** Every item in the config, by id — local to the v1.12 block (the choice-dialect one is
+ *  scoped inside its own describe). */
+const itemsById = (): Map<string, { id: string; satisfy: string; options?: string[] }> => {
+  const out = new Map<string, { id: string; satisfy: string; options?: string[] }>();
+  const walk = (o: unknown): void => {
+    if (Array.isArray(o)) return o.forEach(walk);
+    if (o && typeof o === "object") {
+      const rec = o as Record<string, unknown>;
+      if (typeof rec.id === "string" && typeof rec.satisfy === "string")
+        out.set(rec.id, rec as unknown as { id: string; satisfy: string; options?: string[] });
+      Object.values(rec).forEach(walk);
+    }
+  };
+  walk(checklistsBaseline);
+  return out;
+};
+
+/**
+ * Master v1.12 — Table J, Table H's uniqueness guard, and Table G actually applied.
+ *
+ * Every rule here has a negative control. Table G in particular is why: its "a retired value
+ * must not still be live" check shipped from v1.7 and could never fire, because the generator
+ * trimmed the value cell instead of stripping backticks — so it compared `none` against none
+ * for four versions while the table was empty. Rule 11b, discovered the moment the table got
+ * its first row.
+ */
+describe("Table J — an option whose consequence is an N/A reason's (v1.12)", () => {
+  const clone = () => structuredClone(checklistsBaseline) as unknown as {
+    naEquivalents?: { itemId: string; value: string; reasonId: string }[];
+  };
+
+  it("the two access-honesty items are mapped, and `no access` is still a LIVE option", () => {
+    // The invariant that separates Table J from Table G: these were NOT retired. §2 adjudicated
+    // in July that `no access` IS the answer for an item recording how far the inspector went.
+    // A mapping for a value the generator no longer ships would declare a consequence for
+    // nothing, so both halves have to hold at once.
+    const cfg = validConfig();
+    const mapped = new Map(cfg.naEquivalents.map((e) => [e.itemId, e]));
+    for (const id of ["att.access-honesty", "crw.access-honesty"]) {
+      const e = mapped.get(id);
+      expect(e, `${id} must map its no-access extent`).toBeDefined();
+      expect(e!.reasonId).toBe("no-access");
+      const item = itemsById().get(id)!;
+      expect(item.options, `${id} must still offer ${e!.value}`).toContain(e!.value);
+    }
+  });
+
+  it("the reason it maps to actually feeds the gap list", () => {
+    // Otherwise the table is decorative: the whole consequence being declared is "lands on
+    // the visit-two list", which is `feedsGapList` on the Table C row.
+    const cfg = validConfig();
+    for (const e of cfg.naEquivalents) {
+      const reason = cfg.naReasons.find((r) => r.id === e.reasonId)!;
+      expect(reason, `${e.reasonId} must be a Table C reason`).toBeDefined();
+      expect(reason.feedsGapList, `${e.reasonId} declares a consequence that routes nowhere`).toBe(true);
+    }
+  });
+
+  it("rejects a mapping whose value is not a live option", () => {
+    const bad = clone();
+    bad.naEquivalents = [{ itemId: "att.access-honesty", value: "no such option", reasonId: "no-access" }];
+    const r = validateChecklistConfig(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/is not a live option/);
+  });
+
+  it("rejects a mapping on an item that is not a choice, and an unknown reason", () => {
+    const notChoice = clone();
+    notChoice.naEquivalents = [{ itemId: "wh.tpr", value: "x", reasonId: "no-access" }];
+    expect(validateChecklistConfig(notChoice).ok).toBe(false);
+
+    const badReason = clone();
+    badReason.naEquivalents = [{ itemId: "att.access-honesty", value: "no access", reasonId: "invented" }];
+    const r = validateChecklistConfig(badReason);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/unknown N\/A reason/);
+  });
+});
+
+describe("Table H uniqueness — field issue #64", () => {
+  it("declares each unit exactly once", () => {
+    const units = validConfig().measureUnits.map((u) => u.unit);
+    expect(new Set(units).size, `duplicate unit in [${units.join(", ")}]`).toBe(units.length);
+  });
+
+  it("rejects a duplicate unit — the guard that did not exist from v1.7 to v1.11", () => {
+    // `in` shipped twice with two different glosses and nothing caught it: the drift gate, the
+    // schema and the round-trip test all compare the config to itself, so a table that
+    // disagrees with itself is internally consistent.
+    const bad = structuredClone(checklistsBaseline) as unknown as { measureUnits: { unit: string; means: string }[] };
+    bad.measureUnits = [...bad.measureUnits, { unit: "in", means: "inches (lengths)" }];
+    const r = validateChecklistConfig(bad as unknown as Record<string, unknown>);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/unit 'in' is declared more than once/);
+  });
+});
+
+describe("Table G — retired values are APPLIED, not merely recorded (v1.12)", () => {
+  it("no retired value survives in its item's option set", () => {
+    // The declared-versus-applied gap, stated as the invariant rather than as the four rows:
+    // this holds at four retirements and at forty.
+    const cfg = validConfig();
+    expect(cfg.retiredOptions.length, "expected at least one retirement to test").toBeGreaterThan(0);
+    for (const r of cfg.retiredOptions) {
+      const item = itemsById().get(r.itemId);
+      expect(item, `${r.itemId} must exist`).toBeDefined();
+      expect(item!.options ?? [], `${r.itemId} still ships retired value '${r.value}'`).not.toContain(r.value);
+    }
+  });
+
+  it("a retired value carries no backticks — the check must be able to fail", () => {
+    // Rule 11b. The generator trimmed this cell instead of stripping ticks, so the schema
+    // compared `none` (with backticks) against the option list and could never match. Four
+    // versions of a guard that was structurally incapable of firing, invisible because the
+    // table had no rows until now.
+    for (const r of validConfig().retiredOptions)
+      expect(r.value, `${r.itemId}'s retired value must be the literal option text`).not.toMatch(/`/);
+  });
+});
+
+describe("Table A — a flag that is not asked is absent from the question list (v1.12)", () => {
+  it("flat_roof carries no intake source at all", () => {
+    // Issue #63's real fix. It was declared for Master Spec §15 with no intake question, and
+    // this screen renders one group per source — so a source cell DESCRIBING the absence
+    // becomes a client-visible heading with a live toggle under it. Absent, not described.
+    const f = validConfig().propertyFlags.find((x) => x.id === "flat_roof")!;
+    expect(f.intakeSource).toBeUndefined();
+  });
+
+  it("the intake screen skips a flag with no source", () => {
+    const src = readFileSync(join(root, "src", "screens", "v2", "SetupV2Screen.tsx"), "utf8");
+    expect(src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")).toMatch(/if \(!f\.intakeSource\) continue;/);
+  });
+
+  it("every other flag still has one — the fix must not blank the question list", () => {
+    const without = validConfig().propertyFlags.filter((f) => !f.intakeSource).map((f) => f.id);
+    expect(without).toEqual(["flat_roof"]);
   });
 });

@@ -9,92 +9,191 @@ import type { ChecklistConfigInput } from "../engine/schema/checklistConfig";
 
 export const checklistsBaseline: ChecklistConfigInput = {
   "configId": "checklists-baseline",
-  "configVersion": "1.11.0",
+  "configVersion": "1.12.0",
   "propertyFlags": [
     {
       "id": "municipal_water",
       "label": "Municipal water",
-      "intakeSource": "Water source"
+      "intakeSource": "Water source",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "well",
       "label": "Private well",
-      "intakeSource": "Water source"
+      "intakeSource": "Water source",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "municipal_sewer",
       "label": "Municipal sewer",
-      "intakeSource": "Sewage"
+      "intakeSource": "Sewage",
+      "consumers": [
+        "binder"
+      ]
     },
     {
       "id": "septic",
       "label": "Septic system",
-      "intakeSource": "Sewage"
+      "intakeSource": "Sewage",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "gas",
       "label": "Natural gas service",
-      "intakeSource": "Fuel on property"
+      "intakeSource": "Fuel on property",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "propane",
       "label": "Propane on property",
-      "intakeSource": "Fuel on property"
+      "intakeSource": "Fuel on property",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "oil",
       "label": "Oil on property",
-      "intakeSource": "Fuel on property"
+      "intakeSource": "Fuel on property",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "wood_heat",
       "label": "Wood-burning appliance",
-      "intakeSource": "Wood-burning appliance"
+      "intakeSource": "Wood-burning appliance",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "pool",
       "label": "Pool or hot tub",
-      "intakeSource": "Pool/hot tub"
+      "intakeSource": "Pool/hot tub",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "generator",
       "label": "Generator",
-      "intakeSource": "Generator"
+      "intakeSource": "Generator",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "waterfront",
       "label": "Waterfront/shoreline",
-      "intakeSource": "Waterfront"
+      "intakeSource": "Waterfront",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "pre_1990",
       "label": "Built before ~1990",
-      "intakeSource": "Year built"
+      "intakeSource": "Year built",
+      "consumers": [
+        "binder"
+      ]
     },
     {
       "id": "solar",
       "label": "Solar/battery",
-      "intakeSource": "Solar/battery/EV"
+      "intakeSource": "Solar/battery/EV",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "ev",
       "label": "EV charging",
-      "intakeSource": "Solar/battery/EV"
+      "intakeSource": "Solar/battery/EV",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "seasonal_vacancy",
       "label": "Seasonal or periodically vacant",
-      "intakeSource": "Occupancy (v1.6)"
+      "intakeSource": "Occupancy (v1.6)",
+      "consumers": [
+        "binder"
+      ]
     },
     {
       "id": "secondary_suite",
       "label": "Secondary suite / in-law / rental unit",
-      "intakeSource": "Secondary suite (v1.6)"
+      "intakeSource": "Secondary suite (v1.6)",
+      "consumers": [
+        "field",
+        "binder"
+      ]
     },
     {
       "id": "flat_roof",
       "label": "Flat or low-slope roof section",
-      "intakeSource": "⚠ **not yet asked at intake** — see §9"
+      "consumers": [
+        "binder"
+      ]
+    },
+    {
+      "id": "attached_garage",
+      "label": "Attached garage",
+      "intakeSource": "Garage (attached/detached/carport/none)",
+      "consumers": [
+        "binder"
+      ]
+    },
+    {
+      "id": "prior_water_entry",
+      "label": "Prior water entry in the building",
+      "intakeSource": "Water history",
+      "consumers": [
+        "binder"
+      ]
+    },
+    {
+      "id": "year_built_unknown",
+      "label": "Year built not established",
+      "intakeSource": "Year built",
+      "consumers": [
+        "binder"
+      ]
+    }
+  ],
+  "naEquivalents": [
+    {
+      "itemId": "att.access-honesty",
+      "value": "no access",
+      "reasonId": "no-access"
+    },
+    {
+      "itemId": "crw.access-honesty",
+      "value": "no access",
+      "reasonId": "no-access"
     }
   ],
   "zoneAttributes": [
@@ -4741,7 +4840,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "options": [
             "ducted to exterior",
             "recirculating",
-            "n/a — countertop",
             "unknown"
           ],
           "tier": "standard",
@@ -4964,7 +5062,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
           "options": [
             "winter/open",
             "summer/closed",
-            "no damper",
             "unknown"
           ],
           "tier": "standard",
@@ -5305,7 +5402,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "propane",
             "electric",
             "heat pump",
-            "none",
             "unknown"
           ],
           "tier": "standard",
@@ -5365,7 +5461,6 @@ export const checklistsBaseline: ChecklistConfigInput = {
             "double check",
             "pressure vacuum breaker",
             "atmospheric vacuum breaker",
-            "none observed",
             "unknown"
           ],
           "tier": "standard",
@@ -5696,7 +5791,32 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "type": "chimney"
     }
   ],
-  "retiredOptions": [],
+  "retiredOptions": [
+    {
+      "itemId": "apm.vent",
+      "value": "n/a — countertop",
+      "version": "v1.12",
+      "reason": "**No replacement option: resolve the item N/A with reason `not-applicable`.** An inapplicability inside a value list. The N/A path already carries it, with a reason id the manifest can route"
+    },
+    {
+      "itemId": "pol.heater",
+      "value": "none",
+      "version": "v1.12",
+      "reason": "**No replacement option: resolve the item N/A with reason `none-present`.** An absence inside a value list. `none-present` records it as a finding; the option recorded it as satisfied"
+    },
+    {
+      "itemId": "irr.type",
+      "value": "none observed",
+      "version": "v1.12",
+      "reason": "**No replacement option: resolve the item N/A with reason `none-present`.** As above — and *observed* made it read as a reading rather than an absence"
+    },
+    {
+      "itemId": "hum.season",
+      "value": "no damper",
+      "version": "v1.12",
+      "reason": "**No replacement option: resolve the item N/A with reason `none-present`.** As above"
+    }
+  ],
   "measureUnits": [
     {
       "unit": "in",
@@ -5719,8 +5839,16 @@ export const checklistsBaseline: ChecklistConfigInput = {
       "means": "millimetres"
     },
     {
-      "unit": "in",
-      "means": "inches (lengths)"
+      "unit": "m",
+      "means": "metres — linear runs"
+    },
+    {
+      "unit": "m2",
+      "means": "square metres — areas"
+    },
+    {
+      "unit": "deg",
+      "means": "degrees — slope and pitch"
     }
   ],
   "provenance": [

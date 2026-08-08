@@ -84,10 +84,13 @@ describe("§7.1 — a measure's unit is declared, not guessed (F-21)", () => {
 
 describe("§7.3 — no authoring marks reach the screen (F-23)", () => {
   it("no rendered intake heading carries markdown emphasis or a spec cross-reference", () => {
-    // The invariant, not the instance: `flat_roof` is today's offender, but this holds
-    // for any flag the master gains. The walk saw the literal
-    // "⚠ **not yet asked at intake** — see §9" as a section heading.
+    // The invariant, not the instance. `flat_roof` WAS the offender — the walk saw the literal
+    // "⚠ **not yet asked at intake** — see §9" as a section heading — and master v1.12 fixed
+    // it at the source: a flag that is not asked now carries no intake source at all, so it
+    // renders no heading to sanitise. The sanitiser stays, because the next authored cell can
+    // still carry marks and this test is about the class rather than the instance.
     for (const f of cfg.propertyFlags) {
+      if (!f.intakeSource) continue; // not asked — no heading is rendered for it
       const h = heading(f.intakeSource);
       expect(h, f.id).not.toMatch(/[*`_]/);
       expect(h, f.id).not.toMatch(/§/);
@@ -99,7 +102,9 @@ describe("§7.3 — no authoring marks reach the screen (F-23)", () => {
     // Control: the fix must not quietly blank or mangle the sixteen healthy cells.
     expect(heading("Water source")).toBe("Water source");
     expect(heading("Solar/battery/EV")).toBe("Solar/battery/EV");
-    // And the offender specifically, so a regression is legible in the failure output.
+    // And the historical offender, so a regression is legible in the failure output. No flag
+    // carries this string any more (v1.12 made `flat_roof` un-asked rather than describing it
+    // as un-asked), but the sanitiser must still handle it if one ever does again.
     expect(heading("⚠ **not yet asked at intake** — see §9")).toBe("not yet asked at intake");
   });
 });

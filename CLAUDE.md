@@ -111,6 +111,20 @@ pluggable frame source — native viewfinder when `isNativePlatform()` (`src/app
 post-capture path are shared. This is written here rather than left in a chat because an
 unstated decision gets rediscovered as a question.
 
+**A copy stays only if it has a named consumer (design ruling 2026-08-08).** The repo keeps **no
+copy of a document that is replaced wholesale** — roadmaps, registers, State of Understanding
+cuts. `docs/reference/` held one such copy, the 2026-08-07 roadmap, and was removed the next day
+because a stale copy of a wholesale-replaced file is indistinguishable from a current one.
+
+**But "design-session authored" is not the test — "replaced wholesale" is.** A carried document
+with a named consumer stays. `docs/HouseSteady_Field-App_Capture-Mode_BuildSpec_2026-08-03.md`
+and `docs/HouseSteady_Field-Track_Orientation_2026-08-03.md` **stay**: they are one-time specs
+the code was built against, not status documents, and **nineteen test names cite them by section
+number** — that citation is the named consumer. Deleting them orphans the references.
+
+*The distinction is the whole rule.* Sweeping by author would have taken the specs the tests
+point at; sweeping by "does it rot" takes exactly the files that rot.
+
 **Docs the design session needs — flag them and hand over the file (owner rule 2026-08-03).**
 Committing a doc to the repo does **not** deliver it. The design session does not read this
 repo; the owner carries files between tracks by hand. So any turn that **creates or edits a

@@ -209,11 +209,31 @@ export type MeasureUnit = z.output<typeof measureUnitSchema>;
  *  Both are always photo + evidence. */
 export const RESERVED_ITEM_CLASSES = [".unit", ".wide"] as const;
 
+/**
+ * Table A col 4 (2026-08-08) — who actually reads this flag.
+ *
+ * `field` = the app does something with it *during the visit*: an item trigger, a list gate,
+ * or the Discovery capture prompt. `binder` = it travels in the manifest and is read
+ * downstream — report language, schedule derivation, session-plan input.
+ *
+ * An ARRAY, not an enum, because several flags are genuinely both: `pool` prompts the walk to
+ * photograph the pool AND tells the binder to carry pool equipment into the session plan.
+ *
+ * The column exists because eight of eighteen flags were asked at intake and referenced by
+ * nothing, and from inside the config a deliberate binder-only fact (`pre_1990` conditions
+ * report language, not a checklist row) is INDISTINGUISHABLE from an oversight. Declaring the
+ * consumer turns a silence into a checkable claim.
+ */
+export const FLAG_CONSUMERS = ["field", "binder"] as const;
+export type FlagConsumer = (typeof FLAG_CONSUMERS)[number];
+
 const propertyFlagSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_]*$/, "property flag ids are lowercase snake"),
   label: z.string().min(1),
   /** Intake-question grouping, e.g. "Water source", "Fuel on property". */
   intakeSource: z.string().min(1),
+  /** Table A col 4. Optional so a pre-column master still validates; see the rules below. */
+  consumers: z.array(z.enum(FLAG_CONSUMERS)).min(1).optional(),
 });
 export type PropertyFlag = z.output<typeof propertyFlagSchema>;
 
@@ -496,6 +516,54 @@ export const checklistConfigSchema = checklistConfigObject.superRefine((cfg, ctx
     if (c.stub && c.items.length) issue(`stub component ${c.types.join("/")} carries items`);
     if (!c.stub && !c.items.length) issue(`component ${c.types.join("/")} has no items and is not a stub`);
     for (const item of c.items) checkItem(item, `component ${c.types.join("/")}`);
+  }
+
+  /**
+   * Table A col 4 rules. Both are deliberately shaped so they say something FALSE-ABLE rather
+   * than passing vacuously on a config that has not adopted the column yet.
+   *
+   * (1) ALL-OR-NOTHING. Once any flag declares consumers the column exists, so every flag must
+   *     declare one. Partial adoption is the worst state available: an undeclared flag is then
+   *     ambiguous between "nobody has filled this in" and "declared as having no consumer",
+   *     which is the exact silence the column was added to remove.
+   *
+   * (2) TRIGGERED IMPLIES `field`. If an item trigger or a list gate names the flag, the
+   *     declaration must say `field`. This is the drift catcher: someone adds a trigger on a
+   *     binder-only flag a year from now and the declaration goes stale without it.
+   *
+   * The converse is NOT a rule and must not become one: `field` does not require a trigger,
+   * because the Discovery capture prompt is a field consumer that needs no trigger at all
+   * (`pool`, `generator`, `ev` are exactly that case).
+   */
+  const declaring = cfg.propertyFlags.filter((f) => f.consumers?.length);
+  if (declaring.length) {
+    for (const f of cfg.propertyFlags)
+      if (!f.consumers?.length)
+        issue(
+          `Table A: ${f.id} declares no consumer, but other flags do — the column is all-or-nothing`,
+        );
+
+    const flagsReferenced = new Set<string>();
+    const noteRef = (ref: string | undefined) => {
+      if (ref?.startsWith("property.")) flagsReferenced.add(ref.slice("property.".length));
+    };
+    const noteItems = (items: ChecklistItem[], gate?: string) => {
+      noteRef(gate);
+      for (const i of items)
+        for (const r of [...(i.trigger?.allOf ?? []), ...(i.trigger?.anyOf ?? []), ...(i.trigger?.not ?? [])])
+          noteRef(r);
+    };
+    for (const b of cfg.baseLists) noteItems(b.items, b.gate);
+    for (const z of cfg.zoneLists) noteItems(z.items, z.gate);
+    for (const c of cfg.componentLists) noteItems(c.items, c.gate);
+    noteItems(cfg.sessionItems);
+
+    for (const f of cfg.propertyFlags)
+      if (flagsReferenced.has(f.id) && f.consumers?.length && !f.consumers.includes("field"))
+        issue(
+          `Table A: ${f.id} is named by an item trigger or list gate but declares consumers ` +
+            `[${f.consumers.join(", ")}] — a triggered flag is read in the field`,
+        );
   }
 
   const layerIds = new Set<string>();

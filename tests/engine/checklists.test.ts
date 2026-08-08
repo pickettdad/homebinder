@@ -1100,3 +1100,132 @@ describe("provenance boundary (master v1.11 §2)", () => {
     expect(validateChecklistConfig(cfg as unknown as Record<string, unknown>).ok).toBe(true);
   });
 });
+
+/**
+ * Table A col 4 — `consumers` (2026-08-08).
+ *
+ * The column does not exist in the master yet, so every one of these builds a fixture. That is
+ * deliberate: a rule that only runs against a config which has not adopted it yet passes
+ * vacuously, which is how a validator probe can report green while checking nothing. Every
+ * rule below has a POSITIVE case and a NEGATIVE control.
+ */
+describe("Table A consumers — who reads this flag", () => {
+  const withConsumers = (
+    overrides: Record<string, ("field" | "binder")[] | undefined>,
+  ): Record<string, unknown> => {
+    const cfg = structuredClone(checklistsBaseline) as unknown as {
+      propertyFlags: { id: string; consumers?: ("field" | "binder")[] }[];
+    };
+    for (const f of cfg.propertyFlags) {
+      const v = Object.prototype.hasOwnProperty.call(overrides, f.id) ? overrides[f.id] : undefined;
+      if (v) f.consumers = v;
+    }
+    return cfg as unknown as Record<string, unknown>;
+  };
+
+  /** Every flag declared, and every flag something triggers on declared `field`. */
+  const allDeclared = (): Record<string, unknown> => {
+    const cfg = structuredClone(checklistsBaseline) as unknown as {
+      propertyFlags: { id: string; consumers?: ("field" | "binder")[] }[];
+    };
+    const triggered = new Set(["municipal_water", "well", "septic", "gas", "propane", "oil", "wood_heat", "waterfront"]);
+    for (const f of cfg.propertyFlags) f.consumers = triggered.has(f.id) ? ["field", "binder"] : ["binder"];
+    return cfg as unknown as Record<string, unknown>;
+  };
+
+  it("the shipping config still validates with the column absent", () => {
+    // The column is optional: adopting it must not be forced by shipping the schema for it.
+    expect(validateChecklistConfig(checklistsBaseline).ok).toBe(true);
+  });
+
+  it("accepts a fully-declared table", () => {
+    expect(validateChecklistConfig(allDeclared()).ok).toBe(true);
+  });
+
+  it("rejects PARTIAL adoption — one flag declaring makes the column mandatory", () => {
+    // The worst available state: an undeclared flag becomes ambiguous between "not filled in"
+    // and "declared as having no consumer", which is the silence the column exists to remove.
+    const r = validateChecklistConfig(withConsumers({ pool: ["binder"] }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/all-or-nothing/);
+  });
+
+  it("rejects a TRIGGERED flag that does not declare `field`", () => {
+    // The drift catcher: `septic` is named by sit.septic and sit.septic-protection, so a
+    // binder-only declaration on it is stale the moment it is written.
+    const cfg = allDeclared() as unknown as { propertyFlags: { id: string; consumers: string[] }[] };
+    cfg.propertyFlags.find((f) => f.id === "septic")!.consumers = ["binder"];
+    const r = validateChecklistConfig(cfg as unknown as Record<string, unknown>);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join("\n")).toMatch(/septic .* named by an item trigger or list gate/s);
+  });
+
+  it("a `field` flag needs NO trigger — the capture prompt is a field consumer", () => {
+    // The converse must never become a rule. `pool` and `generator` are read at Discovery by
+    // the intake capture prompt, which triggers nothing. Asserting this keeps a future
+    // tightening honest: it would have to break this test on purpose.
+    const cfg = allDeclared() as unknown as { propertyFlags: { id: string; consumers: string[] }[] };
+    for (const id of ["pool", "generator", "ev"])
+      cfg.propertyFlags.find((f) => f.id === id)!.consumers = ["field", "binder"];
+    expect(validateChecklistConfig(cfg as unknown as Record<string, unknown>).ok).toBe(true);
+  });
+
+  it("rejects an empty consumers array and an unknown consumer", () => {
+    const empty = withConsumers({}) as unknown as { propertyFlags: { consumers?: unknown }[] };
+    empty.propertyFlags[0]!.consumers = [];
+    expect(validateChecklistConfig(empty as unknown as Record<string, unknown>).ok).toBe(false);
+
+    const unknown = withConsumers({}) as unknown as { propertyFlags: { consumers?: unknown }[] };
+    unknown.propertyFlags[0]!.consumers = ["report"];
+    expect(validateChecklistConfig(unknown as unknown as Record<string, unknown>).ok).toBe(false);
+  });
+});
+
+describe("generator — Table A's 4th column parses, and parses strictly", () => {
+  /** The real master with Table A swapped for a 4-column version. Everything else intact, so
+   *  a failure here is about the column and not about some unrelated section drifting. */
+  const withColumn = (rows: string): string =>
+    masterText.replace(
+      /## A\. Property flags \(`property\.\*`\)\n\n\| id \| label \| intake source \|\n\|---\|---\|---\|\n(\| .*\n)+/,
+      `## A. Property flags (\`property.*\`)\n\n| id | label | intake source | consumers |\n|---|---|---|---|\n${rows}`,
+    );
+
+  it("the 3-column master still parses — adopting the column is not forced", () => {
+    expect(parseMaster(masterText).propertyFlags!.every((f) => f.consumers === undefined)).toBe(true);
+  });
+
+  it("parses `field`, `binder` and both, in any of the authored separators", () => {
+    const src = withColumn(
+      "| `well` | Private well | Water source | field |\n" +
+        "| `pre_1990` | Built before ~1990 | Year built | binder |\n" +
+        "| `pool` | Pool or hot tub | Pool/hot tub | field, binder |\n" +
+        "| `generator` | Generator | Generator | field + binder |\n" +
+        "| `ev` | EV charging | Solar/battery/EV | — |\n",
+    );
+    const flags = parseMaster(src).propertyFlags!;
+    const by = (id: string) => flags.find((f) => f.id === id)!;
+    expect(by("well").consumers).toEqual(["field"]);
+    expect(by("pre_1990").consumers).toEqual(["binder"]);
+    expect(by("pool").consumers).toEqual(["field", "binder"]);
+    expect(by("generator").consumers).toEqual(["field", "binder"]);
+    // An em-dash cell means "not declared", the same convention Table B's col 4 already uses.
+    expect(by("ev").consumers).toBeUndefined();
+  });
+
+  it("FAILS the build on an unrecognised consumer rather than dropping it", () => {
+    // A silently dropped consumer reads downstream as "declared to have none" — the config
+    // would then assert something stronger than the master says, which is the worst outcome
+    // available to a generator.
+    expect(() =>
+      parseMaster(withColumn("| `pool` | Pool or hot tub | Pool/hot tub | field, report |\n")),
+    ).toThrow(/unknown flag consumer 'report'/);
+  });
+
+  it("rejects a 5th column outright", () => {
+    expect(() =>
+      parseMaster(
+        masterText.replace("| id | label | intake source |\n|---|---|---|", "| id | label | intake source | consumers | x |\n|---|---|---|---|---|"),
+      ),
+    ).toThrow(/unexpected property-flags header/);
+  });
+});

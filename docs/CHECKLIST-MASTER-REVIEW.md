@@ -1813,8 +1813,19 @@ genuinely useful split: *answerable from a photograph* against *requires a perso
 with instruments*. Under A the consumer is the **binder**, and the field's job is only to emit
 the tag, which it already does.
 
-**But it is a ruling, not a deduction, and authoring 409 tags under the wrong one is expensive
-to undo.** Stated here so it is decided before the pass rather than discovered during it.
+> ### RULED — A, desk-facing (design session, 2026-08-08)
+>
+> **A `capture` tag means *answerable from a photograph*, against *needs a person in the house
+> with a meter*.** B is dead: field-facing contradicts a test-enforced spec.
+>
+> **And the constraint is ruled with it: F-4 must not become a second mode mechanism.**
+> `scope` selects *which items exist for a visit*; **visit kind selects which screen the visit
+> runs on**. Two questions, two mechanisms. Capture Mode spec §1's *"until F-4 lands, mode
+> follows the visit kind the operator picks at session start"* is **not** a promise that F-4
+> changes mode derivation, and must not be read as one.
+>
+> Recorded here rather than left in a chat, because §28.2 posed this as an open question and a
+> ruling that lives only in the message that made it is rediscovered as a question.
 
 ### 28.3 What the field will and will not need to change
 

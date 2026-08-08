@@ -144,6 +144,47 @@ describe("foldV2 core", () => {
     expect(reopened.zones[0]!.audit).toBeUndefined();
   });
 
+  it("a zone close carries a Table C reason id BESIDE the note, and reopen clears it", () => {
+    // Ruling 2026-08-08: an uncaptured zone is a gap. The note says what happened; only the
+    // reason id is routable, so both have to survive the fold independently — a reason that
+    // vanished on reopen would leave a reopened-then-reclosed zone quietly ungapped.
+    const audit = { coreUnresolved: [], standardUnresolved: 0, naCount: 0 };
+    const closed = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "attic", label: "Attic", attributes: {} },
+        { type: "ZoneClosed", zoneId: "z1", note: "hatch sealed by paint", reasonId: "no-access", audit },
+      ]),
+    );
+    expect(closed.zones[0]!.closeReasonId).toBe("no-access");
+    expect(closed.zones[0]!.closeNote).toBe("hatch sealed by paint");
+
+    const reopened = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "attic", label: "Attic", attributes: {} },
+        { type: "ZoneClosed", zoneId: "z1", note: "hatch sealed by paint", reasonId: "no-access", audit },
+        { type: "ZoneReopened", zoneId: "z1" },
+      ]),
+    );
+    expect(reopened.zones[0]!.closeReasonId).toBeUndefined();
+  });
+
+  it("a zone that captured something closes with no reason, and that is not a gap", () => {
+    // The negative control. Without it this suite would pass on an implementation that
+    // stamped every close with a reason, which would put every zone on the visit-two list.
+    const audit = { coreUnresolved: [], standardUnresolved: 0, naCount: 0 };
+    const state = foldV2(
+      mkEvents([
+        init,
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "bathroom", label: "Bath", attributes: {} },
+        { type: "ZoneClosed", zoneId: "z1", note: "done", audit },
+      ]),
+    );
+    expect(state.zones[0]!.closeReasonId).toBeUndefined();
+    expect(state.zones[0]!.closeNote).toBe("done");
+  });
+
   it("zone levels: set at creation, corrected later; ghost zone orphans", () => {
     const state = foldV2(
       mkEvents([

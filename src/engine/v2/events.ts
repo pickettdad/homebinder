@@ -134,7 +134,25 @@ export type V2SessionEvent =
   | (EventBase & { type: "ZoneRetyped"; zoneId: string; zoneType: string })
   | (EventBase & { type: "ZoneLevelSet"; zoneId: string; level: string })
   | (EventBase & { type: "ZoneAttributesSet"; zoneId: string; attributes: Record<string, boolean> })
-  | (EventBase & { type: "ZoneClosed"; zoneId: string; note?: string; audit: ZoneAuditSnapshot })
+  /**
+   * `reasonId` names a Table C `naReasons` row — the SAME closed vocabulary items use, now
+   * carried at zone scope (design ruling 2026-08-08: an uncaptured zone is a gap).
+   *
+   * It rides BESIDE `note`, never instead of it. The note says what happened here; the reason
+   * says which kind of gap it is, and only the reason is routable: `no-access` and `deferred`
+   * carry `feedsGapList: true`, and `none-present` carries `recordsFinding: true`. A free
+   * string carries neither, so before this an empty zone and a zone confirmed empty were the
+   * same record downstream — indistinguishable exactly where the difference matters.
+   *
+   * Optional because zones that captured something are not gaps and are never asked.
+   */
+  | (EventBase & {
+      type: "ZoneClosed";
+      zoneId: string;
+      note?: string;
+      reasonId?: string;
+      audit: ZoneAuditSnapshot;
+    })
   | (EventBase & { type: "ZoneReopened"; zoneId: string; note?: string })
   // ---- pins (numbers session-scoped: see the header — never a cross-visit key)
   | (EventBase & { type: "PinCreated"; pinId: string; pinNumber: number; zoneId?: string })

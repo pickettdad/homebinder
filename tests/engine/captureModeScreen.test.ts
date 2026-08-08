@@ -108,17 +108,34 @@ describe("§6 — an empty zone is asked why, and the candidate is offered not a
     expect(zoneScreen).toMatch(/zone\.canvases\.length === 0/);
   });
 
-  it("never pre-fills the close note from a resolution", () => {
+  it("never pre-fills the close note or reason from a resolution", () => {
     // The candidate is rendered as a button the concierge taps. Pre-filling would let an
     // existing resolution stand as the answer to a question nobody was asked.
     const code = zoneScreen.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    expect(code).not.toMatch(/setCloseNote\(emptyCandidate\s*\?\?/);
     expect(code).not.toMatch(/useState\(emptyCandidate/);
-    expect(code).toMatch(/onClick=\{\(\) => setCloseNote\(emptyCandidate\)\}/);
+    expect(code).not.toMatch(/setCloseNote\(emptyCandidate\.text\s*\?\?/);
+    // Both halves land on the same tap, and only on a tap.
+    expect(code).toMatch(/setCloseNote\(emptyCandidate\.text\)/);
+    expect(code).toMatch(/setCloseReasonId\(emptyCandidate\.reasonId\)/);
   });
 
-  it("an empty zone cannot be closed silently", () => {
-    expect(zoneScreen).toMatch(/disabled=\{noMedia && !closeNote\.trim\(\)\}/);
+  it("an empty zone cannot be closed without a Table C reason", () => {
+    // The ruling (2026-08-08): an uncaptured zone is a gap, so the close carries a REASON ID
+    // beside the free text. Stated as "something routable was recorded" rather than as the
+    // literal gate expression — the old version of this test asserted
+    // `!closeNote.trim()` verbatim and would have failed on a strictly better gate.
+    const code = zoneScreen.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toMatch(/disabled=\{noMedia && !closeReasonId\}/);
+    expect(code).toMatch(/closeZoneV2\(zoneId, closeNote, closeReasonId/);
+  });
+
+  it("the reasons offered are Table C's, never a list written into the screen", () => {
+    // A second vocabulary here would drift the moment Table C gains a row — the same defect
+    // class as hardcoding `utility` in the UI instead of reading `defaultsTrueFor`.
+    const code = zoneScreen.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).toMatch(/v2Config\.naReasons\.map\(/);
+    for (const id of ["none-present", "no-access", "not-applicable", "deferred"])
+      expect(code, `${id} must not be written into the screen`).not.toContain(`"${id}"`);
   });
 });
 

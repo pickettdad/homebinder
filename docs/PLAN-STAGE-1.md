@@ -299,8 +299,8 @@ session (+ lifecycle[]: {type: completed|reopened, at, reason?} — the full
          complete/reopen history, so re-work is auditable, owner req 2026-07-24) ·
 config (checklist snapshot + hash — includes the layers definitions) ·
 zones[]: {zoneId, type, label, level?, attributes, closedAt?, closeNote?,
-          canvases[], audit: {items: [{itemId, tier, attest, status:
-          satisfied|na|unresolved, via?, evidence?, naReason?}]}} ·
+          closeReasonId?, canvases[], audit: {items: [{itemId, tier, attest,
+          status: satisfied|na|unresolved, via?, evidence?, naReason?}]}} ·
 pins[]:  {pinId, number, zoneId?, type?, label?, flag?, anchors[], mediaIds[],
           noteIds[], chatThreadIds[]} ·
 sessionAudit · inbox[] (unassigned at export — explicitly listed, never dropped) ·
@@ -309,6 +309,18 @@ media[] (paths: `media/<zone-or-_misc>/pin-<number>/<mediaId>.<ext>`; canvas pho
 under `media/<zone>/_canvas/`; zone-targeted media with no pin under
 `media/<zone>/_zone/`) · totals · orphanEvents · events
 ```
+
+**`zones[].closeReasonId` — an uncaptured zone is a gap (design ruling, 2026-08-08).** A zone
+closing with no photo, no voice note and no canvas is asked why, and the answer now carries a
+**Table C `naReasons` id beside the free text** — the same closed vocabulary items use, read at
+zone scope. Absent on any zone that captured something, and on every zone closed before the
+ruling; additive and optional, so no schema-version bump (same class as `session.visitKind`).
+
+**The id travels, never a verdict.** `feedsGapList` and `recordsFinding` are *not* emitted
+alongside it: the emitter cannot know the receiving config, so resolving the id is the
+receiver's job against the config snapshot in the same manifest — §7a-iii's rule for
+`unanswered`, applied to the same shape. A binder that wants the visit-two list reads
+`closeReasonId` against `config.snapshot.naReasons`.
 
 **Pin flag vocabulary — declared here because this is its source (change request via owner,
 2026-07-31).** §7 listed `flag?` in the shape above and never said what it could hold, so a

@@ -227,3 +227,40 @@ describe("manifest v3 — video classification", () => {
     expect(t.photos + t.videos + t.voiceNotes).toBe(t.mediaFiles);
   });
 });
+
+describe("zone close reason — the gap survives the export (ruling 2026-08-08)", () => {
+  const closeWith = (reasonId?: string, note?: string) =>
+    (() => {
+      const events = mkEvents([
+        { type: "SessionInitialized", configId: "cfg", configVersion: "1.0", configHash: "h", propertyFlags: [], propertyLabel: "H" },
+        { type: "ZoneCreated", zoneId: "z1", zoneType: "attic", label: "Attic", attributes: {} },
+        { type: "ZoneClosed", zoneId: "z1", note, reasonId, audit: { coreUnresolved: [], standardUnresolved: 0, naCount: 0 } },
+      ]);
+      return buildManifestV3({
+        state: foldV2(events), events, configSnapshot: { layers: [] },
+        exportedAt: "2026-08-08T00:00:00.000Z", appVersion: "0.5.0",
+      });
+    })();
+
+  it("emits the reason id alongside the note", () => {
+    // The binder cannot re-derive "why was nothing captured" from an empty zone — it can only
+    // read what the field recorded. If the id stops at the fold, the gap is invisible.
+    const z = closeWith("no-access", "hatch painted shut").zones[0]!;
+    expect(z.closeReasonId).toBe("no-access");
+    expect(z.closeNote).toBe("hatch painted shut");
+  });
+
+  it("emits the ID, never a pre-resolved gap flag", () => {
+    // PLAN-STAGE-1 §7a-iii: the emitter cannot know the receiving config, so it must not bake
+    // this config's `feedsGapList` opinion into the record. The id plus the travelling config
+    // snapshot is the whole contract; a boolean here would be a claim we are not positioned
+    // to make.
+    const z = closeWith("no-access") as unknown as Record<string, unknown>;
+    for (const baked of ["feedsGapList", "isGap", "recordsFinding"])
+      expect(Object.keys(z)).not.toContain(baked);
+  });
+
+  it("a zone closed without a reason carries none — absent, not defaulted", () => {
+    expect(closeWith(undefined, "done").zones[0]!.closeReasonId).toBeUndefined();
+  });
+});

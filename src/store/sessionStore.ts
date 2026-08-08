@@ -154,7 +154,7 @@ interface AppStore {
   resolveItem(scope: ItemScope, itemId: string, resolution: ItemResolution): Promise<void>;
   reopenItem(scope: ItemScope, itemId: string): Promise<void>;
   /** Advisory close — records the audit snapshot and a note; NEVER blocks. */
-  closeZoneV2(zoneId: string, note?: string): Promise<void>;
+  closeZoneV2(zoneId: string, note?: string, reasonId?: string): Promise<void>;
   reopenZoneV2(zoneId: string, note?: string): Promise<void>;
   completeSessionV2(): Promise<void>;
   /** Record a produced export (manifest + files) in the log; marks a completed visit exported. */
@@ -480,12 +480,18 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "ItemReopened", scope, itemId }]);
   },
 
-  async closeZoneV2(zoneId, note) {
+  async closeZoneV2(zoneId, note, reasonId) {
     const { v2Config, v2Session } = get();
     if (!v2Config || !v2Session) throw new Error("no active v2 session");
     // Advisory close: the audit is recorded, never enforced (REDESIGN decision 1).
     const audit = auditSnapshot(deriveZoneAudit(v2Config, v2Session, zoneId));
-    await get().dispatchV2([{ type: "ZoneClosed", zoneId, note: note?.trim() || undefined, audit }]);
+    // Fail closed on the vocabulary rather than storing an unresolvable id: a reason that
+    // does not exist in Table C is worse than none, because it looks routable downstream.
+    if (reasonId && !v2Config.naReasons.some((r) => r.id === reasonId))
+      throw new Error(`unknown close reason: ${reasonId}`);
+    await get().dispatchV2([
+      { type: "ZoneClosed", zoneId, note: note?.trim() || undefined, reasonId, audit },
+    ]);
   },
 
   async reopenZoneV2(zoneId, note) {

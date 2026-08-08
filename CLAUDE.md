@@ -78,6 +78,21 @@ the local branch must assume it happened.
 *The general form:* **a PR's state is not a fact you can cache across a turn boundary.**
 Same class as reusing a stale config reading — checked once, quoted later as if verified.
 
+**The ancestry check does not answer the PR question (2026-08-07, fourth stranding).** `git
+merge-base --is-ancestor <sha> origin/main` answers *"did this reach main"* and **nothing else**.
+It was run, it correctly said "not in main", and that was read as "waiting in the open PR" —
+but the PR had merged an hour earlier and the commit was in no PR at all. A stranded commit and
+a commit awaiting review are **indistinguishable** by ancestry; they differ only in whether a PR
+exists.
+
+**So the end-of-turn check is two commands, not one:** ancestry *and* an open-PR list. If
+ancestry says not-in-main and the PR list is empty, the work is stranded — open one. Never infer
+a PR's existence from a commit's absence from main.
+
+*And it is the message that gets it wrong.* "Nothing further to push, safe to merge" was said
+four times against a PR that did not exist. **Naming the PR number in that sentence forces the
+lookup** that would have caught it, so say "PR #N is safe to merge" and never the bare phrase.
+
 **The browser path is a control, not a shipping surface (2026-08-03).** The concierge runs
 the **native shell**; the walk that cleared the durability gate ran on TestFlight build 13.
 The browser/PWA path **stays runnable and does not stay at capture parity** — no position, no

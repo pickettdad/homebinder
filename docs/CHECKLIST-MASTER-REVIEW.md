@@ -1754,3 +1754,95 @@ probe recorded in CLAUDE.md's error list.
 **Master change-request:** Table A becomes 4 columns. Per §27.3 several of the eight resolve to
 `field, binder` rather than `binder` alone, so the column should be authored **after** the
 capture-prompt decision, not before.
+
+---
+
+## 28. F-4 — what the field side needs before v1.12 is authored (2026-08-08)
+
+**Requested for the v1.12 authoring pass.** F-4 is described everywhere as *"one new `scope[]`
+value plus a content pass"* — Field Track Orientation §8, Capture Mode spec §1 and §14,
+`PLAN-STAGE-1` §9a. **That description is missing a third part, and it is the part with no
+owner.**
+
+### 28.1 `scope` is consumed by nothing. Verified.
+
+`item.scope` is parsed by the generator, validated by the schema, emitted into
+`checklists.generated.ts` — and **read by no derivation, no screen and no filter.**
+`deriveZoneItems`, `deriveComponentItems` and `deriveSessionItems` never look at it. (The
+`scope` in `fold.ts:542` is `ItemScope` — pin/zone/session — an unrelated thing with the same
+word.)
+
+Today's tags, all 409 items:
+
+| scope | items |
+|---|---|
+| `[baseline]` | 402 |
+| `[baseline, monthly]` | 6 |
+| `[baseline, seasonal:spring]` | 1 |
+
+**So the consequence is already shipping, and it is not a content gap.** A **Monthly Visit
+renders the full baseline checklist** — `modeForVisit("monthly")` is `inspection`, which routes
+to `ZoneV2Screen`, which derives without any scope filter. The six monthly items are not a
+short list; they are six items among 409, indistinguishable from the rest on screen.
+
+The roadmap records this as *"the monthly list, genuinely unwritten at six items against 409."*
+**The content half is real, and it is the smaller half.** Even a perfectly authored monthly
+list would render identically to the baseline until something reads `scope`.
+
+**This is the eleventh instance of the declared-and-consumed-by-nothing class** — after the
+eight property flags, `guidance`, and `recordsFinding`. It is the largest, because
+`scope` is the mechanism the whole visit-kind split is supposed to rest on.
+
+### 28.2 The question the content pass turns on, and the field cannot answer it
+
+**What is a capture-scoped item *for*, given that capture mode shows no checklist at all?**
+
+Capture mode is test-enforced to reach no checklist machinery (spec §10) — that is the walk's
+finding, built in. So a `capture` scope value cannot mean *"render this during a Discovery
+Visit"*, because nothing renders during a Discovery Visit. Two readings survive, and they
+produce **different content passes**:
+
+| reading | a `capture` tag means | who consumes it |
+|---|---|---|
+| **A — desk-facing** | this item is answerable from Discovery photographs, at the desk | the binder, from the manifest |
+| **B — field-facing** | this item belongs to the capture *visit* and would render there | nothing today, and building it contradicts spec §10 |
+
+**A is the only reading consistent with everything else on the record** — capture-only
+Discovery, completeness proposed by the desk, the refinement ladder — and it makes the tag a
+genuinely useful split: *answerable from a photograph* against *requires a person in the house
+with instruments*. Under A the consumer is the **binder**, and the field's job is only to emit
+the tag, which it already does.
+
+**But it is a ruling, not a deduction, and authoring 409 tags under the wrong one is expensive
+to undo.** Stated here so it is decided before the pass rather than discovered during it.
+
+### 28.3 What the field will and will not need to change
+
+**No generator change.** The scope column is already optional and multi-valued —
+`id | text | satisfy | tier | attest [| scope] [| trigger]`, defaulting to `[baseline]`. A new
+tag needs **one regex** widened:
+
+```ts
+// src/engine/schema/checklistConfig.ts
+.regex(/^(baseline|monthly|seasonal:(spring|summer|fall|winter))$/, "unknown scope tag")
+```
+
+**CI already enforces the closed vocabulary**, so an unrecognised tag fails the build rather
+than shipping silently — the master can be authored against a value the schema does not accept
+yet, and the failure will be immediate and legible.
+
+**And one constraint that must hold.** Mode is derived from the visit kind and is never
+settable — the owner's ruling, test-enforced. **F-4 must not become a second mode mechanism.**
+Capture Mode spec §1 reads *"until F-4 lands, mode follows the visit kind the operator picks at
+session start"*, which can be read as F-4 changing mode derivation. **It must not.** `scope`
+selects *which items exist for a visit*; visit kind selects *which screen the visit runs on*.
+Two questions, two mechanisms; collapsing them re-creates the ambiguity the visit-kind picker
+was built to remove.
+
+### 28.4 The recommendation
+
+**Author v1.12's `scope` tags, and land a consumer in the same cycle.** The consumer is small —
+a scope filter in `activeRefs`/`shows`, gated on the session's visit kind — but it is the
+difference between the split existing and the split *working*. Shipping the tags alone would
+add a twelfth row to the declared-and-consumed-by-nothing list, and it would be the one that
+looked most like it was finished.

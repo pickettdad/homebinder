@@ -1540,11 +1540,11 @@ None of the three exist in v1.11. They are Table A rows, and Table A is authored
 so per CLAUDE.md's whole-file rule these are **change-requests, not edits**. Applying three
 dictated cells here is exactly the shape that forked v1.2.1.
 
-| proposed flag | label | intakeSource | notes |
-|---|---|---|---|
-| `attached_garage` | Attached garage | Attached garage | see the correction below |
-| `prior_water_entry` | Known prior water entry | History | nothing comparable exists in v1.11 |
-| `year_built_unknown` | Year built unknown | Year built | joins `pre_1990` in an existing group |
+| proposed flag | label | intakeSource | consumers | notes |
+|---|---|---|---|---|
+| `attached_garage` | Attached garage | Attached garage | `binder` | see the correction below |
+| `prior_water_entry` | Known prior water entry | History | `binder` | nothing comparable exists in v1.11 |
+| `year_built_unknown` | Year built unknown | Year built | `binder` | joins `pre_1990` in an existing group |
 
 **`year_built_unknown` — verified as a real fix, and for a reason already on the record.**
 "Year built" today renders as a **single toggle** (`pre_1990`). Leaving it off means *either*
@@ -1563,11 +1563,11 @@ conclusion needs one more step, though:
 > item that fires on every visit, and the three CO conditions live in its prose. Adding the flag
 > does not connect to it, because there is nothing there to connect to.
 
-So the flag alone would become the **ninth** unconsumed flag in §26.1's table. To actually cash
-the life-safety intent, the bundle needs the flag **and** a consumer — the straightforward one
-being a CO-alarm item gated on `property.attached_garage`, so the coverage question is *asked*
-where the condition holds rather than left inside a sentence a human has to re-read. That is an
-owner content decision, which is why it is written here rather than built.
+**Settled by the owner (2026-08-08): `attached_garage` needs no field trigger — it is
+`binder`.** The field app is not the thing that has to act on it; the binder is, and the CO
+question stays a human judgement on the walk. That is a legitimate answer, and it is exactly
+the answer §27.1's consumer column exists to make *sayable*: without the column, "declared and
+triggered by nothing" and "declared for the binder on purpose" are the same silence.
 
 ### 26.5 The zone-close ruling — landed in code this turn
 
@@ -1600,3 +1600,131 @@ before #77 (fold case, no dispatcher): **a declared field with no consumer reads
 It is not urgent — the manifest carries the reason ids and the binder derives — but "confirmed
 absent" being real inspection data (§22.2) currently has no effect anywhere in the field app,
 and that was an explicit design intent.
+
+---
+
+## 27. What is scaffolding and what is permanent — settled from the code (2026-08-08)
+
+Two derivations were suspected of standing in for the unbuilt session-plan import. **Both are
+permanent and correct. What is scaffolding is the same thing in both cases: their inputs.**
+
+### 27.1 The flag-derived checklist — killed as scaffolding
+
+The framing was that the checklist derivation on top of intake flags stands in for the import.
+It does not, and `PLAN-STAGE-1` §7a already rules the other way in as many words: the plan is
+*"surfaced **alongside** the standard checklist"*, and *"a monthly visit = standard monthly-scope
+items **+** this house's open items."* They are complements, not substitutes:
+
+| | what it answers | lifetime |
+|---|---|---|
+| flag-derived checklist | what does **this kind of house** need checked | permanent |
+| session plan | what does **this house** carry from last time | missing |
+
+A septic house needs the septic items at every visit for as long as the product exists. No
+import replaces that, and the derivation is not a placeholder for anything.
+
+**The real defect underneath, verified:** *the flags themselves do not survive the visit.*
+There is **no property entity anywhere in the local database** — `db.ts` declares `sessions`,
+`events`, `media`, `configSnapshots`, `outbox`, `reviewJobs`, `chatJobs` and nothing else, and
+`activeRefs` reads `state.propertyFlags`, which is populated only from `SessionInitialized`.
+Every session is an island. On visit two the concierge re-answers all eighteen toggles from
+memory or from the client, and a mis-remembered answer silently changes the scope of the whole
+visit's checklist.
+
+`ses.triggers-confirmed` — *"Intake-declared property flags confirmed or corrected on site"* —
+is written as if something were carried in to confirm. **Nothing is.** So the item currently
+asks the concierge to confirm their own answer from twenty minutes earlier.
+
+**And at Discovery the flags reach nothing at all.** Capture mode never imports any derivation
+(spec §10, test-enforced), so on a Discovery Visit the eighteen toggles feed *no* UI — they ride
+into `session.flags` in the manifest and stop. Which is what makes §27.3 the first field
+consumer they have ever had.
+
+### 27.2 `deriveComponentItems` — correct for visit two, not scaffolding
+
+The rule it implements is *"a pin of component type X exists in this zone → X's items appear on
+that pin, parent items first, each list applying its own gate."* That is the object model, and
+it is what makes visit two work **once the pins are there**. Two properties confirm it was built
+for recurrence rather than for one walk:
+
+- the proposal search spans `allPins` across the whole session on purpose, so a chimney pinned
+  on an elevation evidences a fireplace item in the living room — cross-zone object identity,
+  which is precisely what an imported pin set needs;
+- `effectiveAttributes` resolves Table B defaults **at derivation, not at zone creation**, and
+  its own comment names the session-plan import as the creation path that would otherwise
+  bypass them.
+
+**What is scaffolding is that `state.pins` starts empty every visit.** §7a names *"pre-seeded
+pin expectations"* as the import's job. Today, on visit two, there is no water-heater pin until
+someone creates one, therefore no water-heater items, therefore the water heater is invisible.
+That is worse than a missing checklist row, because there is no empty row to notice — §7a-ii's
+*"an empty list is indistinguishable from a completed one"*, in the pin dimension.
+
+**So one mechanism feeds both gaps.** The import must carry the property flags and the pin set;
+neither derivation needs changing when it arrives.
+
+### 27.3 Intake as a capture prompt at Discovery — the requirement, and what it costs
+
+**Requirement (owner, 2026-08-08):** intake feeds a **capture prompt** at Discovery — the
+household mentioned a pool, an EV charger, a generator, so the walk is reminded to point the
+camera at them. **Information, never debt: no outstanding-items count, and it must not gate zone
+close.**
+
+**Cost: small — roughly half a day.** Everything it needs already exists:
+
+```ts
+const mentioned = v2Config.propertyFlags.filter((f) => v2Session.propertyFlags.includes(f.id));
+```
+
+No config change, no schema change, no event, no fold change, no manifest change. One component
+plus its render in `CaptureModeScreen`, and tests. It reads `label` — the same string the intake
+screen already shows — so there is no new vocabulary either.
+
+**The `no debt` constraint is what shapes it, and it has one honest consequence.** To carry no
+debt the prompt must not track whether the pool was actually photographed — so it says the same
+thing at the end of the walk as at the start. A concierge who has already shot the pool still
+sees "pool" listed. That is the price of not counting, and it is the right price, but it means
+the prompt has to read as a *reminder of what the household said*, never as a list to work.
+
+**One decision needed before building:** shown **once at the top of the walk**, or **persistent
+on every zone screen**? Recommendation: **walk-level, dismissible.** Per-zone it becomes ambient
+nagging — a fixed list repeated on every screen reads as a list to clear, which is the failure
+capture mode exists to remove, arriving through a different door.
+
+**This also revises §26.1.** That sweep asked *"does anything trigger on this flag"*, which is
+an inspection-mode question. The capture prompt is a **Discovery-mode consumer that needs no
+trigger at all**, so `pool`, `generator`, `ev`, `solar` and `waterfront` become genuinely
+field-consumed the day it ships — which is why several of the eight resolve to **both**.
+
+### 27.4 The consumer column — built (schema, generator, validator)
+
+Table A gains a 4th column, `consumers`, holding **`field`**, **`binder`**, or both. Shipped
+this turn on the code side; the master adopts it when the bundle is authored.
+
+- **Schema:** `consumers?: ("field" | "binder")[]`, optional, `.min(1)`. Optional so a
+  pre-column master still validates — adopting the column is not forced by shipping support
+  for it.
+- **Generator:** accepts `id|label|intake source` **and** `id|label|intake source|consumers`,
+  exactly as Table B's col 4 was added. Authored as `field`, `binder`, `field, binder`,
+  `field + binder`, or `—` for not-declared. An **unrecognised word fails the build** rather
+  than being dropped: a silently dropped consumer reads downstream as *"declared to have
+  none"*, which would make the config assert something stronger than the master says.
+- **Rule 1 — all-or-nothing.** Once any flag declares consumers, every flag must. Partial
+  adoption is the worst state available: an undeclared flag becomes ambiguous between "nobody
+  filled this in" and "declared as having no consumer", which is the silence the column exists
+  to remove.
+- **Rule 2 — triggered implies `field`.** A flag named by an item trigger or a list gate must
+  declare `field`. This is the drift catcher for a year from now.
+- **The converse is deliberately NOT a rule.** `field` does **not** require a trigger, because
+  §27.3's capture prompt is a field consumer that triggers nothing. There is a test asserting
+  this, so a future tightening would have to break it on purpose.
+
+**Every rule has a negative control**, and each was mutation-checked: disabling rule 1,
+disabling rule 2, making the generator accept an unknown consumer, and making the generator drop
+the column each fail exactly one test. The column does not exist in the master yet, so a rule
+tested only against the shipping config would pass while checking nothing — the same vacuous
+probe recorded in CLAUDE.md's error list.
+
+**Master change-request:** Table A becomes 4 columns. Per §27.3 several of the eight resolve to
+`field, binder` rather than `binder` alone, so the column should be authored **after** the
+capture-prompt decision, not before.

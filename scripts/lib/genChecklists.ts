@@ -396,14 +396,35 @@ export function parseMaster(markdown: string): ChecklistConfigInput {
           currentList = null;
         }
       } else if (section === "flags") {
-        if (table.header.join("|") !== "id|label|intake source")
+        // 2026-08-08 added a 4th column (`consumers`); both shapes accepted, exactly as
+        // Table B's `defaults true for` was, so adopting the column is not a breaking edit
+        // for anyone regenerating an older master.
+        const flagHeader = table.header.join("|");
+        if (flagHeader !== "id|label|intake source" && flagHeader !== "id|label|intake source|consumers")
           throw new MasterParseError(table.line, `unexpected property-flags header: ${table.header.join(" | ")}`);
-        for (const row of table.rows)
-          cfg.propertyFlags!.push({
+        for (const row of table.rows) {
+          const entry: NonNullable<ChecklistConfigInput["propertyFlags"]>[number] = {
             id: stripTicks(row.cells[0] ?? "", row.line),
             label: (row.cells[1] ?? "").trim(),
             intakeSource: (row.cells[2] ?? "").trim(),
-          });
+          };
+          const consCell = (row.cells[3] ?? "").trim();
+          if (consCell !== "" && consCell !== "—" && consCell !== "-") {
+            // Authored as "field, binder" / "field + binder" / "binder". Parsed strictly:
+            // an unrecognised word fails the build rather than silently dropping a consumer,
+            // because a dropped consumer reads downstream as "declared to have none".
+            const parts = consCell
+              .split(/[,+/]/)
+              .map((p) => stripTicks(p, row.line).trim().toLowerCase())
+              .filter(Boolean);
+            for (const p of parts)
+              if (p !== "field" && p !== "binder")
+                throw new MasterParseError(row.line, `unknown flag consumer '${p}' (expected field/binder)`);
+            if (!parts.length) throw new MasterParseError(row.line, "empty consumers cell");
+            entry.consumers = [...new Set(parts)] as ("field" | "binder")[];
+          }
+          cfg.propertyFlags!.push(entry);
+        }
       } else if (section === "attrs") {
         // v1.6.1 added a 4th column; both shapes accepted so the header change alone
         // isn't a breaking edit for anyone regenerating an older master.

@@ -17,7 +17,7 @@ import { loadRoute } from "../config/loadRoute";
 import { loadChecklists } from "../config/loadChecklists";
 import type { ChecklistConfig } from "../engine/schema/checklistConfig";
 import type {
-  CaptureTarget, ItemResolution, ItemScope, PinFlag, PinTypeRef, V2EventPayload, V2SessionEvent,
+  CaptureIntent, CaptureTarget, ItemResolution, ItemScope, PinFlag, PinTypeRef, V2EventPayload, V2SessionEvent,
   VisitKind,
 } from "../engine/v2/events";
 import { foldV2, type SessionStateV2 } from "../engine/v2/fold";
@@ -143,8 +143,15 @@ interface AppStore {
   addCanvas(zoneId: string, file: File | Blob, mime?: string): Promise<string>;
   placeAnchor(pinId: string, canvasId: string, x: number, y: number): Promise<void>;
   removeAnchor(anchorId: string): Promise<void>;
-  /** durationMs applies to video only — stills leave it undefined. */
-  capturePhotoV2(target: CaptureTarget, file: File | Blob, mime?: string, durationMs?: number): Promise<string>;
+  /** durationMs applies to video only — stills leave it undefined. `intent` marks one of the
+   *  three declared capture kinds; ordinary captures leave it undefined. */
+  capturePhotoV2(
+    target: CaptureTarget,
+    file: File | Blob,
+    mime?: string,
+    durationMs?: number,
+    intent?: CaptureIntent,
+  ): Promise<string>;
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
   discardMediaV2(mediaId: string): Promise<void>;
   reassignMedia(mediaId: string, target: CaptureTarget): Promise<void>;
@@ -407,7 +414,7 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "AnchorRemoved", anchorId }]);
   },
 
-  async capturePhotoV2(target, file, mimeOverride, durationMs) {
+  async capturePhotoV2(target, file, mimeOverride, durationMs, intent) {
     const { sessionId } = get();
     if (!sessionId) throw new Error("no active session");
     assertEditable(get().v2Session, targetZoneId(get().v2Session, target));
@@ -420,7 +427,9 @@ export const useApp = create<AppStore>((set, get) => ({
       mime, bytes: file.size, sha256, capturedAt: new Date().toISOString(), durationMs, blob: file,
     };
     await get().dispatchV2(
-      [{ type: "PhotoAdded", media: { mediaId, sha256, mime, bytes: file.size }, target, durationMs }],
+      // `intent` rides the EVENT only, never MediaRow — the same shape as `caption`. MediaRow
+      // is blob storage; the log is the record, and one home for a fact is the whole point.
+      [{ type: "PhotoAdded", media: { mediaId, sha256, mime, bytes: file.size }, target, durationMs, intent }],
       [row],
     );
     return mediaId;

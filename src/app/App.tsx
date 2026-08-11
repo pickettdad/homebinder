@@ -12,6 +12,7 @@ import { ExportScreen } from "../screens/ExportScreen";
 import { SetupV2Screen } from "../screens/v2/SetupV2Screen";
 import { CaptureModeScreen } from "../screens/v2/CaptureModeScreen";
 import { modeForVisit, visitKindOf } from "../engine/v2/checklist";
+import { globalCameraApplies } from "./captureSurface";
 import { WalkScreen } from "../screens/v2/WalkScreen";
 import { ZoneV2Screen } from "../screens/v2/ZoneV2Screen";
 import { PinScreen } from "../screens/v2/PinScreen";
@@ -37,7 +38,9 @@ function GlobalCamera() {
   const { screen, v2Session, capturePhotoV2, showToast } = useApp();
   const [sweeping, setSweeping] = useState(false);
   if (!v2Session || v2Session.completedAt) return null;
-  if (!["walk", "zone2", "pin", "inbox"].includes(screen.name)) return null;
+  // Capture mode owns the camera; the floating trio stays everywhere else (owner ruling
+  // 2026-08-11). The rule lives in `globalCameraApplies` so it can be tested.
+  if (!globalCameraApplies(visitKindOf(v2Session), screen.name)) return null;
 
   let target: CaptureTarget = { kind: "inbox" };
   let where = "Inbox";

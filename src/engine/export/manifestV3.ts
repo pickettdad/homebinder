@@ -13,7 +13,7 @@
  * inbox/unassigned under `media/_misc/_inbox/…`.
  */
 import type { Source } from "../schema/events";
-import type { PinFlag, PinTypeRef, V2SessionEvent, VisitKind } from "../v2/events";
+import type { CaptureIntent, PinFlag, PinTypeRef, V2SessionEvent, VisitKind } from "../v2/events";
 import type {
   AnchorState,
   ChatMessage,
@@ -72,9 +72,21 @@ export interface MediaFileEntryV3 {
   mime: string;
   bytes: number;
   sha256: string;
+  /**
+   * When this capture was COMMITTED, not when it began — `at` is stamped inside the storage
+   * transaction. For a still the difference is negligible. For a video it is the end of
+   * recording plus an unbounded, unrecorded pause on the confirm sheet, so a run trace's
+   * transcript CANNOT be aligned against other captures on a shared clock from this field.
+   *
+   * Recorded as a limit rather than fixed (owner ruling 2026-08-11): §4.1b needs the
+   * transcript as an index into its OWN clip, and offsets are relative to the file, so frame
+   * extraction works today and needs nothing from here.
+   */
   capturedAt: string;
   durationMs?: number;
   caption?: string;
+  /** Which declared capture kind this was (§4.1a/§4.1b); absent = ordinary. */
+  intent?: CaptureIntent;
   source: Source;
 }
 
@@ -178,6 +190,7 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
       capturedAt: m.at,
       durationMs: m.durationMs,
       caption: m.caption,
+      intent: m.intent,
       source: m.source,
     });
 

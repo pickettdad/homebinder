@@ -13,6 +13,7 @@
  */
 import type { Source } from "../schema/events";
 import type {
+  CaptureIntent,
   CaptureTarget,
   ItemResolution,
   ItemScope,
@@ -33,6 +34,10 @@ export interface MediaRef {
   durationMs?: number;
   /** Context caption ("panel, before dead-front photo") — set via MediaCaptioned. */
   caption?: string;
+  /** Which declared capture kind this was, if any (CaptureIntent). Absent = ordinary.
+   *  Rides the ref, so it survives MediaReassigned for free — the intent is a fact about
+   *  the act of capture and does not change when the capture is re-filed. */
+  intent?: CaptureIntent;
   source: Source;
 }
 
@@ -187,7 +192,8 @@ const mediaRef = (
   at: string,
   source: Source,
   durationMs?: number,
-): MediaRef => ({ ...media, at, source, durationMs });
+  intent?: CaptureIntent,
+): MediaRef => ({ ...media, at, source, durationMs, intent });
 
 export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
@@ -472,7 +478,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
       }
 
       case "PhotoAdded":
-        if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs), e.target, false)) orphan(e);
+        if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs, e.intent), e.target, false)) orphan(e);
         break;
       case "VoiceNoteAdded":
         if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs), e.target, true)) orphan(e);

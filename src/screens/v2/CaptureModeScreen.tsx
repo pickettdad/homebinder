@@ -23,6 +23,12 @@ import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { BigButton, Sheet } from "../../ui/bits";
 import { MediaThumb, MediaViewer, ZONE_LEVELS } from "./shared";
 import type { ChecklistConfig } from "../../engine/schema/checklistConfig";
+import type { CaptureIntent } from "../../engine/v2/events";
+
+/** Door styling. The primary reads as dominant (§2); the declared kinds sit under it. */
+const PRIMARY_DOOR =
+  "min-h-16 rounded-xl bg-brass-500 px-5 text-lg font-semibold text-slate-950 transition-colors active:bg-brass-400";
+const SECONDARY_DOOR = "min-h-14 rounded-xl bg-slate-700 px-3 text-base text-slate-100 transition-colors active:bg-slate-600";
 
 // Dismissal is UI state, not inspection data — localStorage, never the event log, exactly as
 // ChatPanel's per-pin collapse. Keyed by session so dismissing it on one visit says nothing
@@ -108,6 +114,51 @@ function IntakePrompt({ flags, onDismiss }: { flags: { id: string; label: string
   );
 }
 
+/**
+ * How long a pause has to be before the grid treats it as the end of one object's string.
+ *
+ * The §4.1a sequence — whole object, plate, plate, fittings, indicator — is a burst of
+ * seconds; walking to the next object takes longer. So a gap is where a string probably
+ * ended, and drawing the break makes *object, plate, plate* read as a group **with nobody
+ * naming anything**. Grouping without classification is the whole point.
+ *
+ * A guessed constant is acceptable here precisely because nothing depends on it: this is
+ * rendering only. It is never exported, never counted, and gates nothing — the manifest
+ * carries capture order and the desk proposes the grouping (register #109). Wrong threshold,
+ * slightly different screen, identical record.
+ */
+export const RUN_GAP_MS = 60_000;
+
+/**
+ * Split captures into visual runs at large time gaps, oldest first (owner ruling 2026-08-11).
+ *
+ * Sorts rather than trusting array order: `MediaReassigned` re-appends a ref at the tail, so
+ * a re-filed capture would otherwise render at the end of the room instead of where it was
+ * taken. uuidv7 mediaIds are lexicographically time-ordered, which settles same-instant ties
+ * — one storage transaction stamps `at` once for every event in it, so ties are real.
+ */
+export function groupIntoRuns<T extends { at: string; mediaId: string }>(
+  media: readonly T[],
+  gapMs: number = RUN_GAP_MS,
+): [T, ...T[]][] {
+  const sorted = [...media].sort((a, b) =>
+    a.at === b.at ? a.mediaId.localeCompare(b.mediaId) : a.at < b.at ? -1 : 1,
+  );
+  // Non-empty by construction — every run is opened as `[m]` — and typed that way so callers
+  // can key on run[0] without a guard that could never fire.
+  const runs: [T, ...T[]][] = [];
+  for (const m of sorted) {
+    const run = runs[runs.length - 1];
+    const prev = run?.[run.length - 1];
+    // An unparseable timestamp yields NaN, and NaN > gapMs is false — so it joins the current
+    // run rather than starting a spurious one. Degrading into the neighbouring group is the
+    // harmless direction.
+    if (!run || !prev || new Date(m.at).getTime() - new Date(prev.at).getTime() > gapMs) runs.push([m]);
+    else run.push(m);
+  }
+  return runs;
+}
+
 /** The three-button post-capture step (§3). The third fires on roughly one capture in ten,
  *  so it is present and unobtrusive rather than prominent. */
 function PostCapture({
@@ -170,7 +221,9 @@ function PostCapture({
 
 export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
   const { v2Session, v2Config, navigate, capturePhotoV2, captionMedia, createZone, showToast } = useApp();
-  const [pending, setPending] = useState<{ file: File | Blob; durationMs?: number } | null>(null);
+  const [pending, setPending] = useState<{ file: File | Blob; durationMs?: number; intent?: CaptureIntent } | null>(
+    null,
+  );
   const [switching, setSwitching] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
@@ -218,9 +271,9 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
    */
   const save = (note?: string) => {
     if (!pending || !zone) return;
-    const { file, durationMs } = pending;
+    const { file, durationMs, intent } = pending;
     setPending(null);
-    void capturePhotoV2({ kind: "zone", id: zone.zoneId }, file, undefined, durationMs)
+    void capturePhotoV2({ kind: "zone", id: zone.zoneId }, file, undefined, durationMs, intent)
       .then((mediaId) => (note ? captionMedia(mediaId, note) : undefined))
       .catch((e) => showToast(e instanceof Error ? e.message : "Could not save"));
   };
@@ -255,7 +308,8 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
     );
   }
 
-  const media = [...zone.photos].reverse(); // most recent first (§2)
+  const media = zone.photos;
+  const runs = groupIntoRuns(media);
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
@@ -305,30 +359,73 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
         </button>
       </div>
 
-      {/* The camera, as the dominant and obvious action (§2). */}
-      <PhotoInput onPhoto={(file) => setPending({ file })}>
-        <span className="text-lg">📷 Photograph this room</span>
+      {/* The camera, as the dominant and obvious action (§2). Ordinary capture — no intent. */}
+      <PhotoInput onPhoto={(file) => setPending({ file })} className={PRIMARY_DOOR}>
+        📷 Photograph this room
       </PhotoInput>
 
-      <div className="flex gap-2">
-        <VideoInput onVideo={(file, ms) => setPending({ file, durationMs: ms })}>Video</VideoInput>
+      {/*
+        The three declared capture kinds (§4.1a, §4.1b), one door each.
+
+        INTENT LIVES ON THE DOOR, never on the confirm sheet. A post-capture "what was that?"
+        is a decision per capture, and §3 says the deciding is the cost — not the tapping. And
+        choosing a door is not classification: it says what the concierge is about to do, not
+        what the thing in front of them is. Nothing here asks what anything IS.
+
+        Room shot vs pan needs no expertise, and the labels are the rule: one frame if the
+        room fits, a pano if it does not.
+      */}
+      <div className="grid grid-cols-2 gap-2">
+        <PhotoInput onPhoto={(file) => setPending({ file, intent: "room-shot" })} className={SECONDARY_DOOR}>
+          🖼 Room shot
+        </PhotoInput>
+        <PhotoInput
+          onPhoto={(file) => setPending({ file, intent: "pan" })}
+          fromLibrary
+          className={SECONDARY_DOOR}
+        >
+          ↔ Pan
+        </PhotoInput>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <VideoInput onVideo={(file, ms) => setPending({ file, durationMs: ms })} className={SECONDARY_DOOR}>
+          🎥 Video
+        </VideoInput>
+        {/* §4.1b. Mostly desk-prescribed for visit two — in Discovery this is the obvious
+            ones in utility spaces. The narration is the deliverable, so the label says so. */}
+        <VideoInput
+          onVideo={(file, ms) => setPending({ file, durationMs: ms, intent: "run-trace" })}
+          className={SECONDARY_DOOR}
+        >
+          🎬 Run trace
+        </VideoInput>
         {/* Standalone voice note, from anywhere in capture mode (§3). The concierge is
             already talking; the transcript is orientation the desk cannot otherwise get. */}
-        <BigButton variant="secondary" className="flex-1" onClick={() => setVoiceOpen(true)}>
-          Voice note
+        <BigButton variant="secondary" className={SECONDARY_DOOR} onClick={() => setVoiceOpen(true)}>
+          🎙 Voice
         </BigButton>
       </div>
 
-      {media.length === 0 ? (
+      {runs.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-700 p-4 text-center text-sm text-slate-400">
           Nothing photographed here yet.
         </p>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
-          {media.map((m) => (
-            <button key={m.mediaId} type="button" onClick={() => setViewing(m.mediaId)}>
-              <MediaThumb mediaId={m.mediaId} mime={m.mime} durationMs={m.durationMs} className="h-24 w-full" />
-            </button>
+        /*
+         * Capture order, oldest first, broken into runs at large gaps (owner ruling
+         * 2026-08-11). No labels and no counts — the break IS the whole signal, so *object,
+         * plate, plate* arrives as a visual group without anybody having named a thing.
+         */
+        <div className="flex flex-col gap-3">
+          {runs.map((run) => (
+            <div key={run[0].mediaId} className="grid grid-cols-3 gap-2">
+              {run.map((m) => (
+                <button key={m.mediaId} type="button" onClick={() => setViewing(m.mediaId)}>
+                  <MediaThumb mediaId={m.mediaId} mime={m.mime} durationMs={m.durationMs} className="h-24 w-full" />
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}

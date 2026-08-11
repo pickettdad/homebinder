@@ -54,6 +54,36 @@ export type PinFlag = "fine" | "monitor" | "issue";
  */
 export type VisitKind = "discovery" | "inspection" | "monthly";
 
+/**
+ * What a capture was FOR — the three declared capture kinds (Baseline Service Design v1.2
+ * §4.1a, §4.1b; owner rulings 2026-08-11). Absent means an ordinary capture, which is the
+ * overwhelming majority; only the three named kinds are marked.
+ *
+ * This records INTENT, never content. It says which door the concierge chose, not what the
+ * frame holds — the app cannot see what is in a photograph and must never appear to. So this
+ * is unverifiable by construction and therefore cannot become a count: there is nothing to
+ * count it against, because nothing here knows how many objects a room contains.
+ *
+ * - `room-shot` — one frame, the room fits. The orienting capture §4.1a step 2 asks for.
+ * - `pan` — the same job when the room does NOT fit in one frame. A stitched still panorama,
+ *   deliberately not video: a pano has no frame exits in the output image and rides the media
+ *   contract unchanged, where a video canvas would be a contract change (`zones[].canvases[]`
+ *   is typed `kind: "photo"`). Owner ruling: still panorama first.
+ * - `run-trace` — §4.1b's narrated video following a line end to end.
+ *
+ * WHY `room-shot` IS HERE when the ruling named "pan / run-trace / ordinary": #124 asks
+ * whether the pan should REPLACE the room shot, and that question is scored by comparing the
+ * two. Collapsing `room-shot` into "ordinary" leaves the comparison with only one of its two
+ * arms and the desk with no way to find the orienting frame among a hundred zone photographs
+ * — which is precisely the job §4.1a step 2 gives it.
+ *
+ * NOT a canvas. A Discovery room shot travels the ordinary photo path into `_zone` and never
+ * becomes a `CanvasAdded` (owner ruling: one artifact in three phases, gated by visit kind).
+ * So `zones[].canvases[]` is empty on a Discovery export by design, and a reader must not
+ * take that emptiness as "no orienting frame" — this field is where the frame is named.
+ */
+export type CaptureIntent = "room-shot" | "pan" | "run-trace";
+
 /** Where a pin's type comes from: the component library, or freeform (REDESIGN §3). */
 export type PinTypeRef =
   | { kind: "component"; componentType: string }
@@ -171,7 +201,14 @@ export type V2SessionEvent =
   // ---- media + notes, target-addressed (inbox → retag later)
   // durationMs is set only for video (added 2026-07-25); stills omit it. Video is filed as
   // visual evidence through PhotoAdded rather than VoiceNoteAdded — it belongs beside stills.
-  | (EventBase & { type: "PhotoAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
+  // `intent` marks the three declared capture kinds; absent = ordinary (see CaptureIntent).
+  | (EventBase & {
+      type: "PhotoAdded";
+      media: CaptureMediaMeta;
+      target: CaptureTarget;
+      durationMs?: number;
+      intent?: CaptureIntent;
+    })
   | (EventBase & { type: "VoiceNoteAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
   | (EventBase & { type: "MediaDiscarded"; mediaId: string })
   | (EventBase & { type: "MediaReassigned"; mediaId: string; target: CaptureTarget })

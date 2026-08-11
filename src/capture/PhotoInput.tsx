@@ -17,6 +17,9 @@ function MediaInput(props: {
   onFile: (file: File) => void | Promise<void>;
   disabled?: boolean;
   className?: string;
+  /** Omit `capture` so iOS offers the Photo Library alongside Take Photo. Default is to set
+   *  it, which goes straight to the in-page camera — right for every deliberate shot. */
+  fromLibrary?: boolean;
   children: ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -26,7 +29,7 @@ function MediaInput(props: {
         ref={inputRef}
         type="file"
         accept={props.accept}
-        capture="environment"
+        {...(props.fromLibrary ? {} : { capture: "environment" as const })}
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -50,6 +53,17 @@ export function PhotoInput(props: {
   onPhoto: (file: File) => void | Promise<void>;
   disabled?: boolean;
   className?: string;
+  /**
+   * For the pan (§4.1a step 1, still-panorama form). iOS's in-page camera is a restricted UI
+   * — a Photo/Video toggle, not the Camera app's mode carousel — so Pano is very likely not
+   * reachable from it, and the working route is: shoot the pano in the Camera app, then pick
+   * it. Omitting `capture` is what puts Photo Library on the sheet.
+   *
+   * UNVERIFIED ON DEVICE. Stated as the reason for the flag rather than asserted as fact; if
+   * the field test shows the in-page camera does offer Pano, drop the flag and the door goes
+   * straight to the camera like every other one.
+   */
+  fromLibrary?: boolean;
   children: ReactNode;
 }) {
   return <MediaInput accept="image/*" onFile={props.onPhoto} {...props} />;

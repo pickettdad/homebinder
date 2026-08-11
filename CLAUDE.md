@@ -123,6 +123,25 @@ the right job.
 *This is the test every future flag gets*, and it is the guard on a column that would otherwise
 quietly re-import the classification-during-capture the three-visit redesign removed.
 
+**Three capture kinds, and "sweep" is not one of them (owner rulings 2026-08-11).** The declared
+kinds are the **pan**, the **room shot** and the **run trace** (Baseline Service Design v1.2
+§4.1a/§4.1b). ***Sweep* is retired from all owner-authored content.** `SweepCamera` keeps its
+name in code — that door is unchanged — but the word must never reach `CHECKLIST-MASTER` or the
+capture prompt, because the component fires **discrete stills** while §4.1a's pan is *defined* by
+having **no frame exits**. A burst of separate frames is exactly the structure the rule exists to
+rule out, the photographs look fine, and **nothing downstream can tell** — the governing filter's
+own failure mode (*can it be executed correctly by someone who does not know what they are looking
+at?*), reached through a word rather than a rule.
+
+*Intent lives on the door, never on the confirm sheet.* `CaptureIntent` records **which door was
+chosen, never what the frame holds** — the app cannot see inside a photograph and must never
+appear to. That is also why it cannot become a count: **there is nothing to count against, because
+nothing here knows how many objects a room contains.** Absent = ordinary, which is most captures.
+
+*And capture mode owns the camera.* The floating trio is gated by `globalCameraApplies`
+(`src/app/captureSurface.ts`) — a predicate rather than an early return, for the reason
+`offersVerdict` states: doctrine inside a component cannot be scanned or tested.
+
 **A copy stays only if it has a named consumer (design ruling 2026-08-08).** The repo keeps **no
 copy of a document that is replaced wholesale** — roadmaps, registers, State of Understanding
 cuts. `docs/reference/` held one such copy, the 2026-08-07 roadmap, and was removed the next day

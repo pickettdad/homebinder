@@ -199,6 +199,29 @@ the shell calls Netlify cross-origin, `netlify/functions/*` carry **CORS headers
 preflight**. (4) `ITSAppUsesNonExemptEncryption=false` is injected into `Info.plist` in CI (HTTPS
 only) so export compliance auto-answers. The hello-shell milestone is **complete** (2026-07-24).
 
+**`ios/` is generated, so native code lives in a plugin package — forced, not chosen.** `ios/` is
+gitignored and CI runs `npx cap add ios && npx cap sync ios` on **every** build, so **Swift written
+into `ios/App/` is destroyed on the next build.** That is why the Info.plist keys are re-injected
+with PlistBuddy each run rather than committed. **The only durable shape is a Capacitor plugin
+package resolved through `package.json`.**
+
+*This is not a preference and the repo has already paid for it:* `ios-testflight.yml` carries the
+reverted July RoomPlan injection in a comment — two storyboard-registration variants, both
+black-screening on device, and **the recorded cause is not that native is hard, it is that CI-only
+iteration could not diagnose it.** The Swift is parked in `native/ios/` as a head start.
+
+**And #71 gets diagnosed before the WebView is made transparent.** A native camera preview behind
+the web layer needs `isOpaque = false`; if that goes wrong the symptom is a black screen — **which
+is also #71's symptom, with no way to separate them.** #71's one known variable is pre-existing
+stored data, which a fresh install never has and CI can never exercise.
+
+**Two sessions never share a branch (rule 20).** A Mac-side session takes `claude/native-*`; a
+cloud session keeps its own; **they meet only at `main`, through pull requests the owner merges.**
+*A shared branch produces a visible conflict. A session without PR discipline pushing to a branch
+another later rebases from is the stranding class — invisible by construction, and this project has
+hit it four times.* **Written as an impossibility rather than a caution**, because the four
+strandings were all failures of remembering.
+
 ## Commands
 
 `npm test` · `npm run typecheck` · `npm run validate:config` ·

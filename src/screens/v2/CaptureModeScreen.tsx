@@ -375,7 +375,7 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
         Room shot vs pan needs no expertise, and the labels are the rule: one frame if the
         room fits, a pano if it does not.
       */}
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <PhotoInput onPhoto={(file) => setPending({ file, intent: "room-shot" })} className={SECONDARY_DOOR}>
           🖼 Room shot
         </PhotoInput>
@@ -385,6 +385,12 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
           className={SECONDARY_DOOR}
         >
           ↔ Pan
+        </PhotoInput>
+        {/* §4.1d. Manuals, invoices, permits, the well record — photographed whether or not
+            anyone knows what they are, which is §4.1a's rule applied to paper. It files to the
+            current zone like everything else, which records the drawer it came out of. */}
+        <PhotoInput onPhoto={(file) => setPending({ file, intent: "document" })} className={SECONDARY_DOOR}>
+          📄 Paper
         </PhotoInput>
       </div>
 

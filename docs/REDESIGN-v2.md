@@ -10,6 +10,48 @@ there still stand.
 
 ---
 
+> ## ⚑ SUPERSESSION BLOCK — 2026-08-12
+>
+> **This document is the file a new session reads first, and §5 and §6 below describe a world
+> that ended on 2026-08-11.** Everything else in it still stands. Read this block before them;
+> the original text is kept beneath, unedited, because its reasoning is still why the decisions
+> were made.
+>
+> **1 · The Mac is real and local native debugging is the plan.** §6 names a 2015 MacBook Air
+> with 4 GB of RAM and rules a local Mac out. **A 2026 MacBook Air (M5, 16 GB, 512 GB) arrived
+> 2026-08-11**, clearing every Xcode floor. §6's *"cloud CI + TestFlight, no local Mac in the
+> loop — the path, not just the baseline"* **is no longer the path.** The cloud pipeline
+> **stays** — `ios-testflight.yml` is what produces signed builds reproducibly from a clean
+> checkout, and it is what let the black screen be investigated at all when there was no Mac.
+> A local Mac adds *debugging*; it does not replace *building*.
+>
+> **2 · Stage 0's ordering is superseded: the camera comes before RoomPlan.** §5 says *"retire
+> the RoomPlan risk first"* and contains no camera at all. **The native camera now leads**, for
+> two reasons: RoomPlan's consumer is the desk pass, which is binder-side and unbuilt, so
+> RoomPlan-first optimises a stage that cannot yet consume its output — and the camera plugin
+> *is* the RoomPlan harness (permissions, a native view under a transparent WebView, view
+> lifecycle, a structured-result bridge). Build the camera first and RoomPlan inherits all of
+> it; build RoomPlan first and the camera inherits some.
+>
+> **3 · Stage 2's premise is dead, not just its wording.** §5 says *"the plan canvas from the
+> RoomPlan module becomes the primary canvas."* **It does not.** Baseline Service Design v1.3
+> §4.2 places pins **on the room shot or the pan**, and §4.3 gives the floorplan **placement**
+> instead. Those are two different jobs and Stage 2 assumed they were one. **What Stage 2
+> becomes is an open design question, not a rewording.**
+>
+> **4 · The auto-pin acceptance test goes with it.** §5's *"auto-pin candidates from RoomPlan's
+> detected objects"* and §5 Stage 2's *"auto-pins from scan objects (confirm/dismiss)"* are
+> **desk artifacts now.** v1.3 §4.2: Discovery offers no pin surface, because pinning is
+> classification and classification is desk work. An auto-pin proposed in the room is the
+> failure the three-visit redesign removed, arriving through the scanner instead of the
+> checklist. *(`PLAN-STAGE-0.md` §5's auto-pin candidate markers carry the same correction.)*
+>
+> **What did not change:** §1–§4 and §7–§9 — the v2 model, what carries over, the decisions log
+> and the open questions. The falsifications that caused this document are unaffected by any of
+> the above.
+
+---
+
 ## 1. Where the project stands
 
 **Shipped and deployed** (Netlify, installed as PWA on the owner's iPad Pro 11" 3rd gen,

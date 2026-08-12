@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.5.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "predev": "node scripts/gen-icons.mjs",
     "dev": "vite",

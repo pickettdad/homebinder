@@ -83,6 +83,17 @@ export function HomeScreen() {
         </section>
       )}
 
+      {/* Diagnostics. Plainly labelled rather than hidden behind a gesture or a flag: this
+          ships to one person, on TestFlight, and a control he cannot find is a control that
+          does not exist. It never appears inside a visit — Home only. */}
+      <button
+        type="button"
+        onClick={() => navigate({ name: "devbench" })}
+        className="self-start rounded-lg px-3 py-2 text-sm text-slate-400 ring-1 ring-slate-700 active:bg-slate-800"
+      >
+        Write-rate check
+      </button>
+
       <footer className="mt-4 text-sm text-slate-500">
         {storage && (
           <p>

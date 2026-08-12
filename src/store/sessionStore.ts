@@ -87,7 +87,9 @@ export type Screen =
   | { name: "pin"; pinId: string }
   | { name: "canvas"; canvasId: string; zoneId: string; placePinId?: string }
   | { name: "inbox" }
-  | { name: "export2" };
+  | { name: "export2" }
+  /** Diagnostics, reachable from Home only — never part of a visit. */
+  | { name: "devbench" };
 
 interface AppStore {
   ready: boolean;

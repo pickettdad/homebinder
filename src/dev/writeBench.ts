@@ -27,6 +27,28 @@
  *
  * A quota refusal is a RESULT, not a crash: the device saying "no more at 900 MB" is the
  * finding, so it is caught and reported with how far it got.
+ *
+ * ── FIRST MEASUREMENT, 2026-08-12 · M1 iPad Pro 11" · native shell via TestFlight ──────────
+ *
+ *   preset   fires    written   sustained   hash   commit   slowdown
+ *   Quick       10   114.4 MB   43.3/sec   10 ms    12 ms      0.83×
+ *   A room      40   457.8 MB   48.6/sec    9 ms    11 ms      1.00×
+ *   Long       100    1.12 GB   46.0/sec    9 ms    12 ms      1.18×
+ *
+ * **~21 ms of work per fire against a ~1000 ms budget — roughly 45× headroom**, flat across
+ * three volumes, with no quota refusal at 1.12 GB. Implied throughput agrees to within 10%
+ * across all three runs, which is the cross-check that makes the figures trustworthy rather
+ * than one suspiciously fast number.
+ *
+ * ⚑ **The one thing this does NOT establish, and it is why the bench stays:** it ran on an
+ * otherwise idle device. The real loop competes with a live `AVCaptureSession`, a preview
+ * rendering continuously, and Vision reading text off preview frames. **Re-run it once the
+ * camera exists** — that is when `dominant` starts answering a question somebody has.
+ *
+ * *Deferred-write worry, largely discharged:* ~1 GB/s implied is fast enough to ask whether
+ * WebKit completed the transaction before the bytes reached flash. A hidden I/O backlog would
+ * surface as degradation over 100 fires and a blown-out tail; slowdown was 1.18× and the worst
+ * commit was 18 ms. **The degradation metric answered its own caveat.**
  */
 import Dexie from "dexie";
 import { sha256Hex } from "../engine/canonical";
@@ -72,6 +94,20 @@ export interface BenchSummary {
   degradation: number;
   /** Which of the two costs dominates — names the fix rather than leaving it to be argued. */
   dominant: "hashing" | "commit" | "even";
+  /**
+   * Whether anything needs doing at all.
+   *
+   * ⚑ Added after the first real run, which exposed a defect in this file's own reporting:
+   * `dominant` answers *which cost would I attack*, and that question only matters once there
+   * IS something to attack. At ~21 ms of work against a 1000 ms budget it returned `even`,
+   * which the screen rendered as "neither fix alone is enough — both need attention" **on a
+   * result that needed none.** That is the crying-wolf failure this project had just finished
+   * arguing about, committed one day later in its own diagnostic.
+   *
+   * So the verdict gates the prose: `dominant` is still computed and still right, and it is
+   * only *spoken* when the answer changes what anyone does.
+   */
+  verdict: "comfortable" | "marginal" | "insufficient";
 }
 
 export interface BenchResult {
@@ -117,6 +153,13 @@ export function summarize(params: BenchParams, samples: readonly FireSample[]): 
   const ratio = hashTotal / Math.max(txTotal, 0.001);
   const dominant = ratio > 1.5 ? "hashing" : ratio < 0.667 ? "commit" : "even";
 
+  // Auto-capture wants roughly one fire a second. Below that the shutter outruns storage and a
+  // queue builds behind it; 5× is the margin at which contention from a live camera session —
+  // which this bench does NOT include — can eat most of the headroom and still leave enough.
+  const firesPerSecond = workMs > 0 ? (samples.length / workMs) * 1000 : 0;
+  const verdict =
+    firesPerSecond < 1 ? "insufficient" : firesPerSecond < 5 || degradation > 1.5 ? "marginal" : "comfortable";
+
   return {
     fires: samples.length,
     frames,
@@ -126,9 +169,10 @@ export function summarize(params: BenchParams, samples: readonly FireSample[]): 
     hashMsP95: percentile(hashes, 95),
     txMsP50: percentile(txs, 50),
     txMsP95: percentile(txs, 95),
-    firesPerSecond: workMs > 0 ? (samples.length / workMs) * 1000 : 0,
+    firesPerSecond,
     degradation,
     dominant,
+    verdict,
   };
 }
 

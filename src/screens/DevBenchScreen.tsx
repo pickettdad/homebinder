@@ -174,20 +174,40 @@ export function DevBenchScreen() {
                 value={`${s.degradation.toFixed(2)}×`}
                 note={s.degradation > 1.5 ? "gets worse — the important one" : "steady"}
               />
-              <Row
-                label="Where the time goes"
-                value={
-                  s.dominant === "hashing" ? "fingerprinting" : s.dominant === "commit" ? "saving" : "both, evenly"
-                }
-              />
+              {/* Only shown when there is something to attack. "Which cost dominates" is a
+                  question about a problem, and printing an answer to it on a comfortable
+                  result reads as an alarm — the crying-wolf failure, in the diagnostic. */}
+              {s.verdict !== "comfortable" && (
+                <Row
+                  label="Where the time goes"
+                  value={
+                    s.dominant === "hashing" ? "fingerprinting" : s.dominant === "commit" ? "saving" : "both, evenly"
+                  }
+                />
+              )}
 
-              <p className="mt-3 text-sm text-slate-400">
-                {s.dominant === "hashing"
-                  ? "Fingerprinting dominates — the fix is to move it off the main thread, or have the camera hand us the fingerprint it can compute while writing the file."
-                  : s.dominant === "commit"
-                    ? "Saving dominates — the fix is storing photographs as files rather than inside the database."
-                    : "Neither dominates, so neither fix alone is enough. Both need attention."}
+              <p className="mt-3 text-sm text-slate-300">
+                {s.verdict === "comfortable" ? (
+                  <>
+                    <strong className="text-slate-100">Comfortable — nothing to fix.</strong> The iPad is about{" "}
+                    {Math.round(s.firesPerSecond)}× faster than the camera needs, and it stayed steady as it
+                    filled.
+                  </>
+                ) : s.dominant === "hashing" ? (
+                  "Fingerprinting dominates — the fix is to move it off the main thread, or have the camera hand us the fingerprint it can compute while writing the file."
+                ) : s.dominant === "commit" ? (
+                  "Saving dominates — the fix is storing photographs as files rather than inside the database."
+                ) : (
+                  "Neither dominates, so neither fix alone is enough. Both need attention."
+                )}
               </p>
+
+              {s.verdict === "comfortable" && (
+                <p className="mt-2 text-sm text-slate-400">
+                  Worth running again once the new camera exists — this ran on an idle iPad, and the real
+                  loop shares it with a live viewfinder.
+                </p>
+              )}
               <p className="mt-2 text-xs text-slate-500">
                 Send this screen to the field session — the slowdown figure matters more than the averages,
                 because a room that starts fast and stalls at object thirty is the failure a short test hides.

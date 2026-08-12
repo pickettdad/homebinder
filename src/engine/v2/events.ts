@@ -70,6 +70,15 @@ export type VisitKind = "discovery" | "inspection" | "monthly";
  *   contract unchanged, where a video canvas would be a contract change (`zones[].canvases[]`
  *   is typed `kind: "photo"`). Owner ruling: still panorama first.
  * - `run-trace` — §4.1b's narrated video following a line end to end.
+ * - `document` — §4.1d, the paper: a manual, an invoice, a permit, the well record. NOT a
+ *   fourth capture *kind* — the kinds are the pan, the room shot and the run trace — but the
+ *   same marking problem, because a photograph of an invoice is indistinguishable from a
+ *   photograph of a wall once it is one of three hundred. ⚑ It is the §4.1a rule applied to
+ *   paper: *photograph it whether or not you know what it is*, so the door needs no expertise
+ *   and asks nothing. **An invoice carries an install date, a model and the name of the trade
+ *   who did the work, and a camera pointed at a water heater carries none of the three.**
+ *   Marked here because Intake Tier 3, the Binder Master Spec's document vault and Amendment
+ *   11's `document` reading surface were three declarations with no producer.
  *
  * WHY `room-shot` IS HERE when the ruling named "pan / run-trace / ordinary": #124 asks
  * whether the pan should REPLACE the room shot, and that question is scored by comparing the
@@ -82,7 +91,7 @@ export type VisitKind = "discovery" | "inspection" | "monthly";
  * So `zones[].canvases[]` is empty on a Discovery export by design, and a reader must not
  * take that emptiness as "no orienting frame" — this field is where the frame is named.
  */
-export type CaptureIntent = "room-shot" | "pan" | "run-trace";
+export type CaptureIntent = "room-shot" | "pan" | "run-trace" | "document";
 
 /** Where a pin's type comes from: the component library, or freeform (REDESIGN §3). */
 export type PinTypeRef =

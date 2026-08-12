@@ -57,7 +57,14 @@ describe("capture intent — set at the door, unchanged downstream", () => {
     // The invariant, not the list: whatever intents go in come out attached to the same
     // media, and absence stays absence. `undefined` is the ordinary capture — the majority —
     // and it must never acquire a value by travelling.
-    const intents: (CaptureIntent | undefined)[] = ["room-shot", undefined, "pan", "run-trace", undefined];
+    const intents: (CaptureIntent | undefined)[] = [
+      "room-shot",
+      undefined,
+      "pan",
+      "run-trace",
+      undefined,
+      "document",
+    ];
     const manifest = sessionWithIntents(intents);
 
     expect(manifest.media).toHaveLength(intents.length);

@@ -122,7 +122,12 @@ debug, or upload role — the pipeline is 100 % cloud CI.**
 **Web-layer work (all iteration happens here, not in Swift):**
 - 2D projection in TypeScript: CapturedRoom `walls/doors/windows/openings` (4×4
   transforms + dimensions) → top-down polylines; `objects` (16 furniture/appliance
-  categories with oriented boxes) → **auto-pin candidate markers**. Two verify-first
+  categories with oriented boxes) → ~~**auto-pin candidate markers**~~ **— SUPERSEDED
+  2026-08-12: auto-pins are a desk artifact.** *Baseline Service Design v1.3 §4.2 — Discovery
+  offers no pin surface, because pinning is classification and classification is desk work.
+  A candidate marker proposed in the room is the failure the three-visit redesign removed,
+  arriving through the scanner instead of the checklist. The detected `objects` still travel;
+  what changes is that nothing proposes a pin from them in the field.* Two verify-first
   caveats from research: Apple doesn't formally document the Codable JSON schema
   (pin it from our own sample encodes; it carries a `version` field), and the
   wall-axis convention (x = width, thin z) is community-consistent but unconfirmed —

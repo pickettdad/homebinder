@@ -7,10 +7,19 @@
  * bright teal accent and a crimson Fail, neither of which appears in it — on a screen a
  * homeowner can see. This replaces those two and nothing else.
  *
- * What this is NOT: the spec's ivory-based capture mode. That palette is for a mode that
- * does not exist yet, and building it now would redress the inspection app in capture
- * mode's clothes. The light-versus-dark call is deferred to a real kitchen and a real
- * crawlspace (design session ruling, 2026-08-03).
+ * THE DEFERRAL IS DISCHARGED (owner ruling 2026-08-11). The 2026-08-03 ruling deferred the
+ * light-versus-dark call "to a real kitchen and a real crawlspace"; the owner used the app on
+ * device and ruled it. **The app is light and on brand — ivory #FBF8F2 ground, navy #15223B
+ * text, brass #BE8A3D accent — and it lands with the native capture rebuild**, when the
+ * capture screen is being redesigned anyway rather than as a separate repaint.
+ *
+ * ⚑ The reasoning is not what the deferral assumed, and it is the part worth keeping: **a
+ * viewfinder is dark because the picture is the content, which was never a palette question.**
+ * Capture mode stays dark for that reason and not as an exception. Everything else — the walk,
+ * the zone picker, anything shown to a homeowner — is where the brand lives, and those are the
+ * moments a client sees the display.
+ *
+ * So what is below is still the stopgap, and it is now a stopgap with a stated end.
  *
  * Named `brass`/`alert` rather than redefining `teal`/`rose`, which would have been a
  * one-line change: a class reading `teal-500` that renders brass is the same defect as a
@@ -21,8 +30,8 @@
  * `amber` (core-open dots) and `emerald` (satisfied ticks) are left alone: conventional
  * status affordances, not brand accents, and out of this fix's scope.
  *
- * The shell stays slate-950 rather than brand navy #15223B — the surface scale is used
- * everywhere and swapping it belongs with the capture-mode palette decision, not here.
+ * The shell stays slate-950 for now — the surface scale is used everywhere, and swapping it is
+ * the native-rebuild job above rather than a change to make twice.
  */
 @theme {
   --color-brass-50: #fbf4e8;

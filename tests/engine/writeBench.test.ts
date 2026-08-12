@@ -63,6 +63,33 @@ describe("summarize — the numbers the screen reports", () => {
     expect(even.dominant).toBe("even");
   });
 
+  it("only calls a result comfortable when it has headroom AND stays steady", () => {
+    // The defect the first real run exposed: `dominant` answers "which cost would I attack",
+    // and on a result needing no attack the screen printed "both need attention" — an alarm
+    // on a pass. The verdict is what gates that, so it has to be right in both directions.
+    const fast = Array.from({ length: 8 }, (_, i) => ({ index: i, hashMs: 9, txMs: 11 }));
+    expect(summarize(params, fast)!.verdict).toBe("comfortable");
+
+    // Fast on average but degrading badly is NOT comfortable — a room that stalls at object
+    // thirty is the failure the averages hide, so headroom alone must not clear it.
+    const degrading = [
+      ...Array.from({ length: 4 }, (_, i) => ({ index: i, hashMs: 9, txMs: 5 })),
+      ...Array.from({ length: 4 }, (_, i) => ({ index: i + 4, hashMs: 9, txMs: 40 })),
+    ];
+    expect(summarize(params, degrading)!.verdict).toBe("marginal");
+
+    // Slower than one fire a second is the shutter outrunning storage.
+    const slow = Array.from({ length: 8 }, (_, i) => ({ index: i, hashMs: 600, txMs: 600 }));
+    expect(summarize(params, slow)!.verdict).toBe("insufficient");
+  });
+
+  it("still computes dominance on a comfortable result, even though nothing says it", () => {
+    // Gating the PROSE, not the diagnostic. The number stays right so a later run under camera
+    // contention can be compared against this one.
+    const s = summarize(params, [{ index: 0, hashMs: 100, txMs: 10 }])!;
+    expect(s.dominant).toBe("hashing");
+  });
+
   it("orders percentiles", () => {
     const values = [5, 1, 9, 3, 7];
     expect(percentile(values, 50)).toBeLessThanOrEqual(percentile(values, 95));

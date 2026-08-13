@@ -245,6 +245,26 @@ the web layer needs `isOpaque = false`; if that goes wrong the symptom is a blac
 is also #71's symptom, with no way to separate them.** #71's one known variable is pre-existing
 stored data, which a fresh install never has and CI can never exercise.
 
+**The native build order is a sequence of proofs, and each one exists because the next is
+undiagnosable without it.** **#71 · then the plugin skeleton, proven on device · then the camera ·
+then RoomPlan.** **No camera UI before the skeleton returns a value on real hardware** — if the
+bridge shape is wrong, the camera and RoomPlan are both wrong, and that must surface on day one
+rather than day five. **And RoomPlan does not come first**: its consumer is desk-pass placement,
+which is binder-side and unbuilt, so RoomPlan-first optimises a stage that cannot yet consume its
+output — while the camera plugin *is* RoomPlan's harness (permissions, a native view under a
+transparent WebView, view lifecycle, a structured-result bridge, a package that survives
+`cap sync`).
+
+**⚑ And the skeleton is proven twice, in one day, before anything is built on it: once locally on
+a tethered device, then through `ios-testflight.yml` to TestFlight.** *The July failure did not
+happen in Xcode — it happened **on device, after a CI archive**, and the recorded cause is that
+CI-only iteration could not diagnose it.* **A Mac fixes the diagnosis half and does not make the
+local build the shipping build**: CI still runs `npx cap add ios && npx cap sync ios` from a clean
+checkout, and **`cap sync` resolving a plugin through `package.json` is exactly the step that
+failed in July.** A skeleton that returns a value under Xcode debug and never goes through the
+archive has proved the bridge shape and not the thing that broke. **If the two runs disagree, that
+disagreement is the finding.**
+
 **Two sessions never share a branch (rule 20).** A Mac-side session takes `claude/native-*`; a
 cloud session keeps its own; **they meet only at `main`, through pull requests the owner merges.**
 *A shared branch produces a visible conflict. A session without PR discipline pushing to a branch

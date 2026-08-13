@@ -1,8 +1,17 @@
 # CLAUDE.md
 
 HouseSteady Field Assistant — offline-first iPad inspection PWA. Orientation order:
-`docs/REDESIGN-v2.md` (the model), `docs/PLAN-STAGE-0.md` / `docs/PLAN-STAGE-1.md`
-(build plans), `docs/CHECKLIST-MASTER.md` (checklist content — owner-edited, versioned).
+`docs/REDESIGN-v2.md` (the model — **read its supersession block first**), `docs/PLAN-STAGE-0.md` /
+`docs/PLAN-STAGE-1.md` (build plans), `docs/CHECKLIST-MASTER.md` (checklist content —
+owner-edited, versioned).
+
+**⚑ The build sequence is NOT in this repo, and that is deliberate.** The canonical stage list and
+the native-track plan live in the owner-carried **Build Roadmap** (`§2` and `§4a`), alongside the
+**Document Register** and **Baseline Service Design**. **Ask the owner for the current cut; do not
+reconstruct one from this repo, and do not create one here** — both Code sessions were asked for a
+build sequence, both found none, and both declined to write one, because *two copies is how they
+drift apart*. `REDESIGN-v2.md` §5 holds four one-line stages from 2026-07-22 and is superseded by
+that table; its own supersession block says so.
 
 ## Standing rules
 

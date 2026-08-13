@@ -123,6 +123,27 @@ the right job.
 *This is the test every future flag gets*, and it is the guard on a column that would otherwise
 quietly re-import the classification-during-capture the three-visit redesign removed.
 
+**A signal that speaks on the majority case is one nobody reads on the minority case that
+matters (class named 2026-08-12, third instance in three days).** Each arrived in code written
+by the session that had just argued for the rule, which is why it is a class rather than three
+fixes:
+
+1. **The OCR retake trigger**, ruled to fire when a read returned *nothing*. But most captures
+   legitimately contain no text — a pipe, a floor stain, a wide shot — so it would have nagged on
+   the majority and been ignored by the time a plate needed it. Correct trigger: characters *were*
+   detected and the read is marginal.
+2. **The viewfinder frame colour**, which was to go amber for a torch that correctly stayed off in
+   a lit room. **A frame meaning both *wrong mode* and *torch unavailable* means neither** — and
+   the failure it exists to catch is twenty plates shot in the wrong mode.
+3. **The write-rate screen**, which printed *both need attention* on a result with 45× headroom,
+   because it answered *which cost dominates* without first asking whether anything dominated.
+
+*The general form:* **a diagnostic decides whether there is anything to say before it says what.**
+Attribution is a question about a problem; printing an answer when there is no problem is an
+alarm. **Gate the prose on a verdict and keep the diagnostic computed** — so a later run under
+different conditions stays comparable. `summarize()` in `src/dev/writeBench.ts` is the worked
+example, and it is the one that got this wrong first.
+
 **Three capture kinds, and "sweep" is not one of them (owner rulings 2026-08-11).** The declared
 kinds are the **pan**, the **room shot** and the **run trace** (Baseline Service Design v1.2
 §4.1a/§4.1b). ***Sweep* is retired from all owner-authored content.** `SweepCamera` keeps its

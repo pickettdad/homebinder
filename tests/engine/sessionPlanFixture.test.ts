@@ -17,6 +17,44 @@
  *
  * The receiver is NOT built yet. This validates the shape it will be built against, so the
  * contract is pinned before the code exists rather than after.
+ *
+ * ────────────────────────────────────────────────────────────────────────────────────────
+ * THE RECEIVER'S RULES, ratified 2026-08-14 with Builder Code and the design session.
+ *
+ * Recorded here rather than in a reply, because **the receiver is built in this repo and
+ * these bind whoever builds it** — and the design session that carried them is consolidating,
+ * so a ruling left in a message has one fewer path to the code than it had yesterday.
+ *
+ * **Versioning — bump on breaking only.** Breaking is a receiver correct at N being wrong at
+ * N+1: a field removed, renamed, retyped, or given new meaning under the same name. Adding a
+ * field is NOT breaking. ⚑ That is only safe as a *pair* with the tolerance rule below — the
+ * emitter may add freely precisely because the receiver ignores what it does not know.
+ * `planRevision` rides alongside so an ignored-field report is attributable to a build.
+ *
+ * **1 · Unknown version → refuse, loudly, never best-effort.** Guessing is the one case that
+ * produces a silent wrong answer.
+ *
+ * **2 · Unknown field at a known version → ignore and count.**
+ *
+ * **3 · Unknown value in a known field → preserve, display, count, mark unrecognised.**
+ *
+ * ⚑ **The discriminator carve-out, and it is a named class rather than one exception.**
+ * **A field whose value selects how another field is read is REFUSED for that pair, not
+ * marked.** `sinceBasis` is today's only instance — `since` is null on every basis but
+ * `dated`, and a null there is four different facts — so an unrecognised basis makes `since`
+ * uninterpretable rather than merely flagged. Naming the class is the point: rule 3 is right
+ * for vocabulary and wrong for anything that decides how to read something else.
+ *
+ * ⚑ **Refuse the plan, never the visit.** Server-side "loudly" is a 4xx. Field-side it is an
+ * iPad in a basement, where **a visit without a plan is survivable and a frozen app is not.**
+ * The import fails, says so plainly, and the visit proceeds unplanned — the same ladder as
+ * *a capture is safe the instant it is taken, and no later step is mandatory.*
+ *
+ * **Two shape guarantees from the emitter side:** `flag` is always present and nullable
+ * (`unflagged` is a state, expressed as null on the wire — never an absent key), and the plan
+ * carries **every flagged live pin regardless of typing**, so an untyped pin someone flagged
+ * is not silently dropped from the visit it was flagged for.
+ * ────────────────────────────────────────────────────────────────────────────────────────
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";

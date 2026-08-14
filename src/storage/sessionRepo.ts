@@ -5,7 +5,7 @@ import { db, type MediaRow, type SessionRow, type StoredEvent } from "./db";
 import type { EventPayload, SessionEvent, Source } from "../engine/schema/events";
 import { EVENT_SCHEMA_VERSION, type RoomInstance } from "../engine/schema/events";
 import type { RouteConfig } from "../engine/schema/routeConfig";
-import type { ChecklistConfig } from "../engine/schema/checklistConfig";
+import { validateChecklistConfig, type ChecklistConfig } from "../engine/schema/checklistConfig";
 import { EVENT_SCHEMA_VERSION_V2, type V2EventPayload, type VisitKind } from "../engine/v2/events";
 import { uuidv7 } from "../engine/ids";
 import { hashConfig } from "../engine/canonical";
@@ -210,13 +210,41 @@ export async function createSessionV2(args: {
   return sessionId;
 }
 
-/** The pinned checklist snapshot for a v2 session — the ONLY config v2 code may read. */
+/**
+ * The pinned checklist snapshot for a v2 session — the ONLY config v2 code may read.
+ *
+ * ⚑ A snapshot is data written by a PAST version of this app. `as ChecklistConfig` was a bare
+ * cast, which is the compiler being *told* that old data has today's shape rather than being
+ * shown it — and that is issue #71: a session created before master v1.6.1 carried zone
+ * attributes with no `defaultsTrueFor`, the current engine called `.includes()` on it during
+ * render, and React unmounted the root. A black screen, post-boot, with the watchdog correctly
+ * silent.
+ *
+ * So the snapshot is re-parsed through the schema on the way out. Every field the schema has
+ * gained since carries a `.default()`, so parsing backfills them — which fixes the whole class
+ * rather than the one field, and keeps fixing it as the master grows.
+ *
+ * Two properties this deliberately preserves:
+ *  - The stored row is never rewritten, and `hashConfig` is only ever computed at CREATION
+ *    (createSession/createSessionV2). Backfilled defaults therefore cannot move a session's
+ *    recorded `configHash` — the provenance stamped on every event and export stays exact.
+ *  - Validation failure is NOT fatal. A snapshot the current schema rejects outright still
+ *    opens, on the raw row, exactly as it does today; the reason is logged. Making resume
+ *    depend on a *newer* schema accepting an *older* snapshot would turn a cosmetic schema
+ *    tightening into unopenable field data, which is a worse failure than the one being fixed.
+ */
 export async function loadSessionChecklistConfig(sessionId: string): Promise<ChecklistConfig> {
   const session = await db.sessions.get(sessionId);
   if (!session) throw new Error(`unknown session ${sessionId}`);
   if (session.kind !== "v2") throw new Error(`session ${sessionId} is not v2`);
   const snapshot = await db.configSnapshots.get(session.configHash);
   if (!snapshot) throw new Error(`missing config snapshot ${session.configHash}`);
+  const parsed = validateChecklistConfig(snapshot.config);
+  if (parsed.ok) return parsed.config;
+  console.warn(
+    `[hs] config snapshot ${session.configHash} does not satisfy the current checklist schema; ` +
+      `opening it as stored. ${parsed.errors.join("; ")}`,
+  );
   return snapshot.config as ChecklistConfig;
 }
 

@@ -90,8 +90,13 @@ export function activeRefs(
  */
 export function effectiveAttributes(config: ChecklistConfig, zone: ZoneStateV2): Record<string, boolean> {
   const out: Record<string, boolean> = { ...zone.attributes };
-  for (const attr of config.zoneAttributes)
-    if (!(attr.id in out) && attr.defaultsTrueFor.includes(zone.zoneType)) out[attr.id] = true;
+  // `defaultsTrueFor ?? []` is not defensive noise: a session's config is a SNAPSHOT written
+  // by whichever build created it, and this field arrived in master v1.6.1 — so every session
+  // created before it has attribute rows without it. Reading it unguarded is issue #71, and
+  // the honest reading of an absent column is that it defaults true for nothing, because a
+  // snapshot that predates the column cannot express an opinion about it.
+  for (const attr of config.zoneAttributes ?? [])
+    if (!(attr.id in out) && (attr.defaultsTrueFor ?? []).includes(zone.zoneType)) out[attr.id] = true;
   return out;
 }
 

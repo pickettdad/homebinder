@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { ErrorBoundary } from "./app/ErrorBoundary";
 import "./app/theme.css";
 
 // The inline watchdog in index.html installs this; it paints a readable error on-device so a
@@ -17,7 +18,14 @@ declare global {
 try {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App />
+      {/*
+        Outermost boundary: catches a throw in App's own body, above the per-screen boundary.
+        No `onRecover` — there is nowhere safer to navigate to from here, so a restart is the
+        only honest offer. Stored events are untouched either way (issue #71).
+      */}
+      <ErrorBoundary context={() => ({ where: "app root" })}>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
 } catch (err) {

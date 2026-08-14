@@ -30,7 +30,10 @@ export function WalkScreen() {
 
   const inboxCount = v2Session.inbox.length + v2Session.inboxNoteIds.length;
   const miscPins = v2Session.pins.filter((p) => !p.zoneId && !p.retired);
-  const askAttrs = config.zoneAttributes.filter((a) => a.askAtCreation);
+  // `?? []` throughout this screen for the reason effectiveAttributes carries: `config` is the
+  // session's pinned snapshot, and an older build's snapshot lacks fields the schema has since
+  // gained (issue #71).
+  const askAttrs = (config.zoneAttributes ?? []).filter((a) => a.askAtCreation);
   const selectedType = config.zoneTypes.find((t) => t.id === typeId);
   const sessionItems = deriveSessionItems(config, v2Session);
 
@@ -201,8 +204,8 @@ export function WalkScreen() {
                   // where they physically are rather than where the room got named.
                   setAttrs(
                     new Set(
-                      config.zoneAttributes
-                        .filter((a) => a.askAtCreation && a.defaultsTrueFor.includes(t.id))
+                      (config.zoneAttributes ?? [])
+                        .filter((a) => a.askAtCreation && (a.defaultsTrueFor ?? []).includes(t.id))
                         .map((a) => a.id),
                     ),
                   );

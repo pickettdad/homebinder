@@ -4,12 +4,13 @@ import { BigButton, Sheet, formatDuration } from "../../ui/bits";
 import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { suggestedPinTypes } from "../../engine/v2/checklist";
-import type { PinFlag } from "../../engine/v2/events";
+import { PIN_FLAGS } from "../../engine/v2/events";
 import { FlagChip, MediaThumb, MediaViewer, PinBadge, Thumb, TypePicker, pinTypeLabel } from "./shared";
 import { AttachFromInbox } from "./AttachFromInbox";
 import { ChatPanel } from "./ChatPanel";
 
-const FLAGS: PinFlag[] = ["fine", "monitor", "issue"];
+/** The vocabulary, imported rather than restated — see PIN_FLAGS. */
+const FLAGS = PIN_FLAGS;
 
 /** One pin: the identity everything hangs off — type, nickname, flag, photos, notes, placement. */
 export function PinScreen({ pinId }: { pinId: string }) {

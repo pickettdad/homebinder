@@ -10,6 +10,7 @@
  * none, and that re-filing a capture never rewrites what the act of capture was.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import type { Source } from "../../src/engine/schema/events";
 import type { CaptureIntent, V2EventPayload, V2SessionEvent } from "../../src/engine/v2/events";
 import { foldV2 } from "../../src/engine/v2/fold";
@@ -184,5 +185,39 @@ describe("groupIntoRuns — the capture-order grid", () => {
 
   it("returns no runs for no captures", () => {
     expect(groupIntoRuns([])).toEqual([]);
+  });
+});
+
+describe("pin flag vocabulary — one declaration, and null is a state", () => {
+  it("offers exactly the declared vocabulary in the UI, by construction", () => {
+    // Not a list check — a check that the list is not restated. The screen imports PIN_FLAGS
+    // rather than carrying its own array, so a fourth value cannot type-check everywhere and
+    // silently fail to appear. Asserted at the source because the guarantee IS the import.
+    const screen = readFileSync("src/screens/v2/PinScreen.tsx", "utf8");
+    expect(screen).toContain("PIN_FLAGS");
+    expect(screen, "the vocabulary must not be restated as a literal").not.toMatch(
+      /\[\s*"fine"\s*,\s*"monitor"\s*,\s*"issue"\s*\]/,
+    );
+  });
+
+  it("exports an unflagged pin as null rather than omitting the field", () => {
+    // The Session Plan v0 Contract §9 lists three values and does not address null. Every pin
+    // starts unflagged and tapping the active flag clears it back — so null is *deliberately
+    // unflagged*, and a receiver reading it as missing data would lose a real state.
+    const events = mkEvents([
+      { type: "SessionInitialized", configId: "cfg", configVersion: "1.0", configHash: "h", propertyFlags: [], visitKind: "discovery" },
+      { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Mechanical", attributes: {}, level: "basement" },
+      { type: "PinCreated", pinId: "p1", pinNumber: 1, zoneId: "z1" },
+      { type: "PinFlagged", pinId: "p1", flag: "issue" },
+      { type: "PinFlagged", pinId: "p1", flag: null },
+    ]);
+    const manifest = buildManifestV3({
+      state: foldV2(events), events, configSnapshot: {},
+      exportedAt: "2026-08-13T12:00:00.000Z", appVersion: "test",
+    });
+    const pin = manifest.pins.find((p) => p.pinId === "p1");
+    expect(pin).toBeDefined();
+    expect("flag" in pin!, "flag must be present, not omitted").toBe(true);
+    expect(pin!.flag).toBeNull();
   });
 });

@@ -108,54 +108,63 @@
       "pinId": "019fb932-8ad9-7712-a1ba-1f8e82c03cd6",
       "componentType": "sink",
       "label": null,
+      "flag": "issue",
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb938-1ec5-754a-a727-354b9dc68162",
       "componentType": "appliance-dishwasher",
       "label": null,
+      "flag": null,
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb93e-37d1-7f22-92b1-5611ac3f5f47",
       "componentType": "receptacle-gfci",
       "label": null,
+      "flag": "fine",
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb93f-98cb-7afb-a438-8548f26668da",
       "componentType": "appliance-refrigerator",
       "label": null,
+      "flag": "fine",
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb942-178f-7e81-a143-26e63c451af2",
       "componentType": "appliance-range-hood",
       "label": null,
+      "flag": "fine",
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb95e-3759-7b2b-8934-ac825f97cb1d",
       "componentType": "register",
       "label": null,
+      "flag": null,
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb960-0c5b-7c27-aa68-140578c42ebd",
       "componentType": "receptacle-gfci",
       "label": null,
+      "flag": null,
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb964-23bf-71ef-9c9a-e64b31a6a260",
       "componentType": "appliance-dryer",
       "label": null,
+      "flag": null,
       "priorUnitPhoto": null
     },
     {
       "pinId": "019fb982-66e0-7189-958e-9a6799dfc23e",
       "componentType": "furnace",
       "label": null,
+      "flag": null,
       "priorUnitPhoto": null
     }
   ],
@@ -2871,11 +2880,11 @@
   "sections": {
     "zones": {
       "count": 8,
-      "note": "7 attribute(s) decided true and 25 decided false travel explicitly; a recorded false is a decision and must not arrive as an absence"
+      "note": "7 attribute(s) recorded true and 25 recorded false travel explicitly, verbatim. A recorded key and an absent key are different things and the difference must survive. A recorded FALSE is not necessarily a decision: exports written before the field-side capture-mode fix wrote a false for every unset toggle, so a considered no and an untouched control are indistinguishable in them. From exports written after that fix, an unset attribute is absent rather than false and a recorded false is a decision."
     },
     "typedPins": {
       "count": 9,
-      "note": "live typed pins, by field-minted uuid"
+      "note": "live typed pins, by field-minted uuid. Each carries the field's own `flag` verbatim — uninterpreted, including values this build has never met. `monitorsDue` is the derivation; this is the evidence, and it outlives the derivation when Increment 5 stops reading flags · 3 live pin(s) carry a flag and have no component type, so they are NOT in this array and their flags do not travel with it. This array is not the property's whole flag record; `monitorsDue` reads every live pin, typed or not"
     },
     "carriedGaps": {
       "count": 208,

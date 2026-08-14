@@ -50,10 +50,40 @@
  * The import fails, says so plainly, and the visit proceeds unplanned — the same ladder as
  * *a capture is safe the instant it is taken, and no later step is mandatory.*
  *
- * **Two shape guarantees from the emitter side:** `flag` is always present and nullable
- * (`unflagged` is a state, expressed as null on the wire — never an absent key), and the plan
- * carries **every flagged live pin regardless of typing**, so an untyped pin someone flagged
- * is not silently dropped from the visit it was flagged for.
+ * **What a receiver may rely on, checked against the fixture beside this file at the
+ * provenance recorded below.** *Two earlier revisions of this block were wrong in opposite
+ * directions — see the note at the end, which is the part worth keeping.*
+ *
+ * - ✅ **`flag` is always present and nullable.** Every entry in `typedPins[]` carries it —
+ *   on this walk, 5 `null`, 3 `fine`, 1 `issue`. `null` is *unflagged*, a state; an absent
+ *   key would be a different fact and does not occur.
+ * - ⚠ **`typedPins[]` is a PARTIAL flag record, and this is the live limitation.** Flags
+ *   travel on typed pins only: **3 live pins carry a flag and have no component type, so
+ *   they are not in the array and their flags do not travel with it.** A receiver reading
+ *   this array as the property's whole flag record loses them silently — *an empty list
+ *   indistinguishable from a completed one*, in the dimension the flag exists to serve.
+ * - ✅ **The shortfall is stated rather than left to be derived.** `sections.typedPins`
+ *   names the count that did not travel, and `sections.monitorsDue` carries the whole-property
+ *   census (6 `fine`, 1 `issue`) including the untyped pins. **So the gap is readable even
+ *   though the pins are not** — read both sections, never the array alone.
+ *
+ * ⚑ **PROVENANCE, and it is load-bearing: this copy is from binder `ac1cfbd` (PR #117).**
+ *
+ * **A committed fixture pins the shape and cannot pin its own freshness.** These tests read a
+ * local file, so they can prove the emitter's shape has not drifted *from this copy* and can
+ * never notice the copy is behind. That gap fired for the first time on 2026-08-14: the
+ * binder regenerated the fixture in #117 adding `typedPins[].flag`, its own suite caught the
+ * change correctly, and nobody carried the note across — so a correction written here against
+ * the stale copy asserted *"no `flag` key at all"*, which was true of this file and false of
+ * the emitter.
+ *
+ * **So: re-pull before trusting a reading of it, and update this SHA in the same commit.**
+ * The SHA is the only thing here that makes staleness detectable at all.
+ *
+ * *And the durable lesson is narrower than "check your copy": a ruling and a shipped
+ * behaviour are different facts, and so are a shipped behaviour and your snapshot of one.
+ * The first confusion put a wrong line in #99; the second put a different wrong line in the
+ * correction to it.*
  * ────────────────────────────────────────────────────────────────────────────────────────
  */
 import { describe, expect, it } from "vitest";

@@ -181,7 +181,8 @@ export function ZoneV2Screen({ zoneId }: { zoneId: string }) {
         <section className="flex flex-col gap-2">
           <h2 className="font-semibold text-slate-300">About this zone</h2>
           <div className="flex flex-wrap gap-2">
-            {v2Config.zoneAttributes.map((a) => {
+            {/* `?? []` — the session's pinned snapshot may predate a schema field (issue #71). */}
+            {(v2Config.zoneAttributes ?? []).map((a) => {
               const on = zone.attributes[a.id] === true;
               const unset = !(a.id in zone.attributes);
               return (

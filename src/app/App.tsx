@@ -13,6 +13,10 @@ import { SetupV2Screen } from "../screens/v2/SetupV2Screen";
 import { CaptureModeScreen } from "../screens/v2/CaptureModeScreen";
 import { modeForVisit, visitKindOf } from "../engine/v2/checklist";
 import { globalCameraApplies } from "./captureSurface";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { isNativePlatform } from "./platform";
+import { APP_VERSION } from "../storage/sessionRepo";
+import { loadChecklists } from "../config/loadChecklists";
 import { WalkScreen } from "../screens/v2/WalkScreen";
 import { ZoneV2Screen } from "../screens/v2/ZoneV2Screen";
 import { PinScreen } from "../screens/v2/PinScreen";
@@ -92,7 +96,8 @@ function GlobalCamera() {
 }
 
 export function App() {
-  const { ready, screen, sessionId, toast, init, drainNow, drainChatNow, refreshReviewStatus, v2Session } = useApp();
+  const { ready, screen, sessionId, toast, init, drainNow, drainChatNow, refreshReviewStatus, v2Session, v2Config, leaveSession } =
+    useApp();
   /**
    * Capture Mode spec §1: mode follows the visit kind and is never independently settable.
    * Derived here, at the one place that decides what a route renders — so capture mode is a
@@ -142,6 +147,27 @@ export function App() {
               : "Screen may sleep — wake lock not held"}
         </div>
       )}
+      {/*
+        Issue #71: a render throw anywhere below here used to unmount the ENTIRE root, and the
+        watchdog is deliberately silent post-boot — so the failure reached the field as a black
+        rectangle with no text. The boundary is seated around the screen switch rather than at
+        the root so that recovery is "go back to the home screen", which keeps the visit; the
+        events are already on disk, so nothing is repaired, only re-navigated.
+      */}
+      <ErrorBoundary
+        resetKey={JSON.stringify(screen)}
+        onRecover={leaveSession}
+        context={() => ({
+          screen,
+          sessionId,
+          appVersion: APP_VERSION,
+          // The snapshot version is the one that matters: #71 was a session pinned to a config
+          // written by an older build, so this is the first thing to compare against today's.
+          sessionConfigVersion: v2Config?.configVersion,
+          currentConfigVersion: loadChecklists().configVersion,
+          native: isNativePlatform(),
+        })}
+      >
       {screen.name === "home" && <HomeScreen />}
       {screen.name === "setup" && <SetupScreen />}
       {screen.name === "route" && <RouteScreen />}
@@ -163,6 +189,7 @@ export function App() {
       {screen.name === "export2" && <ExportV2Screen />}
       {screen.name === "devbench" && <DevBenchScreen />}
       <GlobalCamera />
+      </ErrorBoundary>
       {toast && (
         <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center">
           <p className="rounded-full bg-slate-700 px-5 py-3 text-slate-100 shadow-lg">{toast}</p>

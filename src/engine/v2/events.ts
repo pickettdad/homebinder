@@ -31,7 +31,24 @@ import type { EventBase, CaptureMediaMeta } from "../schema/events";
 
 export const EVENT_SCHEMA_VERSION_V2 = 2;
 
-export type PinFlag = "fine" | "monitor" | "issue";
+/**
+ * The pin flag vocabulary — **one declaration site, and the array is it.**
+ *
+ * The type used to be the declaration and `PinScreen` carried a hand-written
+ * `PinFlag[]` beside it. TypeScript checks such an array for *membership* and not for
+ * *completeness*, so a fourth value would have type-checked everywhere and silently never
+ * appeared in the UI — the declared-and-unconsumed class, in a vocabulary about to become a
+ * versioned cross-repo contract (Session Plan v0 Contract §9b). Deriving the type from the
+ * array makes the drift impossible rather than tested.
+ *
+ * ⚑ `null` is a fourth state and it is not "absent". Every pin starts unflagged, and tapping
+ * the active flag clears it back to null — so a receiver must read null as *deliberately
+ * unflagged*, never as missing data. `PinFlagged`, `PinState.flag` and
+ * `manifest.pins[].flag` are all `PinFlag | null` for that reason.
+ */
+export const PIN_FLAGS = ["fine", "monitor", "issue"] as const;
+
+export type PinFlag = (typeof PIN_FLAGS)[number];
 
 /**
  * What this visit came to do (Capture Mode spec §1). Set once at session start and never

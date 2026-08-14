@@ -265,6 +265,17 @@ failed in July.** A skeleton that returns a value under Xcode debug and never go
 archive has proved the bridge shape and not the thing that broke. **If the two runs disagree, that
 disagreement is the finding.**
 
+**Both Field Code sessions run — owner ruling 2026-08-13, and it is stated rather than inferred.**
+The Mac terminal session does **not** replace the cloud one. *The Mac setup guide's "this session
+is now Field Code" reads as replacement and the branch rule reads as parallel; the owner ruled
+parallel, so rule 20 is live from the day the Mac starts rather than a rule about some future.*
+
+**The division is capability first: anything needing a compiler or the tethered iPad is the Mac's
+— #71, the plugin, the camera, RoomPlan.** Everything else can run either side. *What the cloud
+session picks up is a scheduling decision and belongs to the owner, not to whichever session asks
+first — and it is worth asking, because two sessions independently choosing the same fix is the
+one failure separate branches do not prevent.*
+
 **Two sessions never share a branch (rule 20).** A Mac-side session takes `claude/native-*`; a
 cloud session keeps its own; **they meet only at `main`, through pull requests the owner merges.**
 *A shared branch produces a visible conflict. A session without PR discipline pushing to a branch

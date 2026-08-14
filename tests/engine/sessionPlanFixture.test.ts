@@ -50,29 +50,40 @@
  * The import fails, says so plainly, and the visit proceeds unplanned — the same ladder as
  * *a capture is safe the instant it is taken, and no later step is mandatory.*
  *
- * ⚑ **TWO SHAPE RULINGS THAT ARE NOT YET EMITTED — corrected 2026-08-14, and an earlier
- * revision of this block recorded both as guarantees a receiver may rely on. They are not.
- * Check them against the fixture beside this file, which is the point of it being here.**
+ * **What a receiver may rely on, checked against the fixture beside this file at the
+ * provenance recorded below.** *Two earlier revisions of this block were wrong in opposite
+ * directions — see the note at the end, which is the part worth keeping.*
  *
- * - **`flag` always present and nullable** — ruled, **not emitted**. `typedPins[]` in the v1
- *   fixture carries `pinId · componentType · label · priorUnitPhoto` and **no `flag` key at
- *   all**. So a receiver reading `pin.flag` today gets `undefined` from an absent key, not
- *   `null` from an unflagged pin — and those are different facts.
- * - **Every flagged live pin carried regardless of typing** — ruled, **not emitted**. The
- *   binder ships flags on typed pins only, and **three flagged untyped pins do not travel.**
+ * - ✅ **`flag` is always present and nullable.** Every entry in `typedPins[]` carries it —
+ *   on this walk, 5 `null`, 3 `fine`, 1 `issue`. `null` is *unflagged*, a state; an absent
+ *   key would be a different fact and does not occur.
+ * - ⚠ **`typedPins[]` is a PARTIAL flag record, and this is the live limitation.** Flags
+ *   travel on typed pins only: **3 live pins carry a flag and have no component type, so
+ *   they are not in the array and their flags do not travel with it.** A receiver reading
+ *   this array as the property's whole flag record loses them silently — *an empty list
+ *   indistinguishable from a completed one*, in the dimension the flag exists to serve.
+ * - ✅ **The shortfall is stated rather than left to be derived.** `sections.typedPins`
+ *   names the count that did not travel, and `sections.monitorsDue` carries the whole-property
+ *   census (6 `fine`, 1 `issue`) including the untyped pins. **So the gap is readable even
+ *   though the pins are not** — read both sections, never the array alone.
  *
- * **So `typedPins[]` is a PARTIAL record of what was flagged, and a receiver must treat it as
- * one.** Reading it as the whole set means a pin the concierge flagged is silently absent
- * from the visit it was flagged for — which is `an empty list is indistinguishable from a
- * completed one`, in the dimension the flag exists to serve.
+ * ⚑ **PROVENANCE, and it is load-bearing: this copy is from binder `ac1cfbd` (PR #117).**
  *
- * Read `sections.typedPins` for the count that did not travel. ⚑ **Its note does not carry
- * that count yet** — at v1 it reads *"live typed pins, by field-minted uuid"* — so until it
- * does, the shortfall is not derivable from the payload at all and a receiver must not
- * pretend otherwise.
+ * **A committed fixture pins the shape and cannot pin its own freshness.** These tests read a
+ * local file, so they can prove the emitter's shape has not drifted *from this copy* and can
+ * never notice the copy is behind. That gap fired for the first time on 2026-08-14: the
+ * binder regenerated the fixture in #117 adding `typedPins[].flag`, its own suite caught the
+ * change correctly, and nobody carried the note across — so a correction written here against
+ * the stale copy asserted *"no `flag` key at all"*, which was true of this file and false of
+ * the emitter.
  *
- * *Recorded this way deliberately: a ruling and a shipped behaviour are different facts, and
- * writing the first as if it were the second is what put a wrong line in a merged PR.*
+ * **So: re-pull before trusting a reading of it, and update this SHA in the same commit.**
+ * The SHA is the only thing here that makes staleness detectable at all.
+ *
+ * *And the durable lesson is narrower than "check your copy": a ruling and a shipped
+ * behaviour are different facts, and so are a shipped behaviour and your snapshot of one.
+ * The first confusion put a wrong line in #99; the second put a different wrong line in the
+ * correction to it.*
  * ────────────────────────────────────────────────────────────────────────────────────────
  */
 import { describe, expect, it } from "vitest";

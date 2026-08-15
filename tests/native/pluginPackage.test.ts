@@ -12,9 +12,9 @@
  * Adding methods to the plugin, or a second plugin class, leaves every assertion below true.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { HS_SHELL_JS_NAME } from "../../src/native/hsShell";
 
 const ROOT = process.cwd();
@@ -65,6 +65,37 @@ describe("the native plugin package is wired so `cap sync` finds it", () => {
     const expected = fixName(pluginPackage.name);
     expect(packageSwift).toMatch(new RegExp(`name:\\s*"${expected}"`));
     expect(packageSwift).toMatch(new RegExp(`\\.library\\(\\s*name:\\s*"${expected}"`));
+  });
+
+  it("has every file it needs IN THE REPO, not merely on this machine", () => {
+    // ⚑ The one that got away, 2026-08-14. `.gitignore` carried an unanchored `ios/` — written for
+    // the generated project at the root — and git applies such a pattern at every level, so the
+    // plugin's only Swift file was never committed. The tethered build read it off local disk and
+    // passed; CI checked out a repo without it and could not resolve the package.
+    //
+    // Nothing else here can catch that: every other assertion in this file reads the working tree,
+    // which is exactly the thing that was lying. This one asks git.
+    const tracked = new Set(
+      execFileSync("git", ["ls-files", "native/hs-native"], { cwd: ROOT, encoding: "utf8" })
+        .split("\n")
+        .filter(Boolean),
+    );
+
+    // Xcode and SwiftPM write build/user state inside the package; those are correctly untracked.
+    const IGNORED = new Set([".swiftpm", ".build", "node_modules"]);
+    const onDisk: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (IGNORED.has(entry.name)) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else onDisk.push(relative(ROOT, full).split(sep).join("/"));
+      }
+    };
+    walk(PLUGIN_DIR);
+
+    expect(onDisk.length).toBeGreaterThan(0);
+    expect(onDisk.filter((f) => !tracked.has(f))).toEqual([]);
   });
 
   it("keeps the Swift deployment floor no higher than the app project's", () => {

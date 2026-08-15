@@ -25,6 +25,7 @@
     "@capacitor/ios": "^8.4.2",
     "client-zip": "^2.4.5",
     "dexie": "^4.0.11",
+    "hs-native": "file:native/hs-native",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^3.25.0",

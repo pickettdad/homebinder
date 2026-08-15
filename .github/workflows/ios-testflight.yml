@@ -58,25 +58,25 @@ jobs:
           xcodebuild -version
 
       - name: Generate + sync the iOS project
+        env:
+          # A monotonic, human-readable build number (UTC minute). Without it every upload
+          # carries the template's CFBundleVersion and App Store Connect rejects the second one
+          # as a redundant binary — and, more usefully, this is what lets a tester say WHICH
+          # TestFlight build they are holding when two proofs are compared in one day.
+          HS_BUILD_NUMBER: ${{ github.run_id }}
         run: |
-          npx cap add ios
-          npx cap sync ios
-          # WKWebView crashes on the PWA's camera/mic use without these usage strings.
-          PLIST="ios/App/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Photograph inspection findings, nameplates, and rooms.'" "$PLIST" || true
-          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string 'Record audio evidence and dictate notes.'" "$PLIST" || true
-          # The app uses only OS-standard HTTPS (no custom/proprietary encryption), so declare
-          # it exempt. This auto-answers App Store Connect's export-compliance prompt on every
-          # build — no manual "None of the above" click per upload. Injected here (not committed
-          # in ios/) because the ios/ project is generated on CI, so it survives every cap sync.
-          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || true
-
-          # NOTE: the Stage 0 RoomPlan native plugin injection was REVERTED (2026-07-24) — two
-          # storyboard-registration variants (customModule="App", then flat @objc name) both
-          # black-screened at launch on-device, and blind CI-only iteration couldn't diagnose it.
-          # This build is back to the proven hello-shell. RoomPlan re-approach is parked pending a
-          # decision (safe plugin-package integration, or a Mac for local native debugging). The
-          # Swift stays in native/ios/ for the re-approach; see PLAN-STAGE-0.
+          # ONE prepare script, shared with the local tethered build (scripts/ios-prepare.sh).
+          # Field 4 compares a tethered Debug run against this Release run, and that comparison is
+          # only meaningful if the two projects were prepared identically — a plist key injected
+          # here and not there manufactures a difference that reads as a finding.
+          #
+          # The July RoomPlan failure (storyboard-injected Swift, black screen on device, twice)
+          # is why nothing is copied into the generated project any more: native code lives in
+          # `native/hs-native`, a Capacitor plugin package resolved through package.json, and
+          # `cap sync` writes it into ios/App/CapApp-SPM/Package.swift. The prepare script FAILS
+          # the build if that did not happen — a project missing the plugin builds and installs
+          # perfectly well and simply has no bridge, which is the failure mode that cost a day.
+          ./scripts/ios-prepare.sh
 
       - name: Write the App Store Connect API key
         env:

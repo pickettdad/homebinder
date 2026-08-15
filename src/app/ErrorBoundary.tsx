@@ -55,7 +55,17 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState({ componentStack: info.componentStack ?? "" });
     // Also log it: the device console is attachable over the cable (Safari Web Inspector,
     // enabled in release by capacitor.config.ts), and that is how this gets read remotely.
-    console.error("[hs] render failure caught by ErrorBoundary:", error, info.componentStack);
+    //
+    // ⚑ Flattened to STRINGS first, and that is not tidying. Capacitor's console bridge sends
+    // arguments through JSON, and `JSON.stringify(new Error("boom"))` is `{}` — message, name and
+    // stack are all non-enumerable. Passing the Error object printed a literal `{}` on the device
+    // console: a boundary reporting a failure with no information about it, which is #71's own
+    // symptom moved one layer in. Caught the first time this boundary fired on hardware.
+    console.error(
+      `[hs] render failure caught by ErrorBoundary: ${error?.name ?? "Error"}: ${error?.message ?? String(error)}`,
+    );
+    console.error(`[hs] stack: ${error?.stack ?? "(none)"}`);
+    console.error(`[hs] component stack: ${info.componentStack ?? "(none)"}`);
   }
 
   componentDidUpdate() {

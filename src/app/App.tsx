@@ -24,6 +24,7 @@ import { CanvasScreen } from "../screens/v2/CanvasScreen";
 import { InboxScreen } from "../screens/v2/InboxScreen";
 import { ExportV2Screen } from "../screens/v2/ExportV2Screen";
 import { DevBenchScreen } from "../screens/DevBenchScreen";
+import { NativeCheckScreen } from "../screens/NativeCheckScreen";
 import { PhotoInput, VideoInput } from "../capture/PhotoInput";
 import { SweepCamera } from "../capture/SweepCamera";
 import type { CaptureTarget } from "../engine/v2/events";
@@ -188,6 +189,7 @@ export function App() {
       {screen.name === "inbox" && <InboxScreen />}
       {screen.name === "export2" && <ExportV2Screen />}
       {screen.name === "devbench" && <DevBenchScreen />}
+      {screen.name === "nativecheck" && <NativeCheckScreen />}
       <GlobalCamera />
       </ErrorBoundary>
       {toast && (

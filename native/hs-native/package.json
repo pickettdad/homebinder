@@ -1,0 +1,17 @@
+{
+  "name": "hs-native",
+  "version": "0.1.0",
+  "description": "HouseSteady native shell — the durable home for Swift, resolved through package.json so `cap sync` carries it into the generated Xcode project.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "files": [
+    "Package.swift",
+    "ios"
+  ],
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}

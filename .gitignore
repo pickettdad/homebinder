@@ -8,3 +8,5 @@ ios/
 public/icons/
 *.local
 .DS_Store
+# Xcode writes per-user scheme state into the plugin package when the project is opened.
+.swiftpm/

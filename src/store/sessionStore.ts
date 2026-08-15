@@ -90,7 +90,8 @@ export type Screen =
   | { name: "export2" }
   /** Diagnostics, reachable from Home only — never part of a visit. */
   | { name: "devbench" }
-  | { name: "nativecheck" };
+  | { name: "nativecheck" }
+  | { name: "camera2" };
 
 interface AppStore {
   ready: boolean;

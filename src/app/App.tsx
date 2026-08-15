@@ -25,6 +25,7 @@ import { InboxScreen } from "../screens/v2/InboxScreen";
 import { ExportV2Screen } from "../screens/v2/ExportV2Screen";
 import { DevBenchScreen } from "../screens/DevBenchScreen";
 import { NativeCheckScreen } from "../screens/NativeCheckScreen";
+import { CameraScreen } from "../screens/CameraScreen";
 import { PhotoInput, VideoInput } from "../capture/PhotoInput";
 import { SweepCamera } from "../capture/SweepCamera";
 import type { CaptureTarget } from "../engine/v2/events";
@@ -137,7 +138,9 @@ export function App() {
   if (!ready) return <div className="flex min-h-dvh items-center justify-center text-slate-400">Loading…</div>;
 
   return (
-    <div className="min-h-dvh bg-slate-950 text-slate-100">
+    // The camera screen runs over a native preview, so the app's own ground has to be absent
+    // rather than dark. Decided here, at the one place that knows which screen is up.
+    <div className={`min-h-dvh text-slate-100 ${screen.name === "camera2" ? "bg-transparent" : "bg-slate-950"}`}>
       <UpdateBanner />
       {sessionId !== null && !wakeLock.held && (
         <div className="pointer-events-none fixed right-3 top-3 z-50 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-medium text-slate-950">
@@ -190,6 +193,7 @@ export function App() {
       {screen.name === "export2" && <ExportV2Screen />}
       {screen.name === "devbench" && <DevBenchScreen />}
       {screen.name === "nativecheck" && <NativeCheckScreen />}
+      {screen.name === "camera2" && <CameraScreen />}
       <GlobalCamera />
       </ErrorBoundary>
       {toast && (

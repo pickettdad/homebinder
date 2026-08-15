@@ -101,6 +101,13 @@ export function HomeScreen() {
         >
           Native bridge check
         </button>
+        <button
+          type="button"
+          onClick={() => navigate({ name: "camera2" })}
+          className="self-start rounded-lg px-3 py-2 text-sm text-slate-400 ring-1 ring-slate-700 active:bg-slate-800"
+        >
+          Camera
+        </button>
       </div>
 
       <footer className="mt-4 text-sm text-slate-500">

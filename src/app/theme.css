@@ -65,6 +65,20 @@ body {
   overscroll-behavior-y: none; /* no pull-to-refresh mid-visit */
 }
 
+/*
+ * The viewfinder is a NATIVE layer behind the web view, so the whole web stack has to get out of
+ * its way — WKWebView transparency alone is not enough while html still paints slate-950 over it.
+ *
+ * ⚑ Scoped to a class the camera screen adds and removes, never applied globally. A permanently
+ * transparent web layer over no preview is a black screen, which is #71's symptom exactly; making
+ * it conditional is what keeps "the camera is running" and "the app is broken" distinguishable.
+ */
+html.hs-camera-live,
+html.hs-camera-live body,
+html.hs-camera-live #root {
+  background: transparent !important;
+}
+
 /* Keep text legible if the OS forces light mode; the app supplies its own colors. */
 :root {
   color-scheme: dark;

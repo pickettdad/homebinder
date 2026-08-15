@@ -3,8 +3,17 @@ dist/
 dev-dist/
 # Stage 0: the native iOS project is generated on the CI runner (no Mac to commit one).
 # Committed once real native code lands — see PLAN-STAGE-0 §5.
-ios/
+#
+# ⚑ ANCHORED, and it was not, and that cost the second proof (2026-08-14). An unanchored `ios/`
+# matches a directory of that name at EVERY level, and a Capacitor plugin package keeps its Swift
+# in exactly such a directory — so `native/hs-native/ios/Sources/.../HSShellPlugin.swift` was
+# silently never committed. The tethered build read it off the Mac's disk and passed; CI checked
+# out a repo without it and failed to resolve the package. 312 tests, a clean typecheck and a
+# green run on real hardware were all blind to a file that existed on one machine.
+/ios/
 # generated at build time by scripts/gen-icons.mjs (predev/prebuild hooks)
 public/icons/
 *.local
 .DS_Store
+# Xcode writes per-user scheme state into the plugin package when the project is opened.
+.swiftpm/

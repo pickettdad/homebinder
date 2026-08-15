@@ -89,7 +89,8 @@ export type Screen =
   | { name: "inbox" }
   | { name: "export2" }
   /** Diagnostics, reachable from Home only — never part of a visit. */
-  | { name: "devbench" };
+  | { name: "devbench" }
+  | { name: "nativecheck" };
 
 interface AppStore {
   ready: boolean;

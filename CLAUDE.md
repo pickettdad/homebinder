@@ -238,7 +238,10 @@ package resolved through `package.json`.**
 *This is not a preference and the repo has already paid for it:* `ios-testflight.yml` carries the
 reverted July RoomPlan injection in a comment — two storyboard-registration variants, both
 black-screening on device, and **the recorded cause is not that native is hard, it is that CI-only
-iteration could not diagnose it.** The Swift is parked in `native/ios/` as a head start.
+iteration could not diagnose it.** That package now exists: **`native/hs-native/`**, resolved by
+`"hs-native": "file:native/hs-native"` and carried into the generated project by `cap sync`.
+(An earlier note here said the July Swift was parked in `native/ios/`. There was no such
+directory in the repo — a pointer to a head start that did not exist.)
 
 **And #71 gets diagnosed before the WebView is made transparent.** A native camera preview behind
 the web layer needs `isOpaque = false`; if that goes wrong the symptom is a black screen — **which
@@ -246,8 +249,8 @@ is also #71's symptom, with no way to separate them.** #71's one known variable 
 stored data, which a fresh install never has and CI can never exercise.
 
 **The native build order is a sequence of proofs, and each one exists because the next is
-undiagnosable without it.** **#71 · then the plugin skeleton, proven on device · then the camera ·
-then RoomPlan.** **No camera UI before the skeleton returns a value on real hardware** — if the
+undiagnosable without it.** **#71 ✅ · the plugin skeleton, proven on device ✅ (both runs green
+2026-08-14) · then the camera · then RoomPlan.** **No camera UI before the skeleton returns a value on real hardware** — if the
 bridge shape is wrong, the camera and RoomPlan are both wrong, and that must surface on day one
 rather than day five. **And RoomPlan does not come first**: its consumer is desk-pass placement,
 which is binder-side and unbuilt, so RoomPlan-first optimises a stage that cannot yet consume its
@@ -264,6 +267,21 @@ checkout, and **`cap sync` resolving a plugin through `package.json` is exactly 
 failed in July.** A skeleton that returns a value under Xcode debug and never goes through the
 archive has proved the bridge shape and not the thing that broke. **If the two runs disagree, that
 disagreement is the finding.**
+
+**They disagreed on the first attempt, and the rule paid for itself (2026-08-14).** Tethered Debug
+green; TestFlight `Could not resolve package dependencies: invalid custom path 'ios/Sources/…'`.
+Cause: `.gitignore` carried an **unanchored** `ios/`, written for the generated project at the
+root — and git applies such a pattern at *every* level, so a Capacitor plugin package, which
+keeps its sources in exactly such a directory, had its only Swift file silently never committed.
+The local build read it off the Mac's disk and passed. Both proofs are now green, differing only
+in `buildConfiguration` (Debug / Release).
+
+*The class, and it is general:* **every gate we own reads the working tree, so no gate can see
+what the repo is missing.** 313 tests, a clean typecheck and a green run on real hardware all
+passed on a file that existed on one machine. A check for this has to **ask git**, not the disk —
+`tests/native/pluginPackage.test.ts` asserts every file under the plugin package is *tracked*, not
+merely present. Same shape as a stale config snapshot: the thing consulted was not the thing that
+governs.
 
 **Both Field Code sessions run — owner ruling 2026-08-13, and it is stated rather than inferred.**
 The Mac terminal session does **not** replace the cloud one. *The Mac setup guide's "this session

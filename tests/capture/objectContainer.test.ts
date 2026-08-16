@@ -81,17 +81,57 @@ describe("the strip", () => {
     expect(containersInZone([later, earlier], "z1").map((c) => c.pinId)).toEqual(["a", "b"]);
   });
 
-  it("shows the zone's objects when you are out of a container, and that container's captures when you are in", () => {
+  it("⚑ keeps every object reachable from inside another one", () => {
+    /*
+     The strip used to empty `objects` while a container was open, so stepping into the furnace
+     hid the tank standing next to it and the only way back was to step out first. The owner's
+     report on 2026-08-16 was that the viewfinder *gets too cluttered*; the cause was both strips
+     doing both jobs, and this is the half that made entering a container feel like leaving the
+     room.
+
+     The invariant is reachability, not a list: whatever is open, every object in the zone is still
+     on the strip. That holds at two objects and at twenty.
+    */
     const furnace = pin({ pinId: "a", number: 1, photos: [media("m1"), media("m2")] });
     const tank = pin({ pinId: "b", number: 2 });
 
-    const outside = stripModel([furnace, tank], "z1", null);
-    expect(outside.objects.map((o) => o.pinId)).toEqual(["a", "b"]);
-    expect(outside.captures).toEqual([]);
+    for (const open of [null, { pinId: "a", zoneId: "z1" }, { pinId: "b", zoneId: "z1" }]) {
+      expect(stripModel([furnace, tank], "z1", open).objects.map((o) => o.pinId)).toEqual(["a", "b"]);
+    }
+  });
 
-    const inside = stripModel([furnace, tank], "z1", { pinId: "a", zoneId: "z1" });
+  it("shows the contents of wherever you are standing, and says which that is", () => {
+    const furnace = pin({ pinId: "a", number: 1, photos: [media("m1"), media("m2")] });
+    const tank = pin({ pinId: "b", number: 2 });
+    const zonePhotos = [media("concern"), media("trace")];
+
+    // Out in the zone: the captures that belong to no object — its concerns, its room shots, and
+    // the run traces that deliberately file here rather than into the container they started in.
+    const outside = stripModel([furnace, tank], "z1", null, zonePhotos);
+    expect(outside.captures.map((m) => m.mediaId)).toEqual(["concern", "trace"]);
+    expect(outside.filmstrip).toBe("zone");
+
+    // Inside an object: that object's, and the zone's are not mixed in.
+    const inside = stripModel([furnace, tank], "z1", { pinId: "a", zoneId: "z1" }, zonePhotos);
     expect(inside.captures.map((m) => m.mediaId)).toEqual(["m1", "m2"]);
-    expect(inside.objects).toEqual([]);
+    expect(inside.filmstrip).toBe("object");
+  });
+
+  it("⚑ never lets the filmstrip label disagree with what the filmstrip holds", () => {
+    /*
+     The strip changes meaning as the concierge steps in and out, and *twenty shots filed into the
+     wrong object look exactly like twenty filed correctly*. The label is the only thing that
+     distinguishes the two states, so it must be derived from the same decision that chose the
+     contents — never set alongside it.
+    */
+    const furnace = pin({ pinId: "a", number: 1, photos: [media("m1")] });
+    const zonePhotos = [media("z1-only")];
+    for (const open of [null, { pinId: "a", zoneId: "z1" }]) {
+      const model = stripModel([furnace], "z1", open, zonePhotos);
+      const expected = open ? furnace.photos : zonePhotos;
+      expect(model.filmstrip).toBe(open ? "object" : "zone");
+      expect(model.captures.map((m) => m.mediaId)).toEqual(expected.map((m) => m.mediaId));
+    }
   });
 
   it("still draws the open container itself while you are inside it — the exit needs something to land on", () => {

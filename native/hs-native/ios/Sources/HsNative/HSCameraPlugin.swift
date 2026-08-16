@@ -1195,6 +1195,9 @@ final class CameraController: NSObject {
         var previousBuffer: CVPixelBuffer?
         var lastKeptBuffer: CVPixelBuffer?
         var pendingBuffer: CVPixelBuffer?
+        /// What the accumulator had summed when this frame was requested. Kept so the pair's own
+        /// measurement can be checked against it — see `measureOverlap`.
+        var travelAtRequest: CGFloat = 0
         var awaitingFrame = false
         var index = 0
         var unmet: [String] = []
@@ -1346,6 +1349,7 @@ final class CameraController: NSObject {
     private func requestTraverseFrame(run: TraverseRun, buffer: CVPixelBuffer) {
         run.awaitingFrame = true
         run.pendingBuffer = buffer
+        run.travelAtRequest = hypot(run.travel.x, run.travel.y)
         run.travel = .zero
         // `.speed` because a traverse is a burst and the operator is still moving: a frame that
         // arrives late is a frame taken somewhere else. Quality prioritisation is right for a
@@ -1379,7 +1383,9 @@ final class CameraController: NSObject {
         ])
 
         if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
-            run.pairs.append(measureOverlap(from: previous, to: current, from: index - 1, to: index))
+            run.pairs.append(measureOverlap(from: previous, to: current,
+                                            from: index - 1, to: index,
+                                            expectedTravel: run.travelAtRequest))
         }
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
@@ -1403,7 +1409,8 @@ final class CameraController: NSObject {
      does not apply rather than to fit a fancier wrong one.
      */
     private func measureOverlap(from previous: CVPixelBuffer, to current: CVPixelBuffer,
-                                from fromIndex: Int, to toIndex: Int) -> [String: Any] {
+                                from fromIndex: Int, to toIndex: Int,
+                                expectedTravel: CGFloat) -> [String: Any] {
         let left = CGRect(x: 0, y: 0, width: 0.5, height: 1)
         let right = CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
         let full = translationFraction(from: previous, to: current)
@@ -1421,8 +1428,31 @@ final class CameraController: NSObject {
         let disparity = hypot((leftShift.x - rightShift.x) * 0.5, leftShift.y - rightShift.y)
         let overlap = max(0, 1 - abs(full.x)) * max(0, 1 - abs(full.y))
 
+        /*
+         ⚑ **The false NEGATIVE, which is the one nobody looks for.**
+
+         A featureless pair — the blank painted wall between the furnace and the corner — gives
+         translational registration nothing to lock onto, and it returns a translation near zero
+         rather than returning nothing. Zero translation reads as **100% overlap**, so the pair
+         that had least evidence of contact reports the most. Every other guard in this function
+         is aimed at not crying gap; this one is aimed at not quietly certifying one.
+
+         The check is free because both numbers already exist: the accumulator summed
+         `expectedTravel` on its way to firing this frame, and the pair reports its own
+         displacement. A tight arc legitimately makes path length exceed displacement, so the
+         gate is deliberately the *strong* contradiction — the accumulator travelled a full
+         target and the pair claims almost nothing moved. Curvature cannot explain that;
+         featureless frames and a scene that changed entirely both can, and both mean the same
+         thing here, which is that this mechanism cannot say.
+         */
+        let displacement = hypot(full.x, full.y)
+        let impossiblyStill = expectedTravel >= Self.traverseTargetTravel
+            && displacement < Self.traverseTargetTravel * 0.25
+
         let contiguity: String
-        if Double(disparity) > Self.traverseDisparityTolerance {
+        if impossiblyStill {
+            contiguity = "unverified"
+        } else if Double(disparity) > Self.traverseDisparityTolerance {
             // ⚑ Not a gap. The model does not describe this pair, so this mechanism has nothing
             // to say about whether contact was kept — and saying "gap" here is the false alarm
             // that sends somebody back to a room they already covered.
@@ -1438,6 +1468,10 @@ final class CameraController: NSObject {
         record["dy"] = Double(full.y)
         record["overlap"] = Double(overlap)
         record["disparity"] = Double(disparity)
+        // Both numbers, printed. If the tolerances turn out wrong in a real mechanical room they
+        // are wrong as data somebody can read, not as a mechanism that behaves oddly.
+        record["expectedTravel"] = Double(expectedTravel)
+        record["displacement"] = Double(displacement)
         record["contiguity"] = contiguity
         return record
     }

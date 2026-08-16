@@ -131,9 +131,24 @@ export function App() {
       clearInterval(timer);
     };
   }, [sessionId, drainNow, drainChatNow, refreshReviewStatus]);
-  // Hold the screen awake for the whole visit; re-acquired after camera round-trips
-  // and system releases. Status surfaces below so a failure is visible, not silent.
-  const wakeLock = useWakeLock(sessionId !== null);
+  /*
+   Hold the screen awake for the whole visit; re-acquired after camera round-trips and system
+   releases. Status surfaces below so a failure is visible, not silent.
+
+   ⚑ **The camera screen counts, and it did not.** The gate was `sessionId !== null` alone, so a
+   camera reached from Home — which is how every field test of the native camera has been run —
+   never asked for the lock at all. On 2026-08-16 the owner walked a 98-minute thermal test that
+   way and had to set iPadOS Auto-Lock to Never by hand.
+
+   ⚑ *And the banner that exists to say so was gated on the same condition*, so the one screen
+   that could sleep was the one screen that could not warn about it. That is this project's named
+   failure — a signal that speaks on the majority case and is silent on the minority case that
+   matters — sitting inside the fix for the previous instance of it.
+
+   The rule is now the honest one: **whatever asks for the lock is what reports on it.**
+  */
+  const needsWakeLock = sessionId !== null || screen.name === "camera2";
+  const wakeLock = useWakeLock(needsWakeLock);
 
   if (!ready) return <div className="flex min-h-dvh items-center justify-center text-slate-400">Loading…</div>;
 
@@ -142,7 +157,7 @@ export function App() {
     // rather than dark. Decided here, at the one place that knows which screen is up.
     <div className={`min-h-dvh text-slate-100 ${screen.name === "camera2" ? "bg-transparent" : "bg-slate-950"}`}>
       <UpdateBanner />
-      {sessionId !== null && !wakeLock.held && (
+      {needsWakeLock && !wakeLock.held && (
         <div className="pointer-events-none fixed right-3 top-3 z-50 rounded-full bg-amber-500/90 px-3 py-1 text-xs font-medium text-slate-950">
           {!wakeLock.supported
             ? "Screen sleep not preventable — raise Auto-Lock in Settings"

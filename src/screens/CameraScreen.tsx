@@ -34,6 +34,7 @@ import {
   cameraAvailable,
   captureFrames,
   frameBlob,
+  frameLabel,
   frameStateOf,
   frameUrl,
   glareSuspected,
@@ -506,6 +507,11 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               {" "}
               (on ≥{status.underLitThreshold}, off &lt;{status.torchReleaseThreshold})
             </span>
+            {/* Otherwise a torch that is correctly off while the score says "arm" reads as a
+                contradiction rather than as a decision taken on better evidence. */}
+            {status.companionVetoActive && (
+              <span className="text-emerald-400"> · unlit frame read fine, torch held off</span>
+            )}
           </p>
           {/* Both angles, because the field bug was two rotation tables disagreeing. If these
               two and a frame's exifOrientation ever tell different stories, that IS the finding. */}
@@ -513,22 +519,50 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             rotation · <span className="font-mono text-slate-100">{status.previewRotationAngle}°</span> preview ·{" "}
             <span className="font-mono text-slate-100">{status.captureRotationAngle}°</span> capture
           </p>
+          {/* ⚑ Both lines below say when they are NOT measuring, rather than leaving the last
+              value on screen. Two panels nineteen minutes apart on 2026-08-16 both read
+              `motion · 0.0883` and `read · 0 chars` because this whole block was published only
+              from the recognition callback, which object mode and every traverse skip. A number
+              that has stopped moving is read as a number that is not moving. */}
           {text && (
             <p>
-              read · <span className="font-mono text-slate-100">{text.characterCount}</span> chars ·{" "}
-              {text.meanConfidence.toFixed(2)}
-              {text.marginal && <span className="text-amber-400"> marginal</span>}
+              read ·{" "}
+              {text.reading ? (
+                <>
+                  <span className="font-mono text-slate-100">{text.characterCount}</span> chars ·{" "}
+                  {text.meanConfidence.toFixed(2)}
+                  {text.marginal && <span className="text-amber-400"> marginal</span>}
+                </>
+              ) : (
+                <span className="text-slate-500">not read in this mode</span>
+              )}
             </p>
           )}
           {text && (
             <p>
-              motion · <span className="font-mono text-slate-100">{text.motion.toFixed(4)}</span>
-              <span className="text-slate-500"> (still under {text.stillThreshold})</span>
-              {text.stable && <span className="text-emerald-400"> steady</span>}
+              motion ·{" "}
+              {status.motionLive ? (
+                <>
+                  <span className="font-mono text-slate-100">{text.motion.toFixed(4)}</span>
+                  <span className="text-slate-500"> (still under {text.stillThreshold})</span>
+                  {text.still && <span className="text-emerald-400"> steady</span>}
+                </>
+              ) : (
+                <span className="text-slate-500">not sampled during a traverse</span>
+              )}
             </p>
           )}
           <p>session · <span className="font-mono text-slate-100">{status.sessionRunning ? "running" : "stopped"}</span></p>
-          {capabilities && <p className="mt-1 text-slate-500">brackets {capabilities.maxBracketedFrames} · torch {String(capabilities.torch)}</p>}
+          {capabilities && (
+            <p className="mt-1 text-slate-500">
+              brackets {capabilities.maxBracketedFrames} · torch {String(capabilities.torch)}
+              {/* Reported so the ultra-wide question is settled by a run rather than by a guess
+                  about which iPad this is. Nothing switches lens yet — that needs a ruling. */}
+              {capabilities.lenses?.length > 0 && (
+                <> · lenses {capabilities.lenses.map((l) => l.replace(/^AVCaptureDeviceTypeBuiltIn/, "")).join(", ")}</>
+              )}
+            </p>
+          )}
 
           {/*
             ⚑ The traverse, as an INSTRUMENT and deliberately not a door. It lives inside the
@@ -768,20 +802,6 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       )}
     </div>
   );
-}
-
-/**
- * What a frame IS, not where it sits in the array.
- *
- * "no torch" answers the question the reviewer is asking; "frame 2" answers a different one that
- * nobody has. On a torch pair the label is the whole reason the second frame exists.
- */
-function frameLabel(shot: CaptureResult, index: number): string {
-  const frame = shot.frames[index];
-  if (!frame) return `frame ${index + 1}`;
-  if (shot.torchPaired) return frame.torch ? "torch" : "no torch";
-  if (shot.bracketed) return ["−1 EV", "0 EV", "+1 EV"][index] ?? `frame ${index + 1}`;
-  return `frame ${index + 1}`;
 }
 
 /** Off the device so a plate can be judged on a big screen, which is where legibility is settled.

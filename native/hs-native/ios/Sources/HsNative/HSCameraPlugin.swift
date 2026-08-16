@@ -342,8 +342,20 @@ final class CameraController: NSObject {
     private var previousFrame: CVPixelBuffer?
     private var motionHistory: [CGFloat] = []
     private let motionHistoryLength = 6
-    /// A fraction of frame width. Hand-held still is small but never zero.
-    private let stillThreshold: CGFloat = 0.006
+    /**
+     A fraction of frame width. Hand-held still is small but never zero.
+
+     ⚑ **0.008, raised from 0.006 on the owner's field report (2026-08-16):** holding under 0.006
+     took kneeling with both elbows braced on his thighs to reach a low plate, and the bracing
+     itself added shake. That is the shutter refusing to fire in exactly the posture a mechanical
+     room forces.
+
+     The arithmetic agrees it was too tight. Frames are analysed every sixth frame — 200 ms apart —
+     and ordinary hand tremor over 200 ms is a few tenths of a degree, which at this camera's field
+     of view is already around 0.005 of frame width. 0.006 sat inside the noise floor of a steady
+     hand; 0.008 sits just above it.
+     */
+    private let stillThreshold: CGFloat = 0.008
     private var lastMotion: CGFloat = 1.0
 
     /**
@@ -673,11 +685,76 @@ final class CameraController: NSObject {
      actuator's own effect unable to cross back over the decision.
      */
     private static let underLitThreshold = 0.62
+    /**
+     ⚑ **Kept, and now known to be unreachable on its own — which is why the companion frame
+     exists.**
+
+     The paragraph above assumes the torch's own light pulls the score down across the release
+     threshold. **The field run refuted that.** Five instrument readings across 98 minutes on
+     2026-08-16 show `torch true` at light scores of 0.51, 0.53, 0.61, **0.99 and 1.00** — the
+     score went *up* with the torch lit, and never came within a factor of three of 0.15.
+
+     The reason is geometry, not tuning. `lightScore` is computed from ISO and shutter for the
+     **whole frame**, and a torch reaches a few feet. Point it down a mechanical room and the far
+     two-thirds of the picture is as dark as it ever was, so ISO stays pegged and the score stays
+     near 1. *The actuator cannot lower the measurement it is judged by, so the latch has no exit.*
+
+     Lowering the threshold cannot fix this and raising it re-creates the oscillator. The exit has
+     to come from a different measurement, and `applyCompanionVerdict` is it.
+     */
     private static let torchReleaseThreshold = 0.15
     /// Auto-exposure needs a moment to converge after the light changes. Deciding inside that
     /// window measures the transition rather than the scene.
     private static let torchSettleSeconds = 1.5
     private var torchChangedAt: Date?
+
+    /**
+     How long a companion frame's verdict governs arming.
+
+     ⚑ The ruling says *don't arm the **next** capture*, and a count of captures would be the
+     literal reading. It is the wrong one: between two captures the concierge is walking, and a
+     torch that stays lit across that walk is the thing being complained about. So the veto is a
+     window of wall-clock, and it is refreshed by every pair — which means in a room where the
+     unlit frame keeps reading well the torch simply never comes back, and in a room where it
+     stops reading well the torch returns within one capture.
+
+     Reported in `modeStatus` beside the light score, so a wrong value is a number on screen.
+     */
+    private static let companionVetoSeconds = 30.0
+    private var companionVetoUntil: Date?
+
+    /**
+     Did an accurate read of the unlit companion actually get the plate?
+
+     Same two constants the live veto uses (`LiveRead.worthReadingCharacters`, `goodConfidence`) —
+     one rule about what "read it" means, asked of a better recogniser.
+     */
+    private static func readSufficed(_ read: [String: Any]?) -> Bool {
+        guard let read,
+              let text = read["text"] as? String,
+              let confidence = read["meanConfidence"] as? Double else { return false }
+        let characters = text.filter { $0.isLetter || $0.isNumber }.count
+        return characters >= LiveRead.worthReadingCharacters && confidence >= LiveRead.goodConfidence
+    }
+
+    /**
+     Act on the companion frame, on main.
+
+     Read well → the torch added nothing, so it stays off and does not arm for a while. Read badly
+     → this room is genuinely dark, the torch earned its place, and it goes back on for the next
+     shot rather than making the concierge rediscover that per capture.
+     */
+    private func applyCompanionVerdict(sufficed: Bool) {
+        guard torchOverride == nil else { return }   // an explicit tap outranks the evidence
+        if sufficed {
+            companionVetoUntil = Date().addingTimeInterval(Self.companionVetoSeconds)
+            if torchOn { setTorch(false) }
+        } else {
+            companionVetoUntil = nil
+            if !torchOn { setTorch(true) }
+        }
+        emitStatus(sessionRunning: session.isRunning, unmet: [])
+    }
 
     private func evaluateTorch() {
         guard let device, device.hasTorch else {
@@ -716,9 +793,13 @@ final class CameraController: NSObject {
              path would cost more than the frame is worth.
              */
             let readingWell = goal.liveText && lastRead.isReadingWell
-            let wanted = torchOn
+            // ⚑ The companion frame's verdict outranks the light score in both directions, and it
+            // is the only thing that can turn the torch off in a big dark room — the score cannot,
+            // for the reason `torchReleaseThreshold` now records.
+            let vetoed = companionVetoUntil.map { Date() < $0 } ?? false
+            let wanted = !vetoed && (torchOn
                 ? score >= Self.torchReleaseThreshold
-                : score >= Self.underLitThreshold && !readingWell
+                : score >= Self.underLitThreshold && !readingWell)
             if wanted != torchOn { setTorch(wanted) }
         }
     }
@@ -783,6 +864,13 @@ final class CameraController: NSObject {
             // The release threshold rides beside the arm threshold so the hysteresis gap is a
             // pair of numbers on screen rather than a constant somebody has to go and read.
             "torchReleaseThreshold": Self.torchReleaseThreshold,
+            // Why the torch is off when the light score says it should be on. Without this the
+            // companion veto is an invisible hand and the panel reads as a contradiction.
+            "companionVetoActive": companionVetoUntil.map { Date() < $0 } ?? false,
+            // ⚑ Whether the per-frame instruments are being measured at all. During a traverse the
+            // frame callback belongs to the accumulator, so motion is not sampled — and a stale
+            // number sitting there unlabelled is what the 2026-08-16 panels showed.
+            "motionLive": !isTraversing,
             "previewRotationAngle": Double(previewRotationAngle),
             "captureRotationAngle": Double(captureRotationAngle),
             "thermalState": thermalWord(),
@@ -815,8 +903,29 @@ final class CameraController: NSObject {
             "maxBracketedFrames": photoOutput.maxBracketedCapturePhotoCount,
             "level": motion.isDeviceMotionAvailable,
             "textRecognition": true,
+            /*
+             ⚑ **Reported, not used.** The owner asked for a wider view in tight spaces (field note
+             1, 2026-08-16) — and that request cannot be served by zoom, which only ever narrows.
+             Going wider than the standard lens means switching to `builtInUltraWideCamera`, and
+             whether this iPad has one is a fact about the model, not something to assume: iPad Pro
+             carries an ultra-wide, iPad Air and the base iPad do not.
+
+             So the fact is published and the switch is not built. Choosing a lens is a capture
+             decision — which lens, chosen by whom, and whether a traverse may change it mid-run —
+             and it needs a ruling before it needs code. This line means the next run answers
+             *is it even possible on this device* without anyone guessing.
+             */
+            "lenses": Self.availableLensNames(),
             "unmetAtStart": unmetAtStart
         ]
+    }
+
+    /// What rear lenses this device actually offers, by Apple's own type names.
+    private static func availableLensNames() -> [String] {
+        var types: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .builtInTelephotoCamera]
+        types.append(.builtInUltraWideCamera)
+        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: .back)
+        return discovery.devices.map { $0.deviceType.rawValue }
     }
 
     // MARK: capture
@@ -1043,7 +1152,19 @@ final class CameraController: NSObject {
         }
 
         release(job)
-        if job.wantsTorchPair { setTorch(job.torchAtCapture) }
+        /*
+         ⚑ **The torch is NOT restored here, and that deletion is the owner's ruling of 2026-08-16.**
+
+         It used to be `setTorch(job.torchAtCapture)` — put it back the way the concierge found it.
+         In the field that read as *the torch comes back on and stays on* (owner note 2, and
+         `torch true` in all five instrument screenshots across 98 minutes), because the release
+         threshold could never be reached: see `torchReleaseThreshold`.
+
+         The pair has just handed us the one thing the light score cannot give — **a look at this
+         scene with the actuator off.** So the torch stays off until that frame has been read, and
+         `applyCompanionVerdict` decides from evidence whether it comes back. Restoring it first
+         and deciding a second later would be the blink with an extra step.
+         */
         let angle = Double(captureRotationAngle)
         let currentMode = mode
         let wantsDeskew = goal.detectPageEdges
@@ -1151,9 +1272,54 @@ final class CameraController: NSObject {
          Gated on a pair existing AND both reads returning text. A number computed from one read,
          or from none, would be an alarm on a case where there is nothing to say.
          */
-        if job.pairFired, reads.count >= 2,
-           let lit = reads[0]?["text"] as? String, let unlit = reads[1]?["text"] as? String {
-            payload["torchPairAgreement"] = Self.agreement(between: lit, and: unlit)
+        /*
+         ⚑ **Which two frames, and the first cut named them wrongly.** `reads[0]` vs `reads[1]` is
+         lit-vs-unlit only when the capture is a bare pair. Text mode declares BOTH
+         `bracketWhenMarginal` and `torch: .whenUnderLit`, so a marginal plate under a lit torch
+         delivers **three bracketed lit frames and then the companion** — and `reads[1]` is the
+         second bracket frame, also lit.
+
+         The failure is the bad direction. Two lit frames of one plate agree closely, so the number
+         came out **high**, and high means *no glare* — the alarm silenced precisely in the mode
+         and the moment it exists for. The 2026-08-16 field captures are four frames from one job
+         for exactly this reason.
+
+         The comparison is nominal-exposure lit against the companion: one frame from each side at
+         the exposure the scene actually called for. Best-of-three against one would flatter the
+         torch, which is the side under suspicion.
+         */
+        if job.pairFired {
+            let frames = zip(written, reads).map {
+                (torch: ($0["torch"] as? Bool) ?? false,
+                 index: ($0["index"] as? Int) ?? 0,
+                 read: $1)
+            }
+            let nominal = job.bracketed ? 1 : 0   // bracket biases are [-1, 0, +1]: index 1 is 0 EV
+            let lit = frames.first { $0.torch && $0.index == nominal } ?? frames.first { $0.torch }
+            let unlit = frames.first { !$0.torch }
+            if let lit, let unlit,
+               let litText = lit.read?["text"] as? String, let unlitText = unlit.read?["text"] as? String {
+                payload["torchPairAgreement"] = Self.agreement(between: litText, and: unlitText)
+                // Which frames the number came from, so a surprising value can be checked against
+                // the two photographs rather than argued about.
+                payload["torchPairCompared"] = [lit.index, unlit.index]
+            }
+
+            /*
+             ⚑ **The companion frame decides the next arming** (owner ruling 2026-08-16). This is
+             the accurate read of an unlit frame — a measurement of the scene taken with the
+             actuator off, which is the same class of evidence arming already uses, so it does not
+             put the torch back inside the loop that decides about the torch.
+
+             It also does something the light score structurally cannot: see `torchReleaseThreshold`
+             for why a lit scene at range still scores near 1.0. This read is the only exit from
+             that latch.
+             */
+            let sufficed = Self.readSufficed(unlit?.read)
+            payload["companionReadSufficed"] = sufficed
+            DispatchQueue.main.async { [weak self] in
+                self?.applyCompanionVerdict(sufficed: sufficed)
+            }
         }
         // The top-level read stays frame 0's — the declared surface, unchanged. Stored by nobody,
         // because there is nowhere for it to land (#163).
@@ -1204,8 +1370,24 @@ final class CameraController: NSObject {
         var torchLatched = false
     }
 
-    /// Fraction of frame width to travel before the next still. 0.40 leaves ~60% nominal overlap.
-    private static let traverseTargetTravel: CGFloat = 0.40
+    /**
+     Fraction of frame width to travel before the next still.
+
+     ⚑ **0.20, down from 0.40, and the field run is what settled it.** A 180° turn standing on one
+     spot — the easiest case there is, and the one a translation model describes best — returned
+     **6 pairs out of 6 `unverified`, 0 gaps** (2026-08-16, 7:33). At 0.40 the two half-frames of a
+     pair no longer share enough content for their translations to agree, so the disparity test
+     exceeds tolerance on essentially every pair and the mechanism says nothing, ever.
+
+     *A mechanism that always answers "cannot say" is not conservative, it is switched off* — and
+     it is worse than switched off, because it looks like it is working.
+
+     Halving the spacing roughly halves the disparity a given parallax produces, because disparity
+     is a difference between two half-frame translations and both halves see more of the same
+     scene. The cost is twice the frames for the same wall, which the run-length figures say is
+     affordable: the L-walk kept 16 frames for a whole mechanical room.
+     */
+    private static let traverseTargetTravel: CGFloat = 0.20
     /// Below this, contact is not established and the pair is a gap.
     private static let traverseMinimumOverlap = 0.25
     /// Above this, the two halves of the frame moved differently — parallax — and a single
@@ -1640,7 +1822,24 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         guard frameCounter % analyseEveryNthFrame == 0 else { return }
         measureMotion(of: pixelBuffer)
-        guard goal.liveText, !analysing else { return }
+
+        /*
+         ⚑ **Motion is emitted whether or not this mode reads text, because it used to freeze.**
+
+         The whole instrument line — `read · N chars` and `motion · X` — was published only from
+         the recognition callback below, which is gated on `goal.liveText`. So in object mode, and
+         for the whole of any traverse, those two fields **stopped updating while thermal, battery,
+         light and rotation beside them kept ticking**. The 2026-08-16 screenshots caught it: two
+         panels nineteen minutes apart, both reading `motion · 0.0883` to four decimals.
+
+         A frozen number that looks live is worse than an absent one — it gets read, and decisions
+         get made on it. So the event goes out regardless, and `reading` says whether the character
+         count means anything rather than leaving a stale `0 chars` to be believed.
+         */
+        guard goal.liveText, !analysing else {
+            if !goal.liveText { emitFrameStatus(boxes: [], read: .empty, reading: false) }
+            return
+        }
 
         analysing = true
         let request = VNRecognizeTextRequest { [weak self] request, _ in
@@ -1701,15 +1900,6 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
 
         let read = LiveRead(strings: strings, meanConfidence: strings.isEmpty ? 0 : total / Double(strings.count))
         lastRead = read
-        // Steady AND looking at characters. Either alone is the wrong trigger: a still camera on a
-        // blank wall, or a jittering one over a plate.
-        let still = motionHistory.count >= motionHistoryLength && lastMotion < stillThreshold
-        let stable = still && read.characterCount > 0
-
-        // ⚑ Marginal means characters WERE detected and read badly. A frame with no text is not a
-        // marginal read — it is a photograph of a pipe, and telling someone to retake it is an
-        // alarm on the majority case.
-        let marginal = read.characterCount > 0 && read.meanConfidence < 0.55
 
         if goal.spotMeterSubject, let union, let device, device.isExposurePointOfInterestSupported {
             // Meter where the characters actually are — the plate, not the bright tank beside it.
@@ -1724,12 +1914,33 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             }
         }
 
+        emitFrameStatus(boxes: boxes, read: read, reading: true)
+    }
+
+    /**
+     One publisher for the per-frame instruments, called from both the reading and the non-reading
+     path so neither can go quiet while the other speaks.
+
+     `reading` is the gate on the character fields. Without it a mode that never runs recognition
+     publishes `0 chars · 0.00`, which is indistinguishable from *looked and found nothing* — the
+     same sentence meaning two different things, which is what made the frozen panel readable as a
+     live one.
+     */
+    fileprivate func emitFrameStatus(boxes: [[String: Any]], read: LiveRead, reading: Bool) {
+        let still = motionHistory.count >= motionHistoryLength && lastMotion < stillThreshold
         onTextBoxes?([
             "boxes": boxes,
-            "stable": stable,
-            "marginal": marginal,
+            // Steady AND looking at characters. Either alone is the wrong trigger: a still camera
+            // on a blank wall, or a jittering one over a plate.
+            "stable": reading && still && read.characterCount > 0,
+            // ⚑ Marginal means characters WERE detected and read badly. A frame with no text is
+            // not a marginal read — it is a photograph of a pipe, and telling someone to retake it
+            // is an alarm on the majority case.
+            "marginal": reading && read.characterCount > 0 && read.meanConfidence < LiveRead.goodConfidence,
+            "reading": reading,
             "meanConfidence": read.meanConfidence,
             "characterCount": read.characterCount,
+            "still": still,
             // Reported whether or not it changed anything, so a threshold that turns out wrong in
             // a real mechanical room is a number somebody can read rather than a shutter that
             // mysteriously will not fire. Same stance as `lightScore`.

@@ -22,6 +22,7 @@ import { PhotoInput, VideoInput } from "../../capture/PhotoInput";
 import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { BigButton, Sheet } from "../../ui/bits";
 import { MediaThumb, MediaViewer, ZONE_LEVELS } from "./shared";
+import { cameraAvailable } from "../../native/hsCamera";
 import type { ChecklistConfig } from "../../engine/schema/checklistConfig";
 import type { CaptureIntent } from "../../engine/v2/events";
 
@@ -359,10 +360,24 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
         </button>
       </div>
 
-      {/* The camera, as the dominant and obvious action (§2). Ordinary capture — no intent. */}
-      <PhotoInput onPhoto={(file) => setPending({ file })} className={PRIMARY_DOOR}>
-        📷 Photograph this room
-      </PhotoInput>
+      {/*
+        The camera, as the dominant and obvious action (§2). Ordinary capture — no intent.
+
+        ⚑ ONE DOOR, TWO FRAME SOURCES. In the native shell it opens the stay-open viewfinder,
+        which is where the modes, the live read and the object containers live; in the browser it
+        is `<input capture>` and always will be. That split is CLAUDE.md's rule — *do not spend
+        effort on browser-side capture parity* — and it is why the difference is one branch at
+        the door rather than two implementations of the act.
+      */}
+      {cameraAvailable() ? (
+        <BigButton className={PRIMARY_DOOR} onClick={() => navigate({ name: "camera2", zoneId: zone.zoneId })}>
+          📷 Photograph this room
+        </BigButton>
+      ) : (
+        <PhotoInput onPhoto={(file) => setPending({ file })} className={PRIMARY_DOOR}>
+          📷 Photograph this room
+        </PhotoInput>
+      )}
 
       {/*
         The three declared capture kinds (§4.1a, §4.1b), one door each.

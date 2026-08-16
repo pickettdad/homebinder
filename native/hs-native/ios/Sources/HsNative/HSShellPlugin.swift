@@ -36,7 +36,8 @@ public class HSShellPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "HSShell"
 
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "echo", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "echo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setIdleTimerDisabled", returnType: CAPPluginReturnPromise)
     ]
 
     /// The single declaration of the plugin's version. `native/hs-native/package.json` must carry
@@ -101,6 +102,35 @@ public class HSShellPlugin: CAPPlugin, CAPBridgedPlugin {
                 ]
             ])
             self?.startHeartbeat()
+        }
+    }
+
+    /**
+     Hold the screen awake for the visit — the native mechanism, because the web one is not
+     available here.
+
+     ⚑ Field run, 2026-08-15: the iPad was set down on the camera screen for 45 minutes and had
+     gone to sleep when the owner came back, taking the thermal walk with it. `useWakeLock` asks
+     for `navigator.wakeLock`, which is a **Safari** API; a Capacitor app is a `WKWebView`, where
+     it is simply absent — so the hook's own "not supported" branch was the true one and the
+     whole feature was a banner nobody was in the room to read.
+
+     `isIdleTimerDisabled` is the mechanism that actually exists in an app. It needs no user
+     gesture (the web API does, which had already cost a field run), it is not refused under Low
+     Power Mode, and it is not released behind our back — three failure modes that between them
+     account for every wake-lock defect this project has logged.
+
+     The **resolved value is read back off `UIApplication`** rather than echoing the argument, so
+     "held" is a statement about the system's state and not about our intention.
+     */
+    @objc func setIdleTimerDisabled(_ call: CAPPluginCall) {
+        guard let disabled = call.getBool("disabled") else {
+            call.reject("disabled is required (true to hold the screen awake)")
+            return
+        }
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = disabled
+            call.resolve(["disabled": UIApplication.shared.isIdleTimerDisabled])
         }
     }
 

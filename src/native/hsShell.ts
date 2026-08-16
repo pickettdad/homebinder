@@ -35,6 +35,8 @@ interface ListenerHandle {
 
 interface NativeHSShell {
   echo(options: { sentAt: number }): Promise<HSShellEcho>;
+  /** Resolves with the value `UIApplication` actually holds, not the one that was asked for. */
+  setIdleTimerDisabled(options: { disabled: boolean }): Promise<{ disabled: boolean }>;
   /**
    * ⚑ Returns the handle SYNCHRONOUSLY, not a promise for one — proven on device 2026-08-14.
    * `@capacitor/core`'s typed wrapper returns `Promise<PluginListenerHandle>`, and the raw
@@ -104,6 +106,24 @@ export function onHeartbeat(handler: (beat: HSShellHeartbeat) => void): () => vo
     removed = true;
     void pending.then((handle) => handle?.remove()).catch(() => {});
   };
+}
+
+/**
+ * Hold the screen awake through the native shell, and report what the system ended up holding.
+ *
+ * ⚑ This is the mechanism the shipping surface has. `navigator.wakeLock` is a Safari API and a
+ * Capacitor app is a `WKWebView`, so in the app the web hook's "not supported" branch was always
+ * the true one — which is why the iPad slept through a 45-minute thermal run on 2026-08-15 with
+ * a banner on screen and nobody in the room to read it.
+ *
+ * Returns `null` in the browser rather than throwing: the caller falls back to the web API
+ * there, which is the declared control path and the one place `navigator.wakeLock` exists.
+ */
+export async function setNativeIdleTimerDisabled(disabled: boolean): Promise<boolean | null> {
+  const plugin = nativePlugin();
+  if (!plugin || typeof plugin.setIdleTimerDisabled !== "function") return null;
+  const result = await plugin.setIdleTimerDisabled({ disabled });
+  return result?.disabled === true;
 }
 
 /**

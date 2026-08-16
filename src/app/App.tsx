@@ -147,8 +147,8 @@ export function App() {
           {!wakeLock.supported
             ? "Screen sleep not preventable — raise Auto-Lock in Settings"
             : wakeLock.error
-              ? `Screen may sleep — wake lock denied (${wakeLock.error})`
-              : "Screen may sleep — wake lock not held"}
+              ? `Screen may sleep — ${wakeLock.mechanism} wake lock denied (${wakeLock.error})`
+              : `Screen may sleep — ${wakeLock.mechanism} wake lock not held`}
         </div>
       )}
       {/*
@@ -193,7 +193,7 @@ export function App() {
       {screen.name === "export2" && <ExportV2Screen />}
       {screen.name === "devbench" && <DevBenchScreen />}
       {screen.name === "nativecheck" && <NativeCheckScreen />}
-      {screen.name === "camera2" && <CameraScreen />}
+      {screen.name === "camera2" && <CameraScreen zoneId={screen.zoneId} />}
       <GlobalCamera />
       </ErrorBoundary>
       {toast && (

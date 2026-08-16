@@ -65,7 +65,16 @@ export interface ModeStatusEvent {
   torchOverridden: boolean;
   /** 0 bright … 1 dark, from what the exposure system had to do. Reported always, acted on rarely. */
   lightScore: number;
+  /** Torch arms at or above this. */
   underLitThreshold: number;
+  /** …and releases only below this. ⚑ The gap is the fix: the torch is inside the loop that
+   *  measures whether the torch is needed, so one threshold oscillates on a 5-second timer —
+   *  which is what put a flash on one field capture and none on the next 34 seconds later. */
+  torchReleaseThreshold: number;
+  /** The clockwise rotation, in degrees, that brings the buffer upright. One number drives the
+   *  preview, the still and Vision — two tables disagreeing is what shipped the landscape bug. */
+  previewRotationAngle: number;
+  captureRotationAngle: number;
   thermalState: "nominal" | "fair" | "serious" | "critical" | "unknown";
   battery: { level: number; state: string };
   level?: { pitch: number; roll: number; square: boolean };
@@ -76,6 +85,9 @@ export interface CaptureFrame {
   path: string;
   bytes: number;
   index: number;
+  /** Read back off the written JPEG, never assumed. ⚑ 1 on a portrait shot means the rotation
+   *  never reached the photo connection — the 2026-08-15 finding, now self-reporting. */
+  exifOrientation: number;
 }
 
 export interface CaptureResult {
@@ -85,6 +97,9 @@ export interface CaptureResult {
   bracketed: boolean;
   /** Document mode only: a page was found and flattened. False means the frame is as shot. */
   deskewed: boolean;
+  /** The angle asked of the photo connection, beside each frame's `exifOrientation`. Two numbers
+   *  that must agree — printed so they can be seen not to. */
+  rotationAngle: number;
   at: string;
   /** Present in text/document modes. ⚑ Nothing stores this — there is no manifest field (#163). */
   ocr?: {

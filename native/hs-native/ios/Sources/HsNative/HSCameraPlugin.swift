@@ -37,7 +37,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setMode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setLens", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "adjust", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startAudioProbe", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopAudioProbe", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "capture", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startTraverse", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopTraverse", returnType: CAPPluginReturnPromise),
@@ -90,6 +93,60 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         // guards against is twenty plates shot in the wrong mode, every one of which looks fine.
         let achieved = controller.apply(mode: mode)
         call.resolve(["mode": achieved.mode.rawValue, "unmet": achieved.unmet])
+    }
+
+    /**
+     Choose the glass. ⚑ Resolves with the lens ACHIEVED, never the one asked for — same contract
+     as `setMode`, and for the same reason: Text refuses wide, the ultra-wide does not exist on
+     every iPad, and a traverse will not swap mid-run. A button painted from the tap would claim a
+     field of view the photograph does not have.
+     */
+    @objc func setLens(_ call: CAPPluginCall) {
+        guard let raw = call.getString("lens"), let wanted = CameraLens(rawValue: raw) else {
+            call.reject("lens is required and must be one of: normal, wide")
+            return
+        }
+        guard let controller else {
+            call.reject("Camera is not running — call start first")
+            return
+        }
+        let achieved = controller.requestLens(wanted)
+        call.resolve(["mode": achieved.mode.rawValue, "lens": controller.currentLens.rawValue,
+                      "unmet": achieved.unmet])
+    }
+
+    /**
+     The shutter-sound probe (owner approval 2026-08-16). **A measurement, not a feature.**
+
+     Whether `AVCapturePhotoOutput`'s shutter click lands inside a live recording decides the shape
+     of the run trace, and it is a **device fact** — it varies by region, by iOS version and by
+     whether an audio session is active, so it cannot be settled by reading documentation or by
+     reasoning about it here. This records for as long as it is left running and hands back a file;
+     the answer is whether you can hear the click on playback.
+
+     It lives behind the instruments panel, which is a harness, and nothing in the concierge's path
+     calls it.
+     */
+    @objc func startAudioProbe(_ call: CAPPluginCall) {
+        ensureController().startAudioProbe { result in
+            switch result {
+            case .success(let payload): call.resolve(payload)
+            case .failure(let error): call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc func stopAudioProbe(_ call: CAPPluginCall) {
+        guard let controller else {
+            call.reject("No audio probe is running")
+            return
+        }
+        controller.stopAudioProbe { result in
+            switch result {
+            case .success(let payload): call.resolve(payload)
+            case .failure(let error): call.reject(error.localizedDescription)
+            }
+        }
     }
 
     @objc func adjust(_ call: CAPPluginCall) {
@@ -188,8 +245,37 @@ enum CameraMode: String {
  `torch` is the field that carries the ruling: it is a *policy*, never a switch. `.never` and
  `.whenUnderLit` are goals; there is deliberately no `.always`.
  */
+/**
+ Which piece of glass. Named for what the concierge sees, not for Apple's constants — Apple's
+ `builtInWideAngleCamera` is the *normal* lens, and calling it "wide" in our own vocabulary while
+ the owner uses "wide" to mean *wider than normal* is a collision waiting to be shipped.
+ */
+enum CameraLens: String {
+    case normal
+    case wide
+
+    var deviceType: AVCaptureDevice.DeviceType {
+        switch self {
+        case .normal: return .builtInWideAngleCamera
+        case .wide: return .builtInUltraWideCamera
+        }
+    }
+}
+
+/**
+ A mode as a **goal**, not a settings bundle.
+
+ Each field says what the capture must achieve. `CameraController.apply` measures the scene and the
+ hardware, reaches what it can, and reports the rest in `unmet`.
+
+ `torch` is the field that carries the ruling: it is a *policy*, never a switch. `.never` and
+ `.whenUnderLit` are goals; there is deliberately no `.always`.
+ */
 struct ModeGoal {
     enum TorchPolicy { case never, whenUnderLit }
+    /// What the lens does when nobody has said otherwise. ⚑ `locked` is not a default — it is a
+    /// refusal, and only Text uses it.
+    enum LensPolicy { case defaultsTo(CameraLens), locked(CameraLens) }
 
     let closeFocus: Bool
     /// Meter the subject rather than the scene — the plate, not the bright tank beside it.
@@ -200,6 +286,20 @@ struct ModeGoal {
     let bracketWhenMarginal: Bool
     let detectPageEdges: Bool
     let wantsLevel: Bool
+    /**
+     ⚑ **The mode sets the default; the concierge chooses** (owner ruling 2026-08-16, overturning
+     the design session's position that the app should decide).
+
+     *The lens is a substitute for stepping backwards, and in a tight mechanical room you often
+     cannot step backwards.* "Does the whole thing fit in the picture" requires no knowledge of
+     what the thing is, which is the governing filter for anything a concierge is asked to judge —
+     so it is theirs to judge.
+
+     Text is the one refusal: a 120° lens bends straight lines near the frame edge, and a plate
+     photographed at the edge of an ultra-wide frame reads worse, not wider. There is nothing to
+     gain there and characters to lose.
+     */
+    let lens: LensPolicy
 
     static func of(_ mode: CameraMode) -> ModeGoal {
         switch mode {
@@ -208,19 +308,36 @@ struct ModeGoal {
             // here" — and that meaning is recorded on the door, never inferred from the frame.
             return ModeGoal(closeFocus: false, spotMeterSubject: false, torch: .never,
                             liveText: false, bracketWhenMarginal: false,
-                            detectPageEdges: false, wantsLevel: false)
+                            detectPageEdges: false, wantsLevel: false,
+                            lens: .defaultsTo(.normal))
         case .text:
             return ModeGoal(closeFocus: true, spotMeterSubject: true, torch: .whenUnderLit,
                             liveText: true, bracketWhenMarginal: true,
-                            detectPageEdges: false, wantsLevel: true)
+                            detectPageEdges: false, wantsLevel: true,
+                            lens: .locked(.normal))
         case .document:
             // A different camera, not a photograph with a label: flat, high contrast, edges found
             // and corrected. Built as "a photo we named document" it produces a curled invoice at
             // an angle that reads badly.
             return ModeGoal(closeFocus: false, spotMeterSubject: false, torch: .whenUnderLit,
                             liveText: true, bracketWhenMarginal: false,
-                            detectPageEdges: true, wantsLevel: true)
+                            detectPageEdges: true, wantsLevel: true,
+                            lens: .locked(.normal))
         }
+    }
+
+    /// The lens this goal wants, given whatever the concierge asked for. A locked mode ignores the
+    /// request rather than half-honouring it, and `lensLocked` is what tells the UI to say so.
+    func lens(requested: CameraLens?) -> CameraLens {
+        switch lens {
+        case .locked(let fixed): return fixed
+        case .defaultsTo(let fallback): return requested ?? fallback
+        }
+    }
+
+    var lensLocked: Bool {
+        if case .locked = lens { return true }
+        return false
     }
 }
 
@@ -263,6 +380,15 @@ final class CameraController: NSObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
+    /// Held so the lens swap can remove exactly the input it added, rather than guessing from
+    /// `session.inputs` — the audio probe adds one too.
+    private var videoInput: AVCaptureDeviceInput?
+    /// The glass currently in the session.
+    private var lens: CameraLens = .normal
+    /// What the concierge asked for, which survives a mode change. ⚑ Kept separate from `lens`
+    /// because Text *refuses* wide: stepping into Text must not silently discard a choice the
+    /// concierge made, and stepping back out must restore it rather than making them ask twice.
+    private var requestedLens: CameraLens?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var previewView: UIView?
     private weak var hostWebView: UIView?
@@ -374,18 +500,35 @@ final class CameraController: NSObject {
         }
         let completion: (Result<[String: Any], Error>) -> Void
         let bracketed: Bool
-        /// What the torch was doing when the concierge pressed. The pair restores it afterwards.
+        /// What the torch was doing when the concierge pressed.
         let torchAtCapture: Bool
+        /// Stamped at request time. A lens swap mid-job is refused, so one value describes the
+        /// whole job — but it is recorded per job rather than read back at delivery, for the same
+        /// reason `Frame.torch` is.
+        let lens: CameraLens
+        /// The LIT frames — one, or three under a bracket.
         var frames: [Frame] = []
+        /**
+         The unlit companion, held aside rather than appended.
+
+         ⚑ It is now captured **first** in wall-clock order (owner ruling 2026-08-16: the flash
+         reads as *done*, so the flash must be last), but it stays **last** in the delivered array.
+         Keeping the array shape fixed is deliberate: the EV labels, `torchPairAgreement`'s choice
+         of the nominal frame, the document deskew and the top-level read all key off position, and
+         re-ordering the array to match the clock would have silently moved every one of them.
+         */
+        var companion: Frame?
         var outstanding: Int
         var wantsTorchPair: Bool
         var pairFired = false
 
         init(completion: @escaping (Result<[String: Any], Error>) -> Void,
-             bracketed: Bool, torchAtCapture: Bool, outstanding: Int, wantsTorchPair: Bool) {
+             bracketed: Bool, torchAtCapture: Bool, lens: CameraLens,
+             outstanding: Int, wantsTorchPair: Bool) {
             self.completion = completion
             self.bracketed = bracketed
             self.torchAtCapture = torchAtCapture
+            self.lens = lens
             self.outstanding = outstanding
             self.wantsTorchPair = wantsTorchPair
         }
@@ -479,10 +622,11 @@ final class CameraController: NSObject {
 
     private func configureSession() throws {
         guard session.inputs.isEmpty else { return }
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+        guard let device = AVCaptureDevice.default(CameraLens.normal.deviceType, for: .video, position: .back) else {
             throw CameraError.noCamera
         }
         self.device = device
+        self.lens = .normal
 
         session.beginConfiguration()
         session.sessionPreset = .photo
@@ -490,6 +634,7 @@ final class CameraController: NSObject {
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else { throw CameraError.noCamera }
         session.addInput(input)
+        self.videoInput = input
 
         if session.canAddOutput(photoOutput) {
             session.addOutput(photoOutput)
@@ -564,11 +709,78 @@ final class CameraController: NSObject {
 
     // MARK: mode
 
+    /**
+     Swap the glass.
+
+     ⚑ **Refused mid-traverse, and that is not caution.** A traverse locks exposure, white balance
+     and focus on its first frame and measures overlap between adjacent frames; changing the field
+     of view part-way through changes what "40% of frame width" *means* and makes every pair after
+     the swap incomparable with every pair before it. The run would still produce numbers, which is
+     the dangerous kind of broken.
+
+     Returns what was actually achieved — never what was asked — for the same reason `setMode` does.
+     */
     @discardableResult
+    func requestLens(_ wanted: CameraLens) -> Achieved {
+        requestedLens = wanted
+        return apply(mode: mode)
+    }
+
+    /// The session surgery alone. Split from `apply(mode:)` rather than calling back into it: a
+    /// swap must be followed by a full re-configure, and two functions that each call the other to
+    /// finish the job is how one of them ends up running twice.
+    private func swapLens(to wanted: CameraLens) -> Bool {
+        guard !isTraversing else { return false }
+        guard wanted != lens else { return true }
+        guard let newDevice = AVCaptureDevice.default(wanted.deviceType, for: .video, position: .back) else {
+            return false
+        }
+        guard let newInput = try? AVCaptureDeviceInput(device: newDevice) else { return false }
+
+        let previous = videoInput
+        session.beginConfiguration()
+        if let previous { session.removeInput(previous) }
+        guard session.canAddInput(newInput) else {
+            // Put back exactly what was there. A session left with no input is a black preview,
+            // which is #71's symptom wearing someone else's clothes.
+            if let previous { session.addInput(previous) }
+            session.commitConfiguration()
+            return false
+        }
+        session.addInput(newInput)
+        session.commitConfiguration()
+
+        videoInput = newInput
+        device = newDevice
+        lens = wanted
+
+        /*
+         All of this is per-DEVICE, so none of it survived the swap: the torch belongs to the device
+         that owns it, and the rotation coordinator was built against the old one. Re-asserting
+         rather than assuming is the same rule as reading `exifOrientation` off the bytes — the
+         thing consulted must be the thing that governs. Focus and metering are re-applied by the
+         `apply(mode:)` that called this.
+        */
+        torchOn = false
+        torchChangedAt = nil
+        companionVetoUntil = nil
+        stopTrackingRotation()
+        if let previewLayer { startTrackingRotation(previewLayer: previewLayer) }
+        return true
+    }
+
     func apply(mode: CameraMode) -> Achieved {
         self.mode = mode
         self.goal = ModeGoal.of(mode)
         var unmet: [String] = []
+
+        // ⚑ The lens follows the mode's policy, and a mode that LOCKS the lens takes it back from
+        // the concierge without discarding their choice — `requestedLens` holds what they asked
+        // for and it is restored the moment they leave Text. Swapped before the device is read
+        // below, because a swap replaces the very device this method goes on to configure.
+        let wantedLens = goal.lens(requested: requestedLens)
+        if wantedLens != lens { _ = swapLens(to: wantedLens) }
+        if lens != wantedLens { unmet.append("lens") }
 
         guard let device else { return Achieved(mode: mode, unmet: ["camera"]) }
         do {
@@ -867,6 +1079,12 @@ final class CameraController: NSObject {
             // Why the torch is off when the light score says it should be on. Without this the
             // companion veto is an invisible hand and the panel reads as a contradiction.
             "companionVetoActive": companionVetoUntil.map { Date() < $0 } ?? false,
+            // The glass in use, what this mode defaults to, and whether the concierge may change
+            // it. All three, because "wide is off" and "wide is not allowed here" are different
+            // sentences and a single boolean would say neither.
+            "lens": lens.rawValue,
+            "lensLocked": goal.lensLocked,
+            "lensAvailable": AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,
             // ⚑ Whether the per-frame instruments are being measured at all. During a traverse the
             // frame callback belongs to the accumulator, so motion is not sampled — and a stale
             // number sitting there unlabelled is what the 2026-08-16 panels showed.
@@ -928,6 +1146,82 @@ final class CameraController: NSObject {
         return discovery.devices.map { $0.deviceType.rawValue }
     }
 
+    // MARK: the shutter-sound probe
+
+    /// Exposed so the bridge can report the lens actually in the session, never the request.
+    var currentLens: CameraLens { lens }
+
+    private var audioRecorder: AVAudioRecorder?
+
+    /**
+     Start recording, with the audio session configured the way a run trace would need it.
+
+     ⚑ `.playAndRecord` with `.mixWithOthers` is the configuration under test, not an arbitrary
+     one: it is what a narrated run trace would run under, and the question is whether the camera's
+     shutter sound survives it. `.defaultToSpeaker` is omitted deliberately — routing the monitor to
+     the speaker would let the speaker's own output reach the microphone and manufacture the very
+     click we are trying to detect.
+     */
+    func startAudioProbe(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            DispatchQueue.main.async {
+                guard granted else {
+                    completion(.failure(CameraError.captureFailed("Microphone access was refused.")))
+                    return
+                }
+                do {
+                    let session = AVAudioSession.sharedInstance()
+                    try session.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers])
+                    try session.setActive(true)
+
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("hs-audio-probe-\(Int(Date().timeIntervalSince1970)).m4a")
+                    let settings: [String: Any] = [
+                        AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                        AVSampleRateKey: 44_100,
+                        AVNumberOfChannelsKey: 1,
+                        AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+                    ]
+                    let recorder = try AVAudioRecorder(url: url, settings: settings)
+                    recorder.isMeteringEnabled = true
+                    guard recorder.record() else {
+                        completion(.failure(CameraError.captureFailed("The recorder would not start.")))
+                        return
+                    }
+                    self.audioRecorder = recorder
+                    completion(.success([
+                        "path": url.path,
+                        "startedAt": ISO8601DateFormatter().string(from: Date()),
+                        // The two facts that decide whether a negative result means anything: if
+                        // the device is muted or another app owns the session, "no click" proves
+                        // nothing about the click.
+                        "category": session.category.rawValue,
+                        "otherAudioPlaying": session.isOtherAudioPlaying
+                    ]))
+                } catch {
+                    completion(.failure(error))
+                }
+            }
+        }
+    }
+
+    func stopAudioProbe(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        guard let recorder = audioRecorder else {
+            completion(.failure(CameraError.captureFailed("No audio probe is running.")))
+            return
+        }
+        let url = recorder.url
+        recorder.stop()
+        audioRecorder = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0
+        completion(.success([
+            "path": url.path,
+            "bytes": bytes,
+            "endedAt": ISO8601DateFormatter().string(from: Date())
+        ]))
+    }
+
     // MARK: capture
 
     /// Capacitor dispatches plugin calls off the main queue; job bookkeeping lives on main, so the
@@ -963,8 +1257,19 @@ final class CameraController: NSObject {
          Paired only when the torch actually fires — one extra frame, on the minority of captures
          where there is anything to compare. Never during a traverse, where the torch is latched
          and the exposure locked, and a mid-traverse torch cycle would break both.
+
+         ⚑ **And the unlit frame now goes FIRST** (owner ruling 2026-08-16, from the field). The
+         owner starts moving the instant the flash fires, because *the flash reads as done* — so
+         with the flash first, the companion was being taken during the motion the flash invited.
+         Reordered rather than frozen: freezing the preview would hide the motion instead of
+         removing it, and the photograph would still be taken while the iPad was moving.
          */
         let wantsTorchPair = torchOn && !isTraversing
+
+        if wantsTorchPair {
+            beginPairWithUnlitFrame(bracketed: wantsBracket, completion: completion)
+            return
+        }
 
         let settings: AVCapturePhotoSettings
         if wantsBracket {
@@ -987,6 +1292,7 @@ final class CameraController: NSObject {
             completion: completion,
             bracketed: wantsBracket,
             torchAtCapture: torchOn,
+            lens: lens,
             outstanding: wantsBracket ? 3 : 1,
             wantsTorchPair: wantsTorchPair
         )
@@ -1139,19 +1445,34 @@ final class CameraController: NSObject {
             job.completion(.failure(CameraError.captureFailed(error.localizedDescription)))
             return
         }
-        if let data { job.frames.append(CaptureJob.Frame(data: data, torch: requestedWithTorch)) }
+        // ⚑ Routed by ROLE, not by arrival order. The unlit companion now arrives first and is
+        // held aside; the lit frames fill the array. `torchForRequest` is the authority on which
+        // is which, stamped when the request was made rather than read off `torchOn` now — by now
+        // the pair has already switched it.
+        if let data {
+            let frame = CaptureJob.Frame(data: data, torch: requestedWithTorch)
+            if job.wantsTorchPair && !requestedWithTorch {
+                job.companion = frame
+            } else {
+                job.frames.append(frame)
+            }
+        }
         job.outstanding -= 1
         guard job.outstanding <= 0 else { return }
 
-        // The unlit half of the pair is owed. Fire it before completing, so both frames arrive as
-        // one capture — the concierge pressed once and must get one result back.
+        // The lit half is owed. Fire it before completing, so both halves arrive as one capture —
+        // the concierge pressed once and must get one result back — and so the flash lands last.
         if job.wantsTorchPair && !job.pairFired {
             job.pairFired = true
-            fireTorchPair(for: job)
+            release(job)
+            fireLitHalf(for: job)
             return
         }
 
         release(job)
+        // The lamp goes out behind the pair. Whether it comes back is `applyCompanionVerdict`'s
+        // decision, taken on the unlit frame's accurate read rather than on the light score.
+        if job.wantsTorchPair { setTorch(false) }
         /*
          ⚑ **The torch is NOT restored here, and that deletion is the owner's ruling of 2026-08-16.**
 
@@ -1183,19 +1504,58 @@ final class CameraController: NSObject {
         }
     }
 
-    private func fireTorchPair(for job: CaptureJob) {
+    /**
+     Half one of a reordered pair: the torch goes out and the unlit frame is taken.
+
+     The scene is genuinely darker with the torch off, so this frame wants the exposure system's own
+     answer rather than the lit frame's settings — which is what continuous AE gives it, once it has
+     had `torchPairSettleSeconds` to converge.
+     */
+    private func beginPairWithUnlitFrame(bracketed: Bool,
+                                         completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        let job = CaptureJob(completion: completion, bracketed: bracketed, torchAtCapture: true,
+                             lens: lens, outstanding: 1, wantsTorchPair: true)
         setTorch(false)
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
             guard let self else { return }
-            // The scene is genuinely darker now, so this frame wants the exposure system's own
-            // answer rather than the lit frame's settings — which is what continuous AE gives it,
-            // once it has had `torchPairSettleSeconds` to converge.
             let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
             settings.photoQualityPrioritization = .quality
             let id = settings.uniqueID
             self.jobs[id] = job
             self.torchForRequest[id] = false
-            job.outstanding = 1
+            self.applyRotation(self.captureRotationAngle, to: self.photoOutput.connection(with: .video))
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+    }
+
+    /// Half two: the torch comes back and the lit frames are taken, so the flash is the last thing
+    /// that happens and "done" means done.
+    private func fireLitHalf(for job: CaptureJob) {
+        setTorch(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
+            guard let self else { return }
+            let settings: AVCapturePhotoSettings
+            if job.bracketed {
+                let biases: [Float] = [-1.0, 0.0, 1.0]
+                let brackets = biases.map {
+                    AVCaptureAutoExposureBracketedStillImageSettings.autoExposureSettings(exposureTargetBias: $0)
+                }
+                let bracket = AVCapturePhotoBracketSettings(
+                    rawPixelFormatType: 0,
+                    processedFormat: [AVVideoCodecKey: AVVideoCodecType.jpeg],
+                    bracketedSettings: brackets
+                )
+                bracket.isLensStabilizationEnabled = self.photoOutput.isLensStabilizationDuringBracketedCaptureSupported
+                settings = bracket
+            } else {
+                settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+                settings.photoQualityPrioritization = .quality
+            }
+            let id = settings.uniqueID
+            self.jobs[id] = job
+            self.torchForRequest[id] = true
+            job.outstanding = job.bracketed ? 3 : 1
+            self.applyRotation(self.captureRotationAngle, to: self.photoOutput.connection(with: .video))
             self.photoOutput.capturePhoto(with: settings, delegate: self)
         }
     }
@@ -1207,7 +1567,10 @@ final class CameraController: NSObject {
         // produces a curled invoice at an angle that reads badly — so the page is found and
         // flattened here, and `deskewed` reports whether it actually was.
         var deskewed = false
+        // ⚑ Companion last, however the clock ordered them. See `CaptureJob.companion`: the EV
+        // labels, the agreement comparison, the deskew and the top-level read all key off position.
         var outgoing = job.frames
+        if let companion = job.companion { outgoing.append(companion) }
         if wantsDeskew, let first = outgoing.first, let flattened = Self.flattenPage(jpeg: first.data) {
             outgoing[0] = CaptureJob.Frame(data: flattened, torch: first.torch)
             deskewed = true
@@ -1249,6 +1612,16 @@ final class CameraController: NSObject {
             "frames": written,
             "mode": mode.rawValue,
             "torchUsed": job.torchAtCapture,
+            /*
+             ⚑ **Which glass took this frame, recorded on the frame** (owner ruling 2026-08-16).
+
+             *A missing object means something different at 65° than at 120°.* A desk reading a
+             room shot and asking "why is the water heater not in any of these" needs to know
+             whether the concierge had the wide view available and it still did not fit, or was
+             shooting normal and simply could not step back far enough. Without this the two are
+             indistinguishable and the wrong one gets acted on.
+            */
+            "lens": job.lens.rawValue,
             "bracketed": job.bracketed,
             "torchPaired": job.pairFired,
             // Reported rather than assumed: a document capture where no page was found is a

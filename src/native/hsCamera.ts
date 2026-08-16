@@ -38,6 +38,54 @@ export interface ModeResult {
   unmet: string[];
 }
 
+/**
+ * Which piece of glass, named for what the concierge sees.
+ *
+ * ⚑ Deliberately NOT Apple's vocabulary: Apple's `builtInWideAngleCamera` is the *normal* lens, and
+ * the owner uses "wide" to mean *wider than normal*. Carrying both meanings of one word across a
+ * bridge is a collision waiting to ship.
+ */
+export const CAMERA_LENSES = ["normal", "wide"] as const;
+export type CameraLens = (typeof CAMERA_LENSES)[number];
+
+/** What `setLens` achieved — never what was asked. Text refuses wide, not every iPad has an
+ *  ultra-wide, and a traverse will not swap mid-run. */
+export interface LensResult {
+  mode: CameraMode;
+  lens: CameraLens;
+  unmet: string[];
+}
+
+/**
+ * The default lens for a mode, and whether the concierge may change it (owner ruling 2026-08-16).
+ *
+ * ⚑ **The concierge chooses; the mode sets the default.** The design session argued the app should
+ * decide, because a mode declares a goal and a lens is a setting. The owner overturned it, and the
+ * reason is the one that governs everything a concierge is asked to judge: *the lens is a
+ * substitute for stepping backwards, and in a tight mechanical room you often cannot step
+ * backwards.* "Does the whole thing fit in the picture" needs no knowledge of what the thing is.
+ *
+ * Text is the single refusal — edge distortion on characters buys nothing and costs reads.
+ *
+ * A predicate rather than a branch in the component, for the same reason `traverseVerdict` and
+ * `frameLabel` are: this is the rule, and a rule inside a component cannot be tested.
+ */
+export function lensPolicyFor(
+  mode: CameraMode,
+  intent?: LensIntent,
+): { default: CameraLens; locked: boolean } {
+  // The refusal wins over any intent: a plate is a plate whatever door was used to reach it.
+  if (mode === "text" || mode === "document") return { default: "normal", locked: true };
+  // ⚑ Room shot and traverse default wide — both are "get the whole of it in", which is the exact
+  // job the lens does. Run trace is NOT in the ruling and so is not assumed into it; it follows a
+  // pipe rather than framing a room, and the concierge can still choose.
+  if (intent === "room-shot" || intent === "traverse") return { default: "wide", locked: false };
+  return { default: "normal", locked: false };
+}
+
+/** The capture doors whose framing job differs enough to change the lens default. */
+export type LensIntent = "room-shot" | "run-trace" | "traverse";
+
 export interface TextBox {
   text: string;
   confidence: number;
@@ -88,6 +136,14 @@ export interface ModeStatusEvent {
    *  this the panel shows a torch that is off while the light score says it should be on, and the
    *  two lines read as a contradiction rather than as a decision. */
   companionVetoActive: boolean;
+  /** The glass actually in the session. */
+  lens: CameraLens;
+  /** ⚑ This mode refuses the choice — Text does, because a 120° lens bends straight lines near the
+   *  frame edge and a plate shot there reads worse, not wider. Distinct from "wide is off": the UI
+   *  has to say *not allowed here* rather than offer a control that silently does nothing. */
+  lensLocked: boolean;
+  /** Whether this iPad has an ultra-wide at all. */
+  lensAvailable: boolean;
   /** ⚑ Whether `motion` is being sampled at all. False during a traverse, where the frame callback
    *  belongs to the accumulator — and a stale number sitting there unlabelled is exactly what the
    *  2026-08-16 panels showed for nineteen minutes. */
@@ -197,6 +253,11 @@ export interface CaptureResult {
   /** Whether the unlit companion read the plate on its own. ⚑ This is what decides the next
    *  arming: if the unlit frame got it, the torch added nothing and does not come back on. */
   companionReadSufficed?: boolean;
+  /** ⚑ Which glass took this capture (owner ruling 2026-08-16). *A missing object means something
+   *  different at 65° than at 120°* — a desk asking "why is the water heater in none of these"
+   *  needs to know whether the wide view was in use and it still did not fit, or the concierge was
+   *  on normal and could not step back far enough. Without this the two are indistinguishable. */
+  lens: CameraLens;
   /** The angle asked of the photo connection, beside each frame's `exifOrientation`. Two numbers
    *  that must agree — printed so they can be seen not to. */
   rotationAngle: number;
@@ -220,6 +281,9 @@ interface ListenerHandle {
 interface NativeCamera {
   start(options: { mode: CameraMode }): Promise<{ mode: CameraMode; capabilities: CameraCapabilities }>;
   setMode(options: { mode: CameraMode }): Promise<ModeResult>;
+  setLens(options: { lens: CameraLens }): Promise<LensResult>;
+  startAudioProbe(): Promise<AudioProbeStarted>;
+  stopAudioProbe(): Promise<AudioProbeResult>;
   adjust(options: {
     focusPoint?: { x: number; y: number };
     meteringPoint?: { x: number; y: number };
@@ -290,6 +354,36 @@ export const captureFrames = () => requireCamera().capture();
  * guards against is twenty plates shot in the wrong mode — every one of which looks fine.
  */
 export const requestMode = (mode: CameraMode) => requireCamera().setMode({ mode });
+
+/** Ask for a lens; get back the one ACHIEVED. Same contract as `requestMode`, and the caller must
+ *  paint from this return — a control painted from the tap claims a field of view the photograph
+ *  does not have. */
+export const requestLens = (lens: CameraLens) => requireCamera().setLens({ lens });
+
+/**
+ * The shutter-sound probe — a measurement, not a feature.
+ *
+ * ⚑ Whether the camera's shutter click lands inside a live recording decides the shape of the run
+ * trace, and it is a **device fact**: it varies by region, by iOS version and by whether an audio
+ * session is active, so it cannot be settled by reading documentation. Record, take a capture,
+ * stop, then listen. Nothing in the concierge's path calls this.
+ */
+export interface AudioProbeStarted {
+  path: string;
+  startedAt: string;
+  category: string;
+  /** ⚑ If another app owns the audio session, "no click" proves nothing about the click. */
+  otherAudioPlaying: boolean;
+}
+
+export interface AudioProbeResult {
+  path: string;
+  bytes: number;
+  endedAt: string;
+}
+
+export const startAudioProbe = () => requireCamera().startAudioProbe();
+export const stopAudioProbe = () => requireCamera().stopAudioProbe();
 
 export const adjustCamera = (options: {
   focusPoint?: { x: number; y: number };

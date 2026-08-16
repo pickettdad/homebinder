@@ -12,6 +12,7 @@ import {
   frameLabel,
   frameStateOf,
   glareSuspected,
+  lensPolicyFor,
   shouldOfferRetake,
   traverseVerdict,
   type TraversePair,
@@ -133,6 +134,45 @@ describe("what a traverse amounts to", () => {
       pair("unverified", 9),
     ];
     expect(traverseVerdict({ pairs: measured })).toBe("gaps");
+  });
+});
+
+describe("which lens a door opens on", () => {
+  /*
+   ⚑ The owner's ruling, 2026-08-16, which overturned the design session's position that the app
+   should choose: **the concierge chooses, the mode sets the default.** The lens is a substitute for
+   stepping backwards, and in a tight mechanical room you often cannot step backwards.
+
+   Asserted as the two rules — refusal, and default-by-door — rather than as a table of every
+   mode/intent pair, so a mode or a door added later is covered by the rule it falls under.
+  */
+  it("⚑ never goes wide where characters are the point, whatever door was used", () => {
+    // Edge distortion on a plate buys nothing and costs reads. The refusal outranks any intent,
+    // because a plate is a plate however it was reached.
+    for (const intent of [undefined, "room-shot", "run-trace", "traverse"] as const) {
+      expect(lensPolicyFor("text", intent)).toEqual({ default: "normal", locked: true });
+      expect(lensPolicyFor("document", intent)).toEqual({ default: "normal", locked: true });
+    }
+  });
+
+  it("defaults wide for the doors whose job is fitting the whole of something in", () => {
+    expect(lensPolicyFor("object", "room-shot").default).toBe("wide");
+    expect(lensPolicyFor("object", "traverse").default).toBe("wide");
+  });
+
+  it("leaves the choice open wherever it is the concierge's to make", () => {
+    // The locked flag is the whole of the ruling's second half: outside Text, nothing may take the
+    // decision away from the person standing in the room.
+    for (const mode of CAMERA_MODES.filter((m) => m !== "text" && m !== "document")) {
+      expect(lensPolicyFor(mode).locked).toBe(false);
+      expect(lensPolicyFor(mode, "room-shot").locked).toBe(false);
+    }
+  });
+
+  it("does not assume a door into the ruling that the ruling did not name", () => {
+    // Run trace follows a pipe rather than framing a room, and the owner did not name it. Guessing
+    // it into "wide" would be the app choosing, which is the thing that was overturned.
+    expect(lensPolicyFor("object", "run-trace").default).toBe("normal");
   });
 });
 

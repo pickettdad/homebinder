@@ -38,7 +38,15 @@ import {
   frameStateOf,
   frameUrl,
   glareSuspected,
+  lensPolicyFor,
+  requestLens,
+  startAudioProbe,
+  stopAudioProbe,
   traverseVerdict,
+  type AudioProbeResult,
+  type AudioProbeStarted,
+  type CameraLens,
+  type LensIntent,
   onModeStatus,
   onTextBoxes,
   onTraverse,
@@ -220,6 +228,12 @@ function Level({ roll, square }: { roll: number; square: boolean }) {
 export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
+  /** The latest status, readable from callbacks that must not re-subscribe when it changes —
+   *  `beginTraverse` needs the lens state and is deliberately stable. */
+  const statusRef = useRef<ModeStatusEvent | null>(null);
+  statusRef.current = status;
+  const [audioProbe, setAudioProbe] = useState<AudioProbeStarted | null>(null);
+  const [audioClip, setAudioClip] = useState<AudioProbeResult | null>(null);
   const [capabilities, setCapabilities] = useState<CameraCapabilities | null>(null);
   const [text, setText] = useState<TextBoxesEvent | null>(null);
   const [shots, setShots] = useState<CaptureResult[]>([]);
@@ -321,6 +335,16 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     setTraverseResult(null);
     setTraverseProgress(null);
     try {
+      // ⚑ Lens first, and it MUST be before `startTraverse`. A traverse locks exposure, white
+      // balance and focus on its first frame and refuses a lens swap mid-run — so a wide default
+      // applied afterwards would be silently declined, and the run would be shot on normal while
+      // the control said wide.
+      if (statusRef.current?.lensAvailable) {
+        const policy = lensPolicyFor(statusRef.current.mode, "traverse");
+        if (!policy.locked && statusRef.current.lens !== policy.default) {
+          await requestLens(policy.default);
+        }
+      }
       await startTraverse();
       setTraversing(true);
     } catch (err) {
@@ -396,6 +420,58 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     }
   };
 
+  /**
+   * ⚑ Same contract as `chooseMode`: ask, then let the status stream paint. Nothing here reads the
+   * button that was tapped, because Text refuses wide and a traverse refuses a swap mid-run — so a
+   * control painted from the press would claim a field of view the photograph does not have.
+   */
+  const toggleAudioProbe = async () => {
+    try {
+      if (audioProbe) {
+        const done = await stopAudioProbe();
+        setAudioProbe(null);
+        setAudioClip(done);
+      } else {
+        setAudioClip(null);
+        setAudioProbe(await startAudioProbe());
+      }
+    } catch (err) {
+      setAudioProbe(null);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /** Off the device, because the whole question is whether a human can hear the click. */
+  const shareAudioClip = async () => {
+    if (!audioClip) return;
+    const response = await fetch(frameUrl(audioClip.path));
+    const blob = await response.blob();
+    const file = new File([blob], `hs-shutter-probe-${audioClip.endedAt.replace(/[:.]/g, "-")}.m4a`, {
+      type: "audio/mp4",
+    });
+    if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "HouseSteady shutter probe" });
+    }
+  };
+
+  const chooseLens = async (lens: CameraLens) => {
+    try {
+      const achieved = await requestLens(lens);
+      if (achieved.lens !== lens) showToast(`lens stayed ${achieved.lens}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /** The mode's default lens for a door, applied when that door is opened. The concierge can still
+   *  change it afterwards — this is a default, never a lock. */
+  const applyIntentLens = async (intent: LensIntent) => {
+    if (!status?.lensAvailable) return;
+    const policy = lensPolicyFor(status.mode, intent);
+    if (policy.locked || status.lens === policy.default) return;
+    await chooseLens(policy.default);
+  };
+
   const frameState = frameStateOf(status);
   // Clamped rather than trusted: a stack of three followed by a stack of one would otherwise
   // leave the index pointing past the end and render nothing at all.
@@ -468,12 +544,46 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         {zone && (
           <span className="rounded-full bg-slate-900/70 px-3 py-1.5 text-sm text-slate-100">→ {zone.label}</span>
         )}
+        {/* ⚑ And when there is NO zone, say what this screen is. The absence used to be the whole
+            signal, on the theory that nothing on screen means nothing is being filed — but the
+            owner reached it from Home on 2026-08-16, found no container control, and concluded the
+            feature was missing. It was not; it is hidden because there is no zone to file into.
+            An absence cannot distinguish "nothing is being filed" from "this is broken", so the
+            screen names itself instead. */}
+        {!zone && (
+          <span className="rounded-full bg-slate-900/70 px-3 py-1.5 text-sm text-slate-400">
+            camera harness · nothing is filed · enter from a zone to test objects
+          </span>
+        )}
         <div className="flex items-center gap-2">
           {status?.torchOn && <span className="rounded-full bg-amber-400/90 px-2 py-1 text-xs text-slate-900">torch</span>}
           {frameState === "degraded" && (
             <span className="rounded-full bg-rose-500 px-2 py-1 text-xs text-white">
               {status?.unmet.join(", ")}
             </span>
+          )}
+          {/* ⚑ The lens is the concierge's (owner ruling 2026-08-16). Painted from `status.lens`,
+              which is what the session actually holds — never from the tap, for the same reason the
+              frame colour is painted from `setMode`'s return. Hidden when this iPad has no
+              ultra-wide; disabled, not hidden, when the MODE refuses it, because "not available
+              here" and "not available at all" are different sentences and a missing control says
+              neither. */}
+          {status?.lensAvailable && (
+            <button
+              type="button"
+              aria-label="Lens"
+              disabled={status.lensLocked}
+              onClick={() => void chooseLens(status.lens === "wide" ? "normal" : "wide")}
+              className={`rounded-lg px-3 py-2 text-xs ring-1 ${
+                status.lensLocked
+                  ? "bg-slate-900/40 text-slate-600 ring-slate-700"
+                  : status.lens === "wide"
+                    ? "bg-sky-500 text-slate-900 ring-sky-400"
+                    : "bg-slate-900/70 text-slate-300 ring-slate-600"
+              }`}
+            >
+              {status.lensLocked ? "wide n/a here" : status.lens === "wide" ? "wide" : "normal"}
+            </button>
           )}
           {status?.mode === "text" && (
             <button
@@ -553,9 +663,43 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             </p>
           )}
           <p>session · <span className="font-mono text-slate-100">{status.sessionRunning ? "running" : "stopped"}</span></p>
+          {/*
+            ⚑ **The shutter-sound probe — a measurement, not a feature** (owner approval
+            2026-08-16). Whether the camera's click lands inside a live recording decides the shape
+            of the run trace, and it is a device fact: it varies by region, by iOS version and by
+            whether an audio session is active, so it cannot be settled by reading documentation.
+
+            Record → take a capture → stop → listen. It sits inside the instruments panel because
+            that is a harness, and nothing in the concierge's path reaches it.
+          */}
+          <div className="mt-2 border-t border-slate-700 pt-2">
+            <button
+              type="button"
+              onClick={() => void toggleAudioProbe()}
+              className={`w-full rounded-lg px-2 py-1.5 text-xs ring-1 ${
+                audioProbe
+                  ? "bg-rose-500 text-white ring-rose-400"
+                  : "bg-slate-900/70 text-slate-300 ring-slate-600"
+              }`}
+            >
+              {audioProbe ? "recording — capture, then stop" : "shutter-sound probe"}
+            </button>
+            {audioProbe?.otherAudioPlaying && (
+              // Without this a silent recording proves nothing: another app owns the session.
+              <p className="mt-1 text-amber-400">another app owns the audio session</p>
+            )}
+            {audioClip && (
+              <p className="mt-1">
+                <button type="button" onClick={() => void shareAudioClip()} className="underline">
+                  send clip ({Math.round(audioClip.bytes / 1024)} kB)
+                </button>
+              </p>
+            )}
+          </div>
           {capabilities && (
             <p className="mt-1 text-slate-500">
               brackets {capabilities.maxBracketedFrames} · torch {String(capabilities.torch)}
+              {status.lensAvailable && <> · lens {status.lens}{status.lensLocked ? " (locked)" : ""}</>}
               {/* Reported so the ultra-wide question is settled by a run rather than by a guess
                   about which iPad this is. Nothing switches lens yet — that needs a ruling. */}
               {capabilities.lenses?.length > 0 && (
@@ -693,7 +837,14 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 type="button"
                 aria-label={action.hint}
                 onClick={() => {
-                  void chooseMode(action.mode);
+                  void (async () => {
+                    await chooseMode(action.mode);
+                    // ⚑ The door sets the lens default. A room shot is "get the whole of it in",
+                    // which is the exact job the wide lens does — so opening that door should not
+                    // also require remembering to change lens. Still a default: the control stays
+                    // live and the concierge can go back to normal.
+                    await applyIntentLens(action.id === "room-shot" ? "room-shot" : "run-trace");
+                  })();
                   showToast(`${action.hint} — framed wide, one per zone`);
                 }}
                 className="h-14 w-14 rounded-full bg-slate-900/70 text-lg text-slate-200 ring-1 ring-dashed ring-slate-500"

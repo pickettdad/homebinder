@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   CAMERA_MODES,
   cameraAvailable,
+  frameLabel,
   frameStateOf,
   glareSuspected,
   shouldOfferRetake,
@@ -103,6 +104,95 @@ describe("what a traverse amounts to", () => {
 
   it("confirms contiguity only when every pair was measured and held", () => {
     expect(traverseVerdict({ pairs: [pair("contiguous"), pair("contiguous", 1)] })).toBe("contiguous");
+  });
+
+  it("⚑ will not headline a gap on a run it mostly could not describe", () => {
+    /*
+     The 2026-08-16 L-walk, to shape: 15 pairs, 1 gap, 13 unverified, 1 contiguous — reported to
+     the concierge as the single word `gaps`. A confident claim about a run where the mechanism
+     could not describe thirteen of the fifteen pairs it was asked about, landing on the false
+     alarm the owner ruled worse than no flag at all.
+
+     The invariant is about proportion, not about these counts: a gap is headlined only when the
+     mechanism described most of the run. Stated this way it holds at fifteen pairs and at fifty.
+    */
+    const lWalk = [
+      ...Array.from({ length: 13 }, (_, i) => pair("unverified", i)),
+      pair("gap", 13),
+      pair("contiguous", 14),
+    ];
+    expect(traverseVerdict({ pairs: lWalk })).toBe("unverified");
+  });
+
+  it("still headlines the gap once most of the run was actually measured", () => {
+    // The other side of the same rule — the unverified pairs must not become a way to hide a real
+    // gap in a run the mechanism otherwise handled fine.
+    const measured = [
+      ...Array.from({ length: 8 }, (_, i) => pair("contiguous", i)),
+      pair("gap", 8),
+      pair("unverified", 9),
+    ];
+    expect(traverseVerdict({ pairs: measured })).toBe("gaps");
+  });
+});
+
+describe("what a frame is called", () => {
+  const frame = (index: number, torch: boolean) => ({
+    path: `/tmp/f${index}.jpg`,
+    bytes: 1,
+    index,
+    exifOrientation: 6,
+    torch,
+  });
+
+  /**
+   * ⚑ The invariant, and it is deliberately not a list of expected strings: **no two frames of one
+   * capture may carry the same label.** A label is what a frame leaves the device under, so a
+   * collision is lost evidence — which is not hypothetical, it is what happened to three of the
+   * four frames the owner sent on 2026-08-16.
+   *
+   * Stated this way it holds for any capture shape a future mode invents; an inventory of
+   * "torch · −1 EV" strings would pass today and fire on the next legitimate addition.
+   */
+  const allLabelsDistinct = (shot: Parameters<typeof frameLabel>[0]) => {
+    const labels = shot.frames.map((_, i) => frameLabel(shot, i));
+    return new Set(labels).size === labels.length;
+  };
+
+  it("⚑ gives every frame of a bracketed torch pair a label of its own", () => {
+    // The shape that broke: three lit bracket frames, then the unlit companion.
+    const shot = {
+      frames: [frame(0, true), frame(1, true), frame(2, true), frame(3, false)],
+      torchPaired: true,
+      bracketed: true,
+    };
+    expect(allLabelsDistinct(shot)).toBe(true);
+    // And the companion is still named for the thing that makes it worth keeping.
+    expect(frameLabel(shot, 3)).toBe("no torch");
+  });
+
+  it("keeps labels distinct for a bare pair and a bare bracket alike", () => {
+    expect(
+      allLabelsDistinct({
+        frames: [frame(0, true), frame(1, false)],
+        torchPaired: true,
+        bracketed: false,
+      }),
+    ).toBe(true);
+    expect(
+      allLabelsDistinct({
+        frames: [frame(0, false), frame(1, false), frame(2, false)],
+        torchPaired: false,
+        bracketed: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("names a frame by what it is rather than by where it sits", () => {
+    // The ordinal was rejected on purpose: "frame 2" answers a question nobody has. It survives
+    // only as the fallback for a capture with nothing else to say about its frames.
+    const plain = { frames: [frame(0, false)], torchPaired: false, bracketed: false };
+    expect(frameLabel(plain, 0)).toBe("frame 1");
   });
 });
 

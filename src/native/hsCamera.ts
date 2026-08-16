@@ -23,6 +23,12 @@ export interface CameraCapabilities {
   maxBracketedFrames: number;
   level: boolean;
   textRecognition: boolean;
+  /** ⚑ Rear lenses this device actually has, by Apple's type names. Reported, not used: a wider
+   *  view in a tight space needs `builtInUltraWideCamera` — zoom only ever narrows — and whether
+   *  this iPad has one is a fact about the model. Choosing a lens is a capture decision and needs
+   *  a ruling before it needs code; this is here so the question is answered by a run rather than
+   *  by a guess. */
+  lenses: string[];
   unmetAtStart: string[];
 }
 
@@ -50,8 +56,15 @@ export interface TextBoxesEvent {
   stable: boolean;
   /** ⚑ Characters WERE detected and read badly. Never "no text found". */
   marginal: boolean;
+  /** ⚑ Whether live recognition ran for this frame at all. False in modes that do not read, where
+   *  `characterCount: 0` would otherwise be indistinguishable from *looked and found nothing* —
+   *  the ambiguity that let a frozen instrument panel read as a live one. */
+  reading: boolean;
   meanConfidence: number;
   characterCount: number;
+  /** The motion half of `stable`, on its own, so a shutter that will not fire can be attributed
+   *  to stillness or to characters without guessing which. */
+  still: boolean;
   /** Mean frame-to-frame shift as a fraction of frame width. Reported always, acted on rarely. */
   motion: number;
   stillThreshold: number;
@@ -71,6 +84,14 @@ export interface ModeStatusEvent {
    *  measures whether the torch is needed, so one threshold oscillates on a 5-second timer —
    *  which is what put a flash on one field capture and none on the next 34 seconds later. */
   torchReleaseThreshold: number;
+  /** ⚑ The torch is being held off because an unlit companion frame read the plate fine. Without
+   *  this the panel shows a torch that is off while the light score says it should be on, and the
+   *  two lines read as a contradiction rather than as a decision. */
+  companionVetoActive: boolean;
+  /** ⚑ Whether `motion` is being sampled at all. False during a traverse, where the frame callback
+   *  belongs to the accumulator — and a stale number sitting there unlabelled is exactly what the
+   *  2026-08-16 panels showed for nineteen minutes. */
+  motionLive: boolean;
   /** The clockwise rotation, in degrees, that brings the buffer upright. One number drives the
    *  preview, the still and Vision — two tables disagreeing is what shipped the landscape bug. */
   previewRotationAngle: number;
@@ -168,6 +189,14 @@ export interface CaptureResult {
    *  taken AND both frames produced text — a number computed from one read would be an alarm
    *  on a case with nothing to say. */
   torchPairAgreement?: number;
+  /** ⚑ Which two frame indices `torchPairAgreement` came from — the nominal-exposure lit frame and
+   *  the unlit companion. Present because the first cut compared frames 0 and 1, which under a
+   *  bracket are two LIT frames: they agree closely, so the glare alarm went quiet in the only
+   *  mode that can raise it. A surprising number can now be checked against two photographs. */
+  torchPairCompared?: [number, number];
+  /** Whether the unlit companion read the plate on its own. ⚑ This is what decides the next
+   *  arming: if the unlit frame got it, the torch added nothing and does not come back on. */
+  companionReadSufficed?: boolean;
   /** The angle asked of the photo connection, beside each frame's `exifOrientation`. Two numbers
    *  that must agree — printed so they can be seen not to. */
   rotationAngle: number;
@@ -317,9 +346,67 @@ export type TraverseVerdict = "empty" | "contiguous" | "gaps" | "unverified";
 
 export function traverseVerdict(result: Pick<TraverseResult, "pairs">): TraverseVerdict {
   if (result.pairs.length === 0) return "empty";
-  if (result.pairs.some((p) => p.contiguity === "gap")) return "gaps";
-  if (result.pairs.some((p) => p.contiguity === "unverified")) return "unverified";
+  const gaps = result.pairs.filter((p) => p.contiguity === "gap").length;
+  const unverified = result.pairs.filter((p) => p.contiguity === "unverified").length;
+  /*
+   ⚑ **A run whose pairs were mostly unverifiable does not get to headline `gaps`.**
+
+   The first cut returned `gaps` on a single gap at any count. The 2026-08-16 L-walk is what it
+   costs: **15 pairs — 1 gap, 13 unverified, 1 contiguous — reported as `gaps`.** One word, stated
+   with confidence, on a run where the mechanism could not describe thirteen of the fifteen pairs
+   it was asked about.
+
+   That is this project's named diagnostic failure exactly — *a diagnostic decides whether there
+   is anything to say before it says what* — and here it lands on the false alarm the owner ruled
+   worse than no flag at all, because a concierge reading `gaps` walks the room again.
+
+   So the verdict answers **can this mechanism describe the run** first. When most pairs came back
+   unverified it cannot, and the run is `unverified`. ⚑ *The gap count is not hidden by this* — it
+   is printed beside the verdict either way, so nothing is lost except a claim that was not
+   earned.
+  */
+  if (unverified > gaps + result.pairs.filter((p) => p.contiguity === "contiguous").length) {
+    return "unverified";
+  }
+  if (gaps > 0) return "gaps";
+  if (unverified > 0) return "unverified";
   return "contiguous";
+}
+
+/**
+ * What a frame IS, not where it sits in the array.
+ *
+ * "no torch" answers the question the reviewer is asking; "frame 2" answers a different one that
+ * nobody has. On a torch pair the label is the whole reason the second frame exists.
+ *
+ * ⚑ **The two facts compose; they used to short-circuit.** `torchPaired` returned first, so when a
+ * capture was BOTH bracketed and paired — which is text mode, the only mode that declares either —
+ * three exposures a stop apart all came back labelled `torch`.
+ *
+ * It cost evidence on the run that found it. The owner sent four frames from one job on
+ * 2026-08-16 and three arrived as `hs-text-…-torch.jpg`, `…torch 2`, `…torch 3`, kept apart only
+ * by Google Drive's duplicate-name suffix. Measured afterwards they were a −1/0/+1 bracket, and
+ * which was which is no longer recoverable from the files.
+ *
+ * *A label that says what a frame IS has to carry everything that distinguishes it from the frame
+ * beside it, or it has not done the job the ordinal was rejected for.* Lives here rather than in
+ * the reviewer for the same reason `traverseVerdict` does: a rule inside a component cannot be
+ * tested, and this one is load-bearing for the filename a frame leaves the device under.
+ */
+export function frameLabel(
+  shot: Pick<CaptureResult, "frames" | "torchPaired" | "bracketed">,
+  index: number,
+): string {
+  const frame = shot.frames[index];
+  if (!frame) return `frame ${index + 1}`;
+
+  if (shot.torchPaired && !frame.torch) return "no torch";
+
+  // Bracket biases are [−1, 0, +1] and the companion is appended after them, so the EV names line
+  // up with the leading indices whether or not a pair followed.
+  const ev = shot.bracketed ? ["−1 EV", "0 EV", "+1 EV"][index] : undefined;
+  if (shot.torchPaired) return ev ? `torch · ${ev}` : "torch";
+  return ev ?? `frame ${index + 1}`;
 }
 
 /** Below this the lit and unlit reads of one plate disagree enough to say so. A clean pair on a

@@ -1,8 +1,48 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { isNativePlatform } from "../app/platform";
 import { BigButton, Sheet, formatBytes } from "../ui/bits";
 import { getAppToken, setAppToken } from "../chat/queue";
+import { readDeviceStatus, type HSDeviceStatus } from "../native/hsShell";
+
+/**
+ * Thermal and battery on the screen the camera-closed arm of the thermal walk is run on.
+ *
+ * ⚑ It is here rather than on a diagnostics screen because *here is where the measurement
+ * happens*: the arm is defined as "back on Home, app still running", and a reading you have to
+ * navigate to is a reading taken at a different moment than the one being timed.
+ *
+ * Polled every 30 s, and only while this screen is up. The camera's `modeStatus` carries the
+ * same two figures at 5 s while it is running; nothing needs both at once, and a permanent timer
+ * would be load on the thing being measured.
+ */
+function DeviceStatusLine() {
+  const [status, setStatus] = useState<HSDeviceStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      void readDeviceStatus()
+        .then((s) => !cancelled && setStatus(s))
+        .catch(() => {});
+    };
+    read();
+    const timer = setInterval(read, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+  if (!status) return null;
+  return (
+    <p className="mt-1">
+      Device: thermal <span className="font-mono text-slate-400">{status.thermalState}</span> · battery{" "}
+      <span className="font-mono text-slate-400">{Math.round(status.battery.level * 100)}%</span>{" "}
+      {status.battery.state} ·{" "}
+      {/* The device's clock, not this screen's — a pasted reading should carry its own time. */}
+      <span className="font-mono text-slate-400">{status.at.slice(11, 19)}Z</span>
+    </p>
+  );
+}
 
 export function HomeScreen() {
   const {
@@ -127,6 +167,7 @@ export function HomeScreen() {
                 : "NOT persistent — install to home screen"}
           </p>
         )}
+        <DeviceStatusLine />
         <p className="mt-1">
           Offline-first: nothing here ever waits on a network.{" "}
           <button type="button" className="underline" onClick={() => setTokenSheet(true)}>

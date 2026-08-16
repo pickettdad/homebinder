@@ -91,7 +91,9 @@ export type Screen =
   /** Diagnostics, reachable from Home only — never part of a visit. */
   | { name: "devbench" }
   | { name: "nativecheck" }
-  | { name: "camera2" };
+  /** The zone is optional: reached from Home it is the F-26 judging harness with nothing to
+   *  file into; reached from capture mode it carries the zone, and captures land there. */
+  | { name: "camera2"; zoneId?: string };
 
 interface AppStore {
   ready: boolean;

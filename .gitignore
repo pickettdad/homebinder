@@ -17,3 +17,9 @@ public/icons/
 .DS_Store
 # Xcode writes per-user scheme state into the plugin package when the project is opened.
 .swiftpm/
+# SwiftPM resolution state, written the moment SourceKit or Xcode indexes the plugin package.
+# ANCHORED, per the lesson above — and NOT a build input: the generated app project carries the
+# lock that actually governs resolution (its `capacitor-swift-pm` pin is exact), while this
+# package's own range deliberately intersects it. A resolved file here could only ever disagree.
+/native/hs-native/.build/
+/native/hs-native/Package.resolved

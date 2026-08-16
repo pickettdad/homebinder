@@ -82,7 +82,11 @@ describe("the native plugin package is wired so `cap sync` finds it", () => {
     );
 
     // Xcode and SwiftPM write build/user state inside the package; those are correctly untracked.
-    const IGNORED = new Set([".swiftpm", ".build", "node_modules"]);
+    // ⚑ Named entries, never a pattern. The bug this test exists for was a pattern that matched
+    // more than its author meant it to, so an exemption list that could do the same would be the
+    // same defect wearing the test's own clothes. `Package.resolved` is on it because the lock
+    // that governs resolution is the generated app project's, not this package's.
+    const IGNORED = new Set([".swiftpm", ".build", "node_modules", "Package.resolved"]);
     const onDisk: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {

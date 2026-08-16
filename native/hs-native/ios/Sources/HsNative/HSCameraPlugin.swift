@@ -240,15 +240,42 @@ final class CameraController: NSObject {
     private var analysing = false
 
     /**
-     Which way up the sample buffer is, from Vision's point of view.
+     Which way up the camera is — **ONE angle, from which the preview, the still and Vision are
+     all derived.**
 
-     ⚑ Not a detail: a fixed `.right` reads a landscape-held iPad's text sideways, and Vision
-     simply returns fewer and worse lines — so the mode would look like it was failing at reading
-     plates when it was failing at knowing which way the iPad was pointing. Cached from the main
-     thread because frames are analysed on a background queue and `UIDevice.orientation` is not
-     safe to read there.
+     ⚑ This replaced two hand-written tables that disagreed, and the disagreement reached the
+     field on 2026-08-15: held in landscape the preview was upside down while the green text
+     boxes sat correctly over the characters. Both tables switched on `UIDeviceOrientation`, but
+     the preview table used the angles that belong to `UIInterfaceOrientation` — and
+     `UIDeviceOrientation.landscapeLeft` **is** `UIInterfaceOrientation.landscapeRight`. So the
+     two landscape cases were swapped, and portrait, where the two vocabularies happen to agree,
+     looked fine. The Vision table was the correct one, which is exactly why the overlay was
+     right and the picture was wrong — *a bug that presents as the overlay being broken.*
+
+     `AVCaptureDevice.RotationCoordinator` is Apple's answer to that trap. It reports the angle
+     for the preview and the angle for the capture, it is KVO-observable, and it is right when
+     the iPad is **flat** — a state `UIDevice.orientation` cannot express at all, and the state
+     an iPad is in whenever a plate on top of a furnace gets photographed.
+
+     ⚑ Deriving all three from one angle is the structural half of the fix: two tables can
+     disagree, one cannot.
      */
-    private var visionOrientation: CGImagePropertyOrientation = .right
+    private var previewRotationAngle: CGFloat = 90
+    private var captureRotationAngle: CGFloat = 90
+    private var rotationObservations: [NSKeyValueObservation] = []
+    /// Typed `AnyObject` because the stored property outlives the `iOS 17` availability check.
+    private var rotationCoordinatorStore: AnyObject?
+
+    /**
+     Vision's view of the buffer, from the SAME angle that orients the preview.
+
+     Read on the vision queue while written on main. That race is benign and deliberately not
+     locked: the worst outcome is one analysed frame at the previous angle, mid-rotation, and a
+     lock on the hot path costs more than the frame is worth.
+     */
+    private var visionOrientation: CGImagePropertyOrientation {
+        Self.imageOrientation(forRotationAngle: previewRotationAngle)
+    }
 
     private var lastRead: LiveRead = .empty
 
@@ -383,12 +410,13 @@ final class CameraController: NSObject {
         hostWebView = webView
         previewView = container
         previewLayer = layer
-        applyRotation(to: layer.connection)
+        startTrackingRotation(previewLayer: layer)
     }
 
     func stop() {
         statusTimer?.invalidate()
         statusTimer = nil
+        stopTrackingRotation()
         motion.stopDeviceMotionUpdates()
         setTorch(false)
         sessionQueue.async { [weak self] in
@@ -515,23 +543,50 @@ final class CameraController: NSObject {
         return min(1.0, max(0.0, 0.7 * isoLoad + 0.3 * shutterLoad))
     }
 
+    /**
+     Two thresholds, not one — and the reason is that the torch is **inside the loop that
+     measures whether the torch is needed.**
+
+     ⚑ Field pair, 2026-08-15: one auto-capture fired with the torch and put a specular hotspot
+     across the plate; the next, 34 seconds later with nothing changed, fired without it. The
+     single-threshold form makes that inevitable. `lightScore` is computed from ISO and shutter,
+     the torch lights the scene, ISO falls, the score drops below the one threshold, the torch
+     goes off — and five seconds later the score has risen again and it comes back on. **A
+     5-second oscillator, one auto-capture landing on each phase**, which reads in the field as
+     a camera that flashes at random.
+
+     So: arm high, release **far** lower. With the torch lit a genuinely dark room still scores
+     around the middle of that gap and the torch stays on; a room that was bright all along
+     scores near zero with the torch adding to it, and it releases. The gap is what makes the
+     actuator's own effect unable to cross back over the decision.
+     */
     private static let underLitThreshold = 0.62
+    private static let torchReleaseThreshold = 0.15
+    /// Auto-exposure needs a moment to converge after the light changes. Deciding inside that
+    /// window measures the transition rather than the scene.
+    private static let torchSettleSeconds = 1.5
+    private var torchChangedAt: Date?
 
     private func evaluateTorch() {
         guard let device, device.hasTorch else {
             torchOn = false
             return
         }
-        let wanted: Bool
         if let torchOverride {
-            wanted = torchOverride
-        } else {
-            switch goal.torch {
-            case .never: wanted = false
-            case .whenUnderLit: wanted = lightScore() >= Self.underLitThreshold
-            }
+            if torchOverride != torchOn { setTorch(torchOverride) }
+            return
         }
-        if wanted != torchOn { setTorch(wanted) }
+        switch goal.torch {
+        case .never:
+            if torchOn { setTorch(false) }
+        case .whenUnderLit:
+            if let changedAt = torchChangedAt, Date().timeIntervalSince(changedAt) < Self.torchSettleSeconds {
+                return
+            }
+            let score = lightScore()
+            let wanted = torchOn ? score >= Self.torchReleaseThreshold : score >= Self.underLitThreshold
+            if wanted != torchOn { setTorch(wanted) }
+        }
     }
 
     private func setTorch(_ on: Bool) {
@@ -541,32 +596,14 @@ final class CameraController: NSObject {
             defer { device.unlockForConfiguration() }
             device.torchMode = on ? .on : .off
             torchOn = on
+            torchChangedAt = Date()
         } catch { torchOn = false }
     }
 
     // MARK: status
 
-    /// Back camera, buffers as delivered. Kept in one table so the mapping can be read at a glance.
-    private func trackOrientation() {
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-        NotificationCenter.default.addObserver(
-            forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            switch UIDevice.current.orientation {
-            case .landscapeLeft: self.visionOrientation = .up
-            case .landscapeRight: self.visionOrientation = .down
-            case .portraitUpsideDown: self.visionOrientation = .left
-            case .portrait: self.visionOrientation = .right
-            default: break // face up/down/unknown: keep the last real orientation
-            }
-            self.applyRotation(to: self.previewLayer?.connection)
-        }
-    }
-
     private func startStatusSampling() {
         UIDevice.current.isBatteryMonitoringEnabled = true
-        trackOrientation()
         guard statusTimer == nil else { return }
         // Five seconds: fast enough to watch a thermal state change during a walk, slow enough to
         // be free. iOS reports battery level in 5% steps, so a drain figure needs tens of minutes
@@ -609,6 +646,11 @@ final class CameraController: NSObject {
             "torchOverridden": torchOverride != nil,
             "lightScore": lightScore(),
             "underLitThreshold": Self.underLitThreshold,
+            // The release threshold rides beside the arm threshold so the hysteresis gap is a
+            // pair of numbers on screen rather than a constant somebody has to go and read.
+            "torchReleaseThreshold": Self.torchReleaseThreshold,
+            "previewRotationAngle": Double(previewRotationAngle),
+            "captureRotationAngle": Double(captureRotationAngle),
             "thermalState": thermalWord(),
             "battery": [
                 "level": Double(UIDevice.current.batteryLevel),
@@ -678,22 +720,129 @@ final class CameraController: NSObject {
         captureFrames[id] = []
         captureExpected[id] = wantsBracket ? 3 : 1
 
-        applyRotation(to: photoOutput.connection(with: .video))
+        // ⚑ Applied on the MAIN thread, from the cached coordinator angle. The previous version
+        // read `UIDevice.current.orientation` right here — on Capacitor's background call queue,
+        // where that property is not valid — and the field stills came back unrotated while the
+        // preview, which is driven from a main-thread notification, rotated correctly. Same
+        // class as any other "the thing consulted was not the thing that governs".
+        let angle = captureRotationAngle
+        let connection = photoOutput.connection(with: .video)
+        if Thread.isMainThread {
+            applyRotation(angle, to: connection)
+        } else {
+            DispatchQueue.main.sync { applyRotation(angle, to: connection) }
+        }
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
-    private func applyRotation(to connection: AVCaptureConnection?) {
+    private func applyRotation(_ angle: CGFloat, to connection: AVCaptureConnection?) {
         guard let connection else { return }
-        let angle: CGFloat
-        switch UIDevice.current.orientation {
-        case .landscapeLeft: angle = 180
-        case .landscapeRight: angle = 0
-        case .portraitUpsideDown: angle = 270
-        default: angle = 90
-        }
         if #available(iOS 17.0, *) {
             if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        } else {
+            Self.applyLegacyOrientation(angle, to: connection)
         }
+    }
+
+    /// Pre-iOS-17 path. Isolated in its own function so the deprecation is declared once rather
+    /// than warned about at the call site of a branch that only runs on iOS 15/16.
+    @available(iOS, introduced: 15.0, deprecated: 17.0, message: "videoRotationAngle above 17")
+    private static func applyLegacyOrientation(_ angle: CGFloat, to connection: AVCaptureConnection) {
+        let orientation: AVCaptureVideoOrientation
+        switch Int(angle.rounded()) % 360 {
+        // ⚑ `AVCaptureVideoOrientation` is INTERFACE orientation. Reading these four lines as
+        // device orientations is the exact mistake that shipped: landscape inverted, portrait
+        // fine, and the symptom blamed on the overlay.
+        case 0: orientation = .landscapeRight
+        case 180: orientation = .landscapeLeft
+        case 270: orientation = .portraitUpsideDown
+        default: orientation = .portrait
+        }
+        if connection.isVideoOrientationSupported { connection.videoOrientation = orientation }
+    }
+
+    /// 0 → `.up`, 90 → `.right`, 180 → `.down`, 270 → `.left`. The angle is the clockwise
+    /// rotation that brings the buffer upright, which is exactly what these constants name.
+    static func imageOrientation(forRotationAngle angle: CGFloat) -> CGImagePropertyOrientation {
+        switch Int(angle.rounded()) % 360 {
+        case 0: return .up
+        case 180: return .down
+        case 270: return .left
+        default: return .right
+        }
+    }
+
+    /**
+     Start following the device's rotation, and apply it to the preview immediately.
+
+     The coordinator is created against the preview layer so its preview angle already accounts
+     for the layer's own geometry; `videoRotationAngleForHorizonLevelCapture` is cached rather
+     than read at capture time because `capture` runs on Capacitor's background call queue.
+     */
+    private func startTrackingRotation(previewLayer: AVCaptureVideoPreviewLayer) {
+        guard let device else { return }
+        guard #available(iOS 17.0, *) else {
+            legacyTrackOrientation()
+            return
+        }
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+        rotationCoordinatorStore = coordinator
+        rotationObservations = [
+            coordinator.observe(\.videoRotationAngleForHorizonLevelPreview, options: [.initial, .new]) { [weak self] c, _ in
+                guard let self else { return }
+                self.previewRotationAngle = c.videoRotationAngleForHorizonLevelPreview
+                self.applyRotation(self.previewRotationAngle, to: self.previewLayer?.connection)
+            },
+            coordinator.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.initial, .new]) { [weak self] c, _ in
+                self?.captureRotationAngle = c.videoRotationAngleForHorizonLevelCapture
+            }
+        ]
+    }
+
+    /// iOS 15/16 only. Same angle vocabulary as the coordinator, so everything downstream —
+    /// the preview, the still and Vision — reads one number whichever path produced it.
+    private func legacyTrackOrientation() {
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let angle: CGFloat
+            switch UIDevice.current.orientation {
+            // The inversion, written out: device-landscape-left IS interface-landscape-right.
+            case .landscapeLeft: angle = 0
+            case .landscapeRight: angle = 180
+            case .portraitUpsideDown: angle = 270
+            case .portrait: angle = 90
+            default: return // face up/down/unknown: keep the last real orientation
+            }
+            self.previewRotationAngle = angle
+            self.captureRotationAngle = angle
+            self.applyRotation(angle, to: self.previewLayer?.connection)
+        }
+    }
+
+    private func stopTrackingRotation() {
+        rotationObservations.forEach { $0.invalidate() }
+        rotationObservations = []
+        rotationCoordinatorStore = nil
+    }
+
+    /**
+     The EXIF orientation actually written into a frame — read back off the bytes, not assumed.
+
+     ⚑ This exists because the field pair on 2026-08-15 came back 4032×3024 with orientation 1
+     on a portrait photograph: the rotation was not applied *at all*, while the preview in the
+     same session was rotating. Which of the several candidate mechanisms did that was not
+     decidable from two JPEGs, so the number is now in the capture payload and the next run
+     answers it by showing rather than by argument. Absent tag means 1 by specification.
+     */
+    private static func exifOrientation(of jpeg: Data) -> Int {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let value = properties[kCGImagePropertyOrientation] as? Int
+        else { return 1 }
+        return value
     }
 
     fileprivate func finish(id: Int64, data: Data?, error: Error?) {
@@ -731,7 +880,16 @@ final class CameraController: NSObject {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
             do {
                 try data.write(to: url, options: .atomic)
-                written.append(["path": url.path, "bytes": data.count, "index": index])
+                written.append([
+                    "path": url.path,
+                    "bytes": data.count,
+                    "index": index,
+                    // Read off the written bytes. 1 on a portrait shot means the rotation never
+                    // reached the photo connection — the 2026-08-15 finding, now self-reporting.
+                    // A deskewed document frame is legitimately 1: the page was straightened
+                    // into upright pixels, so there is nothing left for the tag to say.
+                    "exifOrientation": Self.exifOrientation(of: data)
+                ])
             } catch { continue }
         }
         guard !written.isEmpty else {
@@ -747,6 +905,9 @@ final class CameraController: NSObject {
             // Reported rather than assumed: a document capture where no page was found is a
             // photograph of a page, and the difference matters to whoever reads it later.
             "deskewed": deskewed,
+            // The angle asked of the photo connection, beside the orientation each frame came
+            // back carrying. Two numbers that must agree; printed so they can be seen not to.
+            "rotationAngle": Double(captureRotationAngle),
             "at": ISO8601DateFormatter().string(from: Date())
         ]
 
@@ -767,7 +928,10 @@ final class CameraController: NSObject {
      clipped image loses the detail the lift was meant to reveal.
      */
     private static func flattenPage(jpeg: Data) -> Data? {
-        guard let source = CIImage(data: jpeg) else { return nil }
+        // ⚑ `applyOrientationProperty` — without it CIImage ignores the EXIF tag entirely and
+        // the page detector is handed a sideways invoice, which it finds badly or not at all.
+        // Invisible while the rotation was never applied; a live defect the moment it is.
+        guard let source = CIImage(data: jpeg, options: [.applyOrientationProperty: true]) else { return nil }
         let request = VNDetectDocumentSegmentationRequest()
         let handler = VNImageRequestHandler(ciImage: source, options: [:])
         do { try handler.perform([request]) } catch { return nil }
@@ -796,11 +960,15 @@ final class CameraController: NSObject {
     }
 
     private static func readAccurately(jpeg: Data) -> [String: Any]? {
-        guard let image = UIImage(data: jpeg)?.cgImage else { return nil }
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        // ⚑ Orientation passed explicitly. The previous form took `UIImage(data:)?.cgImage`,
+        // which discards the EXIF tag, so the accurate read — the one whose confidence decides
+        // whether a retake is offered — was handed a sideways plate and reported it as a bad
+        // read. The live loop already passes an orientation; this is the same rule, one layer up.
+        let orientation = CGImagePropertyOrientation(rawValue: UInt32(exifOrientation(of: jpeg))) ?? .up
+        let handler = VNImageRequestHandler(data: jpeg, orientation: orientation, options: [:])
         do { try handler.perform([request]) } catch { return nil }
         guard let results = request.results, !results.isEmpty else { return nil }
         var lines: [[String: Any]] = []

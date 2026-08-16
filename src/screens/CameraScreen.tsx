@@ -21,10 +21,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { isNativePlatform } from "../app/platform";
+import { MediaThumb } from "./v2/shared";
+import {
+  captureTargetFor,
+  containerAfterZoneChange,
+  stripModel,
+  tapContainer,
+  type OpenContainer,
+} from "../capture/objectContainer";
 import {
   adjustCamera,
   cameraAvailable,
   captureFrames,
+  frameBlob,
   frameStateOf,
   frameUrl,
   onModeStatus,
@@ -81,6 +90,110 @@ function Overlay({ boxes }: { boxes: TextBoxesEvent["boxes"] }) {
   );
 }
 
+/**
+ * ⚑ **Container state, marked where the concierge is already looking.**
+ *
+ * Being inside a container without realising it is silent: twenty shots filed into the wrong
+ * object look exactly like twenty filed correctly, and nothing downstream can tell. This is the
+ * mode-colour failure wearing different clothes and it takes the same answer — mark it in the
+ * frame. A strip you have to look away from to read is the small icon that rule already rejects.
+ *
+ * ⚑ **It does not touch the mode ring, and that is the point.** The mode ring already carries
+ * *which mode was achieved* and *degraded*; a ring that also meant *in a container* would mean
+ * none of the three. So this is a second mark with different geometry (inset), different stroke
+ * (dashed) and a colour outside the mode palette entirely — three ways of not being the ring.
+ */
+function ContainerFrame({ icon, mime, count }: { icon?: string; mime?: string; count: number }) {
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-5 rounded-xl border-2 border-dashed border-brass-400" />
+      <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center">
+        <span className="flex items-center gap-2 rounded-full bg-brass-500 py-1 pl-1 pr-3 text-sm font-semibold text-slate-950">
+          {icon && mime ? (
+            <MediaThumb mediaId={icon} mime={mime} className="h-7 w-7 shrink-0 rounded-full" />
+          ) : (
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-950/20">⬤</span>
+          )}
+          {/* Not a name. A container declares "this is a thing", never what the thing is. */}
+          in this object · {count} shot{count === 1 ? "" : "s"}
+        </span>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The strip down one side of the viewfinder (v1.8 §4.1a-ii).
+ *
+ * Out of a container it shows the zone's objects, stacked, **each wearing its own first
+ * photograph as its icon — the furnace one, without anybody typing "furnace"**. In a container
+ * it shows that container's captures, with the container itself at the top so the exit gesture
+ * has somewhere to land: ⛑ tapping the one you are in leaves it, which is the same gesture as
+ * entering and therefore not a new control.
+ */
+function ObjectStrip({
+  model,
+  onNew,
+  onTap,
+}: {
+  model: ReturnType<typeof stripModel>;
+  onNew: () => void;
+  onTap: (pinId: string) => void;
+}) {
+  return (
+    <div className="absolute bottom-32 left-2 top-14 flex w-16 flex-col gap-2 overflow-y-auto">
+      <button
+        type="button"
+        aria-label="New object"
+        onClick={onNew}
+        className="h-14 w-14 shrink-0 rounded-xl bg-slate-900/70 text-2xl text-brass-400 ring-1 ring-slate-500"
+      >
+        +
+      </button>
+      {model.current && (
+        <button
+          type="button"
+          aria-label="Leave this object"
+          onClick={() => onTap(model.current!.pinId)}
+          className="h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-2 ring-brass-400"
+        >
+          {model.current.iconMediaId && model.current.iconMime ? (
+            <MediaThumb
+              mediaId={model.current.iconMediaId}
+              mime={model.current.iconMime}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center bg-slate-900/70 text-brass-400">⬤</span>
+          )}
+        </button>
+      )}
+      {model.objects.map((object) => (
+        <button
+          key={object.pinId}
+          type="button"
+          aria-label={`Object ${object.number}`}
+          onClick={() => onTap(object.pinId)}
+          className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-900/70 ring-1 ring-slate-500"
+        >
+          {object.iconMediaId && object.iconMime ? (
+            <MediaThumb mediaId={object.iconMediaId} mime={object.iconMime} className="h-full w-full object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-slate-400">⬤</span>
+          )}
+        </button>
+      ))}
+      {/* Inside a container, its own captures — so what has been filed here is visible without
+          leaving the viewfinder. Deliberately not tappable: this is the record, not a picker. */}
+      {model.captures.map((capture) => (
+        <div key={capture.mediaId} className="h-12 w-14 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600">
+          <MediaThumb mediaId={capture.mediaId} mime={capture.mime} className="h-full w-full object-cover" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The level bubble: one number, drawn, because a number read off a screen is not a bubble. */
 function Level({ roll, square }: { roll: number; square: boolean }) {
   const clamped = Math.max(-20, Math.min(20, roll));
@@ -96,8 +209,8 @@ function Level({ roll, square }: { roll: number; square: boolean }) {
   );
 }
 
-export function CameraScreen() {
-  const { navigate, showToast } = useApp();
+export function CameraScreen({ zoneId }: { zoneId?: string }) {
+  const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
   const [capabilities, setCapabilities] = useState<CameraCapabilities | null>(null);
   const [text, setText] = useState<TextBoxesEvent | null>(null);
@@ -123,6 +236,34 @@ export function CameraScreen() {
   const lastAuto = useRef(0);
   const busyRef = useRef(false);
 
+  /**
+   * The object container (v1.8 §4.1a-ii). Its rules live in `capture/objectContainer` — what is
+   * here is the gesture and the paint.
+   */
+  const [open, setOpen] = useState<OpenContainer | null>(null);
+  const zone = zoneId ? v2Session?.zones.find((z) => z.zoneId === zoneId) : undefined;
+  const strip = stripModel(v2Session?.pins ?? [], zoneId ?? "", open);
+
+  /**
+   * ⚑ Everything `shoot` reads travels by ref, and `shoot` keeps an EMPTY dependency list.
+   *
+   * It is a dependency of the effect that calls `startCamera`, so an identity that changed when
+   * the open container changed would tear down and restart the capture session on every tap of
+   * the strip — a black viewfinder for a beat, a lost torch state, and a restart in the middle
+   * of the auto-capture the concierge was lining up.
+   */
+  const openRef = useRef<OpenContainer | null>(null);
+  const zoneRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+  useEffect(() => {
+    zoneRef.current = zoneId;
+    // Leaving the zone closes the open container. Not a prompt: a container spanning two zones
+    // is always wrong, so there is no decision to put to anybody.
+    setOpen((current) => containerAfterZoneChange(current, zoneId ?? null));
+  }, [zoneId]);
+
   const shoot = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -132,13 +273,40 @@ export function CameraScreen() {
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);
+      // Filed to the container if one is open, to the zone otherwise. Reached from Home there is
+      // no zone at all and this screen stays what Field 4b built: the harness where a plate is
+      // judged at 1:1. Nothing to file into is a state, not a failure.
+      const currentZone = zoneRef.current;
+      const frame = result.frames[0];
+      if (currentZone && frame) {
+        const blob = await frameBlob(frame);
+        await capturePhotoV2(captureTargetFor(openRef.current, currentZone, undefined), blob, "image/jpeg");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       busyRef.current = false;
       setBusy(false);
     }
-  }, []);
+  }, [capturePhotoV2]);
+
+  /**
+   * The `+` at the top of the strip. Tapping it while inside a container closes that one and
+   * opens a new one — one gesture, and the previous object needs no closing act of its own.
+   *
+   * ⚑ The container is created with no type and no label, and nothing here asks for one. It
+   * declares *this is a thing and I am now photographing it*, never what the thing is.
+   */
+  const newContainer = useCallback(async () => {
+    const currentZone = zoneRef.current;
+    if (!currentZone) return;
+    try {
+      const pinId = await createPin(currentZone);
+      setOpen({ pinId, zoneId: currentZone });
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not start an object here");
+    }
+  }, [createPin, showToast]);
 
   // The web stack steps aside for the native preview, and steps back on unmount. Both halves
   // matter: leaving it transparent over a torn-down session is a black screen.
@@ -217,6 +385,13 @@ export function CameraScreen() {
       {/* The viewfinder frame. Its colour is the achieved mode — the one thing on this screen that
           must never be derived from what was tapped. */}
       <div className={`pointer-events-none absolute inset-2 rounded-2xl ring-4 ${FRAME_COLOUR[frameState]}`} />
+      {open && (
+        <ContainerFrame
+          icon={strip.current?.iconMediaId}
+          mime={strip.current?.iconMime}
+          count={strip.current?.captureCount ?? 0}
+        />
+      )}
 
       <div className="relative flex-1">
         {text && status?.mode === "text" && <Overlay boxes={text.boxes} />}
@@ -224,6 +399,14 @@ export function CameraScreen() {
           <Level roll={status.level.roll} square={status.level.square} />
         )}
       </div>
+
+      {zoneId && (
+        <ObjectStrip
+          model={strip}
+          onNew={() => void newContainer()}
+          onTap={(pinId) => setOpen((current) => tapContainer(current, pinId, zoneId))}
+        />
+      )}
 
       <header className="absolute inset-x-0 top-0 flex items-center justify-between p-3">
         <button
@@ -233,6 +416,12 @@ export function CameraScreen() {
         >
           ← Home
         </button>
+        {/* Where shots are landing, always on screen — the 2026-07-26 field report's core
+            complaint was not knowing where a capture went. Absent when there is no zone, which
+            says the same thing honestly: this is the harness and nothing is being filed. */}
+        {zone && (
+          <span className="rounded-full bg-slate-900/70 px-3 py-1.5 text-sm text-slate-100">→ {zone.label}</span>
+        )}
         <div className="flex items-center gap-2">
           {status?.torchOn && <span className="rounded-full bg-amber-400/90 px-2 py-1 text-xs text-slate-900">torch</span>}
           {frameState === "degraded" && (
@@ -268,7 +457,16 @@ export function CameraScreen() {
           <p>battery · <span className="font-mono text-slate-100">{Math.round(status.battery.level * 100)}%</span> {status.battery.state}</p>
           <p>
             light · <span className="font-mono text-slate-100">{status.lightScore.toFixed(2)}</span>
-            <span className="text-slate-500"> (torch at ≥{status.underLitThreshold})</span>
+            <span className="text-slate-500">
+              {" "}
+              (on ≥{status.underLitThreshold}, off &lt;{status.torchReleaseThreshold})
+            </span>
+          </p>
+          {/* Both angles, because the field bug was two rotation tables disagreeing. If these
+              two and a frame's exifOrientation ever tell different stories, that IS the finding. */}
+          <p>
+            rotation · <span className="font-mono text-slate-100">{status.previewRotationAngle}°</span> preview ·{" "}
+            <span className="font-mono text-slate-100">{status.captureRotationAngle}°</span> capture
           </p>
           {text && (
             <p>
@@ -409,6 +607,10 @@ export function CameraScreen() {
           <p className="p-3 text-xs text-slate-500">
             {viewing.mode} · {viewing.frames.length} frame{viewing.frames.length > 1 ? "s" : ""} ·{" "}
             {viewing.torchUsed ? "torch on" : "no torch"}
+            {" · "}
+            {/* ⚑ Printed because two JPEGs could not settle it by argument. On a portrait shot,
+                orientation 1 with a 90° request means the rotation never reached the connection. */}
+            {viewing.rotationAngle}° asked · exif {viewing.frames[0]!.exifOrientation}
             {viewing.ocr && ` · read ${viewing.ocr.meanConfidence.toFixed(2)}`}
           </p>
         </div>

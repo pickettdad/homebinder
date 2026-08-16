@@ -42,6 +42,7 @@ import {
   requestLens,
   startAudioProbe,
   stopAudioProbe,
+  traverseDiagnosis,
   traverseVerdict,
   type AudioProbeResult,
   type AudioProbeStarted,
@@ -139,13 +140,18 @@ function ContainerFrame({ icon, mime, count }: { icon?: string; mime?: string; c
 }
 
 /**
- * The strip down one side of the viewfinder (v1.8 §4.1a-ii).
+ * The strip down one side of the viewfinder (v1.8 §4.1a-ii) — **places, and only places.**
  *
- * Out of a container it shows the zone's objects, stacked, **each wearing its own first
- * photograph as its icon — the furnace one, without anybody typing "furnace"**. In a container
- * it shows that container's captures, with the container itself at the top so the exit gesture
- * has somewhere to land: ⛑ tapping the one you are in leaves it, which is the same gesture as
- * entering and therefore not a new control.
+ * The zone's objects, stacked, **each wearing its own first photograph as its icon — the furnace
+ * one, without anybody typing "furnace"**. The one you are inside is ringed rather than lifted out
+ * of the list: ⛑ tapping it leaves it, which is the same gesture as entering and therefore not a
+ * new control.
+ *
+ * ⚑ **Captures used to be drawn here too, and that was the clutter** (owner, 2026-08-16). Inside a
+ * container this strip showed that container's photographs *and hid its neighbours*, while the
+ * bottom strip went on showing everything — so the side answered a question the bottom already
+ * answered, and stopped answering the one only it could. The contents belong to the filmstrip; the
+ * way between objects belongs here.
  */
 function ObjectStrip({
   model,
@@ -166,46 +172,71 @@ function ObjectStrip({
       >
         +
       </button>
-      {model.current && (
-        <button
-          type="button"
-          aria-label="Leave this object"
-          onClick={() => onTap(model.current!.pinId)}
-          className="h-14 w-14 shrink-0 overflow-hidden rounded-xl ring-2 ring-brass-400"
-        >
-          {model.current.iconMediaId && model.current.iconMime ? (
-            <MediaThumb
-              mediaId={model.current.iconMediaId}
-              mime={model.current.iconMime}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center bg-slate-900/70 text-brass-400">⬤</span>
-          )}
-        </button>
-      )}
-      {model.objects.map((object) => (
-        <button
-          key={object.pinId}
-          type="button"
-          aria-label={`Object ${object.number}`}
-          onClick={() => onTap(object.pinId)}
-          className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-900/70 ring-1 ring-slate-500"
-        >
-          {object.iconMediaId && object.iconMime ? (
-            <MediaThumb mediaId={object.iconMediaId} mime={object.iconMime} className="h-full w-full object-cover" />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center text-slate-400">⬤</span>
-          )}
-        </button>
-      ))}
-      {/* Inside a container, its own captures — so what has been filed here is visible without
-          leaving the viewfinder. Deliberately not tappable: this is the record, not a picker. */}
-      {model.captures.map((capture) => (
-        <div key={capture.mediaId} className="h-12 w-14 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600">
-          <MediaThumb mediaId={capture.mediaId} mime={capture.mime} className="h-full w-full object-cover" />
+      {model.objects.map((object) => {
+        const inside = model.current?.pinId === object.pinId;
+        return (
+          <button
+            key={object.pinId}
+            type="button"
+            // The label carries the state, because the ring is the only other thing that does and
+            // a ring is not readable by anything that is not an eye.
+            aria-label={inside ? `Leave object ${object.number}` : `Object ${object.number}`}
+            onClick={() => onTap(object.pinId)}
+            className={`h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-900/70 ${
+              inside ? "ring-2 ring-brass-400" : "ring-1 ring-slate-500"
+            }`}
+          >
+            {object.iconMediaId && object.iconMime ? (
+              <MediaThumb mediaId={object.iconMediaId} mime={object.iconMime} className="h-full w-full object-cover" />
+            ) : (
+              <span className={`flex h-full w-full items-center justify-center ${inside ? "text-brass-400" : "text-slate-400"}`}>
+                ⬤
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The strip along the bottom — **the contents of wherever you are standing.**
+ *
+ * Inside an object, that object's captures. Out in the zone, the zone's own: its concerns, its
+ * room shots, and the run traces that file here rather than into the container they started in.
+ *
+ * ⚑ **It says which**, and that is not a caption for tidiness. This strip changes meaning as the
+ * concierge steps in and out of a container, and *twenty shots filed into the wrong object look
+ * exactly like twenty filed correctly* — the failure the container ring already guards, arriving
+ * through the strip instead. A strip that silently changes what it is showing is the same defect
+ * with a different door.
+ */
+function ContextFilmstrip({ model, label }: { model: ReturnType<typeof stripModel>; label: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="px-1 text-xs text-slate-400">
+        {model.filmstrip === "object" ? (
+          <>
+            in this object · {model.captures.length} shot{model.captures.length === 1 ? "" : "s"}
+          </>
+        ) : (
+          <>
+            {label} · {model.captures.length} not in an object
+          </>
+        )}
+      </p>
+      {model.captures.length > 0 && (
+        // Not tappable: this is the record, not a picker. Judging a plate at 1:1 happens in the
+        // harness, which is where it has always happened.
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {model.captures.map((capture) => (
+            <div key={capture.mediaId} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600">
+              <MediaThumb mediaId={capture.mediaId} mime={capture.mime} className="h-full w-full object-cover" />
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -268,7 +299,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    */
   const [open, setOpen] = useState<OpenContainer | null>(null);
   const zone = zoneId ? v2Session?.zones.find((z) => z.zoneId === zoneId) : undefined;
-  const strip = stripModel(v2Session?.pins ?? [], zoneId ?? "", open);
+  const strip = stripModel(v2Session?.pins ?? [], zoneId ?? "", open, zone?.photos ?? []);
 
   /**
    * ⚑ Everything `shoot` reads travels by ref, and `shoot` keeps an EMPTY dependency list.
@@ -425,6 +456,28 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    * button that was tapped, because Text refuses wide and a traverse refuses a swap mid-run — so a
    * control painted from the press would claim a field of view the photograph does not have.
    */
+  /** Every pair's raw numbers, off the device as a file. The panel shows the summary; this is what
+   *  actually settles the question, and it is small enough to send from a mechanical room. */
+  const shareTraverseData = async () => {
+    if (!traverseResult) return;
+    const payload = {
+      startedAt: traverseResult.startedAt,
+      endedAt: traverseResult.endedAt,
+      frames: traverseResult.frames.length,
+      torchLatched: traverseResult.torchLatched,
+      unmet: traverseResult.unmet,
+      lens: statusRef.current?.lens ?? null,
+      diagnosis: traverseDiagnosis(traverseResult),
+      pairs: traverseResult.pairs,
+    };
+    const file = new File([JSON.stringify(payload, null, 2)], `hs-traverse-${traverseResult.startedAt.replace(/[:.]/g, "-")}.json`, {
+      type: "application/json",
+    });
+    if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "HouseSteady traverse numbers" });
+    }
+  };
+
   const toggleAudioProbe = async () => {
     try {
       if (audioProbe) {
@@ -472,6 +525,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     await chooseLens(policy.default);
   };
 
+  const diagnosis = traverseResult ? traverseDiagnosis(traverseResult) : null;
   const frameState = frameStateOf(status);
   // Clamped rather than trusted: a stack of three followed by a stack of one would otherwise
   // leave the index pointing past the end and render nothing at all.
@@ -769,6 +823,42 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 )}
               </p>
             )}
+            {/*
+              ⚑ **Why it could not say, not just how often.** Two runs on 2026-08-16 came back 87%
+              and 86% unverified at two different frame spacings — which refutes the reason the
+              spacing was halved and leaves several causes the counts cannot separate. These are
+              the numbers the verdict was computed from.
+
+              The attribution line is gated: it appears only when one axis genuinely dominates.
+              Printing a cause on ambiguous data is the alarm-on-the-majority-case failure landing
+              on the one question where a confident wrong answer costs another wasted round.
+            */}
+            {traverseResult && !traversing && diagnosis && diagnosis.measured > 0 && (
+              <p className="mt-1 text-slate-400">
+                disparity med · <span className="font-mono text-slate-100">{diagnosis.medianDisparity?.toFixed(4)}</span>
+                {" "}(x {diagnosis.medianDisparityX?.toFixed(4)} · y {diagnosis.medianDisparityY?.toFixed(4)})
+                <br />
+                cannot-say · {diagnosis.reasons.disparity} halves disagree ·{" "}
+                {diagnosis.reasons.impossiblyStill} impossibly still · {diagnosis.reasons.unregistered} unregistered
+                {diagnosis.dominant && (
+                  <>
+                    <br />
+                    <span className="text-amber-400">
+                      {diagnosis.dominant === "vertical"
+                        ? "the y axis is spending the tolerance"
+                        : "the x axis is spending the tolerance"}
+                    </span>
+                  </>
+                )}
+              </p>
+            )}
+            {traverseResult && !traversing && traverseResult.pairs.length > 0 && (
+              <p className="mt-1">
+                <button type="button" onClick={() => void shareTraverseData()} className="underline">
+                  send traverse numbers
+                </button>
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -780,7 +870,15 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       )}
 
       <footer className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-3">
-        {shots.length > 0 && (
+        {/*
+          ⚑ Two different strips, and which one appears is decided by whether anything is being
+          filed at all. In a zone the bottom strip is **the record of where you are standing**
+          (owner, 2026-08-16). In the harness there is no zone, nothing files, and the strip stays
+          what Field 4b built: this session's captures, tappable into the 1:1 reviewer — which is
+          where a plate gets judged and always has been.
+        */}
+        {zoneId && <ContextFilmstrip model={strip} label={zone?.label ?? "zone"} />}
+        {!zoneId && shots.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {shots.map((shot) => (
               <button

@@ -195,6 +195,87 @@ export interface TraversePair {
   /** How differently the frame's left and right halves moved — the parallax measure. */
   disparity?: number;
   contiguity: "contiguous" | "gap" | "unverified";
+  /** ⚑ WHICH kind of "cannot say". Three different things used to collapse into one word, and the
+   *  counts could not tell them apart: registration failed outright, the accumulator and the pair
+   *  contradicted each other, or the two half-frames disagreed. */
+  reason?: "unregistered" | "impossiblyStill" | "disparity";
+  /** ⚑ The two components apart, because they are not the same quantity: `x` is a fraction of
+   *  frame WIDTH, `y` a fraction of frame HEIGHT. If the failure is nearly all `y`, the tolerance
+   *  is being spent on vertical registration noise between two half-frames. */
+  disparityX?: number;
+  disparityY?: number;
+  /** The raw half-shifts. The *shape* of the disagreement is the discriminator: a systematic
+   *  optical effect scales the halves, parallax offsets them. */
+  leftDx?: number;
+  leftDy?: number;
+  rightDx?: number;
+  rightDy?: number;
+  expectedTravel?: number;
+  displacement?: number;
+}
+
+/**
+ * What a traverse's own numbers say about why it could not describe itself.
+ *
+ * ⚑ **`dominant` is null whenever the data does not indicate a cause**, and that is the whole
+ * design. Two runs on 2026-08-16 came back 87% and 86% unverified at two different frame spacings,
+ * which refutes the reason the spacing was changed and leaves several candidates the counts cannot
+ * separate. An attribution printed on ambiguous data would be this project's named alarm failure —
+ * *a diagnostic decides whether there is anything to say before it says what* — landing on the one
+ * question where a confident wrong answer costs another wasted round.
+ *
+ * So the numbers are always computed and the attribution is gated behind a real separation.
+ */
+export interface TraverseDiagnosis {
+  pairs: number;
+  measured: number;
+  medianDisparity: number | null;
+  medianDisparityX: number | null;
+  medianDisparityY: number | null;
+  reasons: { unregistered: number; impossiblyStill: number; disparity: number };
+  /** Which axis is spending the tolerance — `null` when neither dominates. */
+  dominant: "vertical" | "horizontal" | null;
+}
+
+/** How much one axis must exceed the other before the difference is called a finding rather than
+ *  noise. Two-to-one: below that, both axes are contributing and naming one would be a guess. */
+export const DISPARITY_DOMINANCE_RATIO = 2;
+
+const median = (values: number[]): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+};
+
+export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): TraverseDiagnosis {
+  const pairs = result.pairs;
+  const measured = pairs.filter((p) => p.measured);
+  const pick = (key: "disparity" | "disparityX" | "disparityY") =>
+    median(measured.map((p) => p[key]).filter((v): v is number => typeof v === "number"));
+
+  const medianDisparityX = pick("disparityX");
+  const medianDisparityY = pick("disparityY");
+
+  let dominant: TraverseDiagnosis["dominant"] = null;
+  if (medianDisparityX !== null && medianDisparityY !== null) {
+    if (medianDisparityY > medianDisparityX * DISPARITY_DOMINANCE_RATIO) dominant = "vertical";
+    else if (medianDisparityX > medianDisparityY * DISPARITY_DOMINANCE_RATIO) dominant = "horizontal";
+  }
+
+  return {
+    pairs: pairs.length,
+    measured: measured.length,
+    medianDisparity: pick("disparity"),
+    medianDisparityX,
+    medianDisparityY,
+    reasons: {
+      unregistered: pairs.filter((p) => p.reason === "unregistered").length,
+      impossiblyStill: pairs.filter((p) => p.reason === "impossiblyStill").length,
+      disparity: pairs.filter((p) => p.reason === "disparity").length,
+    },
+    dominant,
+  };
 }
 
 export interface TraverseFrame {

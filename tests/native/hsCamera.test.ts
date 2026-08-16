@@ -14,6 +14,7 @@ import {
   glareSuspected,
   lensPolicyFor,
   shouldOfferRetake,
+  traverseDiagnosis,
   traverseVerdict,
   type TraversePair,
 } from "../../src/native/hsCamera";
@@ -134,6 +135,70 @@ describe("what a traverse amounts to", () => {
       pair("unverified", 9),
     ];
     expect(traverseVerdict({ pairs: measured })).toBe("gaps");
+  });
+});
+
+describe("what a traverse's own numbers say about why it could not describe itself", () => {
+  const measured = (disparityX: number, disparityY: number, from = 0): TraversePair => ({
+    from,
+    to: from + 1,
+    measured: true,
+    disparity: Math.hypot(disparityX, disparityY),
+    disparityX,
+    disparityY,
+    contiguity: "unverified",
+    reason: "disparity",
+  });
+
+  it("⚑ names no cause when neither axis dominates", () => {
+    /*
+     The gate, and it is the whole point. Two runs on 2026-08-16 came back 87% and 86% unverified
+     at two different frame spacings, which refutes the reason the spacing was halved and leaves
+     several candidates. An attribution printed on ambiguous data is this project's named alarm
+     failure — *a diagnostic decides whether there is anything to say before it says what* —
+     landing on the one question where a confident wrong answer costs another wasted round.
+    */
+    expect(traverseDiagnosis({ pairs: [measured(0.05, 0.05), measured(0.06, 0.05, 1)] }).dominant).toBeNull();
+    // Just short of the ratio is still "no": the threshold is a claim about separation, not a
+    // formality to be rounded through.
+    expect(traverseDiagnosis({ pairs: [measured(0.02, 0.039)] }).dominant).toBeNull();
+  });
+
+  it("names the axis only once it genuinely dominates", () => {
+    expect(traverseDiagnosis({ pairs: [measured(0.01, 0.09)] }).dominant).toBe("vertical");
+    expect(traverseDiagnosis({ pairs: [measured(0.09, 0.01)] }).dominant).toBe("horizontal");
+  });
+
+  it("keeps the numbers even when it has nothing to conclude from them", () => {
+    // ⚑ Gate the prose on a verdict and keep the diagnostic computed, so a later run under
+    // different conditions stays comparable. Losing the medians because no cause was named would
+    // throw away the evidence that decides the next round.
+    const diagnosis = traverseDiagnosis({ pairs: [measured(0.05, 0.05), measured(0.07, 0.05, 1)] });
+    expect(diagnosis.dominant).toBeNull();
+    expect(diagnosis.medianDisparityX).toBeCloseTo(0.06);
+    expect(diagnosis.medianDisparityY).toBeCloseTo(0.05);
+  });
+
+  it("says nothing at all rather than dividing by an empty run", () => {
+    const empty = traverseDiagnosis({ pairs: [] });
+    expect(empty.medianDisparity).toBeNull();
+    expect(empty.dominant).toBeNull();
+    expect(empty.measured).toBe(0);
+  });
+
+  it("counts the three different kinds of cannot-say apart", () => {
+    // They collapsed into one word before, and the counts could not tell them apart — so a run
+    // failing because registration never locked on looked identical to one failing on parallax.
+    const pairs: TraversePair[] = [
+      { from: 0, to: 1, measured: false, contiguity: "unverified", reason: "unregistered" },
+      { from: 1, to: 2, measured: true, contiguity: "unverified", reason: "impossiblyStill" },
+      measured(0.09, 0.01, 2),
+    ];
+    expect(traverseDiagnosis({ pairs }).reasons).toEqual({
+      unregistered: 1,
+      impossiblyStill: 1,
+      disparity: 1,
+    });
   });
 });
 

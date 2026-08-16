@@ -1976,6 +1976,9 @@ final class CameraController: NSObject {
         guard let full, let leftShift, let rightShift else {
             record["measured"] = false
             record["contiguity"] = "unverified"
+            // ⚑ WHICH kind of "cannot say". Three different things collapsed into one word, and
+            // the counts alone could not tell them apart — see `unverifiedReason` below.
+            record["reason"] = "unregistered"
             return record
         }
         // Half-crop x-translations are fractions of a half width; halve them to speak about the
@@ -2005,13 +2008,16 @@ final class CameraController: NSObject {
             && displacement < Self.traverseTargetTravel * 0.25
 
         let contiguity: String
+        var reason: String?
         if impossiblyStill {
             contiguity = "unverified"
+            reason = "impossiblyStill"
         } else if Double(disparity) > Self.traverseDisparityTolerance {
             // ⚑ Not a gap. The model does not describe this pair, so this mechanism has nothing
             // to say about whether contact was kept — and saying "gap" here is the false alarm
             // that sends somebody back to a room they already covered.
             contiguity = "unverified"
+            reason = "disparity"
         } else if Double(overlap) < Self.traverseMinimumOverlap {
             contiguity = "gap"
         } else {
@@ -2028,6 +2034,39 @@ final class CameraController: NSObject {
         record["expectedTravel"] = Double(expectedTravel)
         record["displacement"] = Double(displacement)
         record["contiguity"] = contiguity
+        if let reason { record["reason"] = reason }
+
+        /*
+         ⚑ **The parts the verdict was computed FROM, recorded beside the verdict.**
+
+         Two runs on 2026-08-16 said the same thing at two different spacings: 87% unverified at
+         0.40 of frame width, 86% at 0.20. Frame counts doubled, so the trigger genuinely changed
+         — and the verdict did not follow. **Whatever dominates this measurement does not scale
+         with how far apart the frames are**, which rules out the reason 0.20 was chosen and
+         leaves several candidates that the counts cannot separate.
+
+         So the components go on the record rather than a third guess at the constant:
+
+         - `disparityX` / `disparityY` **apart**, because they are not the same quantity. `x` is a
+           fraction of frame WIDTH (halved out of half-crop space); `y` is a fraction of frame
+           HEIGHT, unconverted because the crops do not change height. If the failure is nearly all
+           `y`, the tolerance is being spent on vertical registration noise between two half-frames
+           and the whole disparity test is answering a question nobody asked.
+         - the four raw half-shifts, because the *shape* of the disagreement is the discriminator:
+           **a systematic optical effect scales the two halves** (their ratio is roughly constant
+           while the difference tracks displacement), whereas **parallax offsets them** (the
+           difference is set by scene depth and is largely indifferent to displacement). One walk
+           with these numbers distinguishes those; no amount of reasoning from here does.
+
+         Nothing here changes a verdict. Measuring and then tuning is the order — tuning first is
+         how a number gets moved twice on a theory that already failed once.
+         */
+        record["disparityX"] = Double(abs(leftShift.x - rightShift.x) * 0.5)
+        record["disparityY"] = Double(abs(leftShift.y - rightShift.y))
+        record["leftDx"] = Double(leftShift.x)
+        record["leftDy"] = Double(leftShift.y)
+        record["rightDx"] = Double(rightShift.x)
+        record["rightDy"] = Double(rightShift.y)
         return record
     }
 

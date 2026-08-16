@@ -146,30 +146,56 @@ export function isEstablishingShot(pin: Pick<PinStateV2, "photos"> | undefined):
   return !!pin && pin.photos.length === 0;
 }
 
-/** What the strip draws. Exactly one of `objects` / `captures` is populated — see below. */
+/**
+ * What the two strips draw.
+ *
+ * ⚑ **One job each, after the field report of 2026-08-16.** The first cut had both strips doing
+ * both jobs: inside a container the side strip showed that container's captures *and hid the other
+ * objects*, while the bottom strip went on showing everything. The owner's words were that it *gets
+ * too cluttered*, and the cause is that neither strip answered a question the other did not.
+ *
+ * So: **the side strip is places, the bottom strip is contents.** `objects` is now always the
+ * zone's full list — going into a container must not hide the way out to its neighbours — and
+ * `captures` is whatever the place you are standing in holds.
+ */
 export interface StripModel {
   /**
-   * The open container, drawn at the top of the strip under the `+`.
+   * The open container, marked in place among its neighbours rather than lifted out of them.
    *
-   * Present so that **the exit gesture has something to land on while you are inside**: in a
-   * container the strip shows that container's captures, so without this row there would be no
-   * icon to tap to leave, and the "same gesture, no new control" rule would need a new control.
+   * ⛑ The exit gesture still lands on it — tapping the one you are in leaves it — which is why it
+   * is identified rather than merely included.
    */
   current: ContainerSummary | null;
-  /** Out of a container: the zone's objects, stacked, each wearing its first photograph. */
+  /** ⚑ ALWAYS the zone's objects, open container included. Emptying this inside a container was
+   *  what made entering one feel like leaving the room. */
   objects: ContainerSummary[];
-  /** In a container: that container's captures, oldest first. */
+  /** The captures of wherever you are: the open container's, or the zone's own. */
   captures: MediaRef[];
+  /**
+   * ⚑ Which of those two `captures` is, and it is not decoration.
+   *
+   * The bottom strip now **changes meaning** as you step in and out of a container, and a strip
+   * that silently changes meaning is precisely how twenty shots get filed into the wrong object —
+   * the failure `ContainerFrame` already exists to prevent, arriving through the other strip.
+   * Whoever draws it must be able to say which it is showing.
+   */
+  filmstrip: "object" | "zone";
 }
 
 export function stripModel(
   pins: readonly PinStateV2[],
   zoneId: string,
   open: OpenContainer | null,
+  zonePhotos: readonly MediaRef[] = [],
 ): StripModel {
   const objects = containersInZone(pins, zoneId);
-  if (!open) return { current: null, objects, captures: [] };
+  if (!open) {
+    // Outside a container the zone's own captures are the ones that belong to nothing else —
+    // its concerns, its room shots, and the run traces that deliberately file here rather than
+    // into the container they started in (`captureTargetFor`).
+    return { current: null, objects, captures: [...zonePhotos], filmstrip: "zone" };
+  }
   const current = objects.find((o) => o.pinId === open.pinId) ?? null;
   const pin = pins.find((p) => p.pinId === open.pinId);
-  return { current, objects: [], captures: pin ? [...pin.photos] : [] };
+  return { current, objects, captures: pin ? [...pin.photos] : [], filmstrip: "object" };
 }

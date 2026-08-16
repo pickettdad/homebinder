@@ -81,6 +81,14 @@ export interface ModeStatusEvent {
   at: string;
 }
 
+export interface FrameRead {
+  lines: { text: string; confidence: number }[];
+  text: string;
+  meanConfidence: number;
+  engine: string;
+  osVersion: string;
+}
+
 export interface CaptureFrame {
   path: string;
   bytes: number;
@@ -88,6 +96,63 @@ export interface CaptureFrame {
   /** Read back off the written JPEG, never assumed. ⚑ 1 on a portrait shot means the rotation
    *  never reached the photo connection — the 2026-08-15 finding, now self-reporting. */
   exifOrientation: number;
+  /** Whether the torch was lit for THIS frame. On a torch pair the two differ, which is the
+   *  whole point of the pair. */
+  torch: boolean;
+  /** Per-frame accurate read, in text/document modes. On a pair these are two independent
+   *  reads of one plate, and where they disagree is where the glare was. */
+  ocr?: FrameRead;
+}
+
+/** One adjacent pair in a traverse. ⚑ `contiguity` has THREE values, and that is the design:
+ *  `unverified` means the translation model does not describe this pair (the operator walked,
+ *  so near content slid faster than far), never that something was missed. A false gap sends
+ *  somebody back to a room they already covered, which is worse than saying nothing. */
+export interface TraversePair {
+  from: number;
+  to: number;
+  measured: boolean;
+  dx?: number;
+  dy?: number;
+  overlap?: number;
+  /** How differently the frame's left and right halves moved — the parallax measure. */
+  disparity?: number;
+  contiguity: "contiguous" | "gap" | "unverified";
+}
+
+export interface TraverseFrame {
+  path: string;
+  bytes: number;
+  index: number;
+  exifOrientation: number;
+  at: string;
+}
+
+export interface TraverseStarted {
+  startedAt: string;
+  targetTravel: number;
+  minimumOverlap: number;
+  disparityTolerance: number;
+  torchLatched: boolean;
+  rotationAngle: number;
+  unmet: string[];
+}
+
+export interface TraverseResult {
+  frames: TraverseFrame[];
+  pairs: TraversePair[];
+  startedAt: string;
+  endedAt: string;
+  torchLatched: boolean;
+  unmet: string[];
+  gaps: number;
+  unverified: number;
+}
+
+export interface TraverseProgressEvent {
+  frames: number;
+  pairs: TraversePair[];
+  lastPair?: TraversePair | null;
 }
 
 export interface CaptureResult {
@@ -97,6 +162,12 @@ export interface CaptureResult {
   bracketed: boolean;
   /** Document mode only: a page was found and flattened. False means the frame is as shot. */
   deskewed: boolean;
+  /** ⚑ The torch fired, so an unlit frame came with it. Fires on the minority of captures. */
+  torchPaired: boolean;
+  /** How much the lit and unlit reads of one plate agree, 0…1. Present only when a pair was
+   *  taken AND both frames produced text — a number computed from one read would be an alarm
+   *  on a case with nothing to say. */
+  torchPairAgreement?: number;
   /** The angle asked of the photo connection, beside each frame's `exifOrientation`. Two numbers
    *  that must agree — printed so they can be seen not to. */
   rotationAngle: number;
@@ -126,9 +197,16 @@ interface NativeCamera {
     torchOverride?: boolean;
   }): Promise<void>;
   capture(): Promise<CaptureResult>;
+  startTraverse(): Promise<TraverseStarted>;
+  stopTraverse(): Promise<TraverseResult>;
   stop(): Promise<void>;
-  addListener(event: "textBoxes" | "modeStatus", handler: (data: never) => void): ListenerHandle | Promise<ListenerHandle>;
+  addListener(
+    event: CameraEvent,
+    handler: (data: never) => void,
+  ): ListenerHandle | Promise<ListenerHandle>;
 }
+
+type CameraEvent = "textBoxes" | "modeStatus" | "traverse";
 
 interface CapacitorGlobal {
   Plugins?: Record<string, unknown>;
@@ -190,7 +268,20 @@ export const adjustCamera = (options: {
   torchOverride?: boolean;
 }) => requireCamera().adjust(options);
 
-function subscribe<T>(event: "textBoxes" | "modeStatus", handler: (data: T) => void): () => void {
+/**
+ * The traverse (owner rulings 2026-08-16) — the mechanism, deliberately without a door.
+ *
+ * ⚑ **Renamed from *pan*, and the rename is a correction rather than a preference.** A pan is a
+ * spin about the vertical axis; real rooms are L-shaped and getting round the corner means
+ * walking, which gives parallax. A word that says *stand still and spin* produces concierges who
+ * stand still and spin, in rooms that cannot be covered that way. The rule is **never break
+ * contact** — rotate, walk, turn a corner — and the only question per adjacent pair is whether
+ * the two frames share content.
+ */
+export const startTraverse = () => requireCamera().startTraverse();
+export const stopTraverse = () => requireCamera().stopTraverse();
+
+function subscribe<T>(event: CameraEvent, handler: (data: T) => void): () => void {
   const plugin = nativeCamera();
   if (!plugin) return () => {};
   let removed = false;
@@ -209,6 +300,45 @@ function subscribe<T>(event: "textBoxes" | "modeStatus", handler: (data: T) => v
 
 export const onTextBoxes = (handler: (event: TextBoxesEvent) => void) => subscribe("textBoxes", handler);
 export const onModeStatus = (handler: (event: ModeStatusEvent) => void) => subscribe("modeStatus", handler);
+export const onTraverse = (handler: (event: TraverseProgressEvent) => void) => subscribe("traverse", handler);
+
+/**
+ * What a finished traverse amounts to.
+ *
+ * ⚑ **`unverified` never reads as `gaps`.** The binder's question is *is there a gap here*, and
+ * the honest answers are yes, no, and *this mechanism cannot say* — the last being what a walked
+ * corner produces. Collapsing the third into the first is the false alarm the owner ruled worse
+ * than no flag at all, in the one place it costs a return visit.
+ *
+ * A predicate rather than a branch in the component, for the reason `frameStateOf` and
+ * `globalCameraApplies` are: this is the rule, and a rule inside a component cannot be tested.
+ */
+export type TraverseVerdict = "empty" | "contiguous" | "gaps" | "unverified";
+
+export function traverseVerdict(result: Pick<TraverseResult, "pairs">): TraverseVerdict {
+  if (result.pairs.length === 0) return "empty";
+  if (result.pairs.some((p) => p.contiguity === "gap")) return "gaps";
+  if (result.pairs.some((p) => p.contiguity === "unverified")) return "unverified";
+  return "contiguous";
+}
+
+/** Below this the lit and unlit reads of one plate disagree enough to say so. A clean pair on a
+ *  matte plate agrees almost exactly; glare is what pulls it down. */
+export const GLARE_AGREEMENT_FLOOR = 0.9;
+
+/**
+ * Did the torch cost us characters?
+ *
+ * ⚑ Gated on a pair having been taken and both frames having produced text. Without that gate
+ * this would answer on captures where nothing was compared — an alarm on the majority case,
+ * which is the failure class this file already carries two other guards against.
+ */
+export function glareSuspected(
+  result: Pick<CaptureResult, "torchPaired" | "torchPairAgreement">,
+): boolean {
+  return result.torchPaired && result.torchPairAgreement !== undefined
+    && result.torchPairAgreement < GLARE_AGREEMENT_FLOOR;
+}
 
 /**
  * What the viewfinder frame colour means. Derived from the ACHIEVED mode and its unmet goals, in

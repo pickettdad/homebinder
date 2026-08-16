@@ -39,6 +39,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setMode", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "adjust", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "capture", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startTraverse", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopTraverse", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise)
     ]
 
@@ -49,6 +51,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         let made = CameraController()
         made.onTextBoxes = { [weak self] payload in self?.notifyListeners("textBoxes", data: payload) }
         made.onStatus = { [weak self] payload in self?.notifyListeners("modeStatus", data: payload) }
+        made.onTraverse = { [weak self] payload in self?.notifyListeners("traverse", data: payload) }
         controller = made
         return made
     }
@@ -109,6 +112,40 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         controller.capture { result in
+            switch result {
+            case .success(let payload): call.resolve(payload)
+            case .failure(let error): call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    /**
+     The traverse mechanism (owner rulings 2026-08-16). **Deliberately not a door.**
+
+     There is no capture kind here, no in-frame guidance and no concierge-facing surface: the
+     owner held those back because a surface built now would harden around a capture kind whose
+     job may be about to double — the traverse and the run trace look like one primitive, and
+     that costing is still open. What exists is the mechanism and a way to measure it.
+     */
+    @objc func startTraverse(_ call: CAPPluginCall) {
+        guard let controller else {
+            call.reject("Camera is not running — call start first")
+            return
+        }
+        controller.startTraverse { result in
+            switch result {
+            case .success(let payload): call.resolve(payload)
+            case .failure(let error): call.reject(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc func stopTraverse(_ call: CAPPluginCall) {
+        guard let controller else {
+            call.reject("Camera is not running — call start first")
+            return
+        }
+        controller.stopTraverse { result in
             switch result {
             case .success(let payload): call.resolve(payload)
             case .failure(let error): call.reject(error.localizedDescription)
@@ -199,6 +236,7 @@ final class CameraController: NSObject {
         case denied
         case noCamera
         case notRunning
+        case notTraversing
         case captureFailed(String)
 
         var errorDescription: String? {
@@ -206,6 +244,7 @@ final class CameraController: NSObject {
             case .denied: return "Camera access was refused. Settings ▸ HouseSteady Field ▸ Camera."
             case .noCamera: return "No usable rear camera on this device."
             case .notRunning: return "Camera is not running."
+            case .notTraversing: return "No traverse is running."
             case .captureFailed(let why): return "Capture failed: \(why)"
             }
         }
@@ -213,10 +252,14 @@ final class CameraController: NSObject {
 
     var onTextBoxes: (([String: Any]) -> Void)?
     var onStatus: (([String: Any]) -> Void)?
+    var onTraverse: (([String: Any]) -> Void)?
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "ca.housesteady.camera.session")
     private let visionQueue = DispatchQueue(label: "ca.housesteady.camera.vision")
+    /// Deskew, JPEG writes and the accurate OCR pass. Off main because a 12 MP read is most of a
+    /// second, and off `visionQueue` because that one is feeding the live loop.
+    private let processingQueue = DispatchQueue(label: "ca.housesteady.camera.processing")
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
@@ -303,15 +346,77 @@ final class CameraController: NSObject {
     private let stillThreshold: CGFloat = 0.006
     private var lastMotion: CGFloat = 1.0
 
-    private var captureHandlers: [Int64: (Result<[String: Any], Error>) -> Void] = [:]
-    private var captureFrames: [Int64: [Data]] = [:]
-    private var captureExpected: [Int64: Int] = [:]
+    /**
+     One capture the concierge asked for, which may arrive as several exposures.
+
+     ⚑ A job rather than a dictionary of frames keyed by settings id, because **the torch pair is
+     a second `capturePhoto` call with its own id** and both of its frames belong to one result.
+     A per-id table cannot express that; it was fine while every capture was one settings object.
+     */
+    private final class CaptureJob {
+        struct Frame {
+            let data: Data
+            /// Stamped per settings id at request time, never read off `torchOn` at delivery —
+            /// by then the pair has already switched it.
+            let torch: Bool
+        }
+        let completion: (Result<[String: Any], Error>) -> Void
+        let bracketed: Bool
+        /// What the torch was doing when the concierge pressed. The pair restores it afterwards.
+        let torchAtCapture: Bool
+        var frames: [Frame] = []
+        var outstanding: Int
+        var wantsTorchPair: Bool
+        var pairFired = false
+
+        init(completion: @escaping (Result<[String: Any], Error>) -> Void,
+             bracketed: Bool, torchAtCapture: Bool, outstanding: Int, wantsTorchPair: Bool) {
+            self.completion = completion
+            self.bracketed = bracketed
+            self.torchAtCapture = torchAtCapture
+            self.outstanding = outstanding
+            self.wantsTorchPair = wantsTorchPair
+        }
+    }
+
+    /// Settings id → job. Two ids map to the same job for a torch pair.
+    private var jobs: [Int64: CaptureJob] = [:]
+    /// Settings id → the torch state that id was requested under.
+    private var torchForRequest: [Int64: Bool] = [:]
+    /// How long to let auto-exposure re-converge after the torch goes out for the paired frame.
+    private static let torchPairSettleSeconds = 0.45
 
     struct LiveRead {
         let strings: [String]
         let meanConfidence: Double
         static let empty = LiveRead(strings: [], meanConfidence: 0)
         var characterCount: Int { strings.reduce(0) { $0 + $1.count } }
+
+        /// Roughly the shortest run of characters worth firing a shutter for on a plate — below
+        /// it, a stray word on a pipe label counts as a read.
+        static let worthReadingCharacters = 6
+        /// The boundary between a read that is going well and one that is not. **One number**,
+        /// used by the retake trigger and the torch veto alike: two constants meaning the same
+        /// thing is precisely how the two rotation tables drifted apart.
+        static let goodConfidence = 0.55
+
+        /**
+         ⚑ Characters WERE detected and read badly. Never "no text found" — most captures
+         legitimately contain none (a pipe, a stain, a wide shot), so a trigger that fires on
+         nothing-read fires on the majority case and is ignored by the time a plate needs it.
+         */
+        var isMarginal: Bool { characterCount > 0 && meanConfidence < Self.goodConfidence }
+
+        /**
+         The read is going well enough that the mode's goal is already met.
+
+         ⚑ This is what the torch asks before arming (owner ruling 2026-08-16). **The goal is
+         legible characters, not a lit room** — so a camera that can already read the plate has
+         nothing to gain from a torch and a specular hotspot to lose.
+         */
+        var isReadingWell: Bool {
+            characterCount >= Self.worthReadingCharacters && meanConfidence >= Self.goodConfidence
+        }
 
         /**
          What "the same read" means, and it is NOT array equality.
@@ -417,6 +522,13 @@ final class CameraController: NSObject {
         statusTimer?.invalidate()
         statusTimer = nil
         stopTrackingRotation()
+        // A traverse outlives nothing. Left running, its locked exposure and latched torch would
+        // be inherited by the next session as settings nobody chose.
+        visionQueue.async { [weak self] in
+            self?.traverse = nil
+            self?.isTraversing = false
+            self?.traverseRequestIds.removeAll()
+        }
         motion.stopDeviceMotionUpdates()
         setTorch(false)
         sessionQueue.async { [weak self] in
@@ -576,6 +688,10 @@ final class CameraController: NSObject {
             if torchOverride != torchOn { setTorch(torchOverride) }
             return
         }
+        // ⚑ Latched for the length of a traverse. Half-lit frames across one continuous move are
+        // worse than either state held consistently, and a torch that switches mid-traverse is
+        // the oscillation this file just removed, arriving through a different door.
+        if isTraversing { return }
         switch goal.torch {
         case .never:
             if torchOn { setTorch(false) }
@@ -584,7 +700,25 @@ final class CameraController: NSObject {
                 return
             }
             let score = lightScore()
-            let wanted = torchOn ? score >= Self.torchReleaseThreshold : score >= Self.underLitThreshold
+            /*
+             ⚑ **The arm-only veto** (owner ruling 2026-08-16), and *arm-only* is the whole of its
+             safety. **The goal is legible characters, not a lit room** — so if Vision is already
+             reading the plate, the torch has nothing to add and a specular hotspot to lose.
+
+             It is deliberately NOT consulted on release. A read taken while the torch is lit is a
+             read *of the torch's own effect*, so letting a good lit read turn the torch off would
+             put the actuator back inside the loop that decides about the actuator — the exact
+             defect the hysteresis above exists to remove. Arming looks at an unlit scene, which
+             is a real measurement; releasing does not, so releasing stays on the light score.
+
+             `lastRead` is written on the vision queue and read here on main. Benign: the worst
+             case is one decision taken against the previous frame's read, and a lock on this
+             path would cost more than the frame is worth.
+             */
+            let readingWell = goal.liveText && lastRead.isReadingWell
+            let wanted = torchOn
+                ? score >= Self.torchReleaseThreshold
+                : score >= Self.underLitThreshold && !readingWell
             if wanted != torchOn { setTorch(wanted) }
         }
     }
@@ -687,17 +821,41 @@ final class CameraController: NSObject {
 
     // MARK: capture
 
+    /// Capacitor dispatches plugin calls off the main queue; job bookkeeping lives on main, so the
+    /// hop happens once here rather than at three places inside.
     func capture(_ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        if Thread.isMainThread {
+            performCapture(completion)
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.performCapture(completion) }
+        }
+    }
+
+    private func performCapture(_ completion: @escaping (Result<[String: Any], Error>) -> Void) {
         guard session.isRunning else {
             completion(.failure(CameraError.notRunning))
             return
         }
-        // ⚑ Extra exposures only when the live read came back MARGINAL — characters were detected
-        // and read badly. Never when nothing was detected: most captures legitimately contain no
-        // text (a pipe, a stain, a wide shot), so bracketing on "no text" would fire on the
-        // majority case and be ignored by the time a plate needed it.
-        let marginal = lastRead.characterCount > 0 && lastRead.meanConfidence < 0.55
-        let wantsBracket = goal.bracketWhenMarginal && marginal && photoOutput.maxBracketedCapturePhotoCount >= 3
+        // Extra exposures only when the live read came back marginal — see `LiveRead.isMarginal`.
+        let wantsBracket = goal.bracketWhenMarginal && lastRead.isMarginal
+            && photoOutput.maxBracketedCapturePhotoCount >= 3
+        /*
+         ⚑ **When the torch fires, the no-torch frame comes with it** (owner ruling 2026-08-16).
+
+         Hysteresis stopped the torch flickering. It did not stop a torch that is *correctly* on
+         from ruining the shot: the hotspot on the owner's plate landed on `197 Min V` rather
+         than the model line **by luck**, and where it lands is positional — no threshold can
+         move it. The unlit frame holds exactly the characters the lit one erased.
+
+         ⚑ And the pair is **two independent reads of one plate by construction**: wherever the
+         two transcriptions disagree, the disagreement localises the glare to those characters.
+         That is a property of taking the pair at all, not something anybody has to implement.
+
+         Paired only when the torch actually fires — one extra frame, on the minority of captures
+         where there is anything to compare. Never during a traverse, where the torch is latched
+         and the exposure locked, and a mid-traverse torch cycle would break both.
+         */
+        let wantsTorchPair = torchOn && !isTraversing
 
         let settings: AVCapturePhotoSettings
         if wantsBracket {
@@ -716,22 +874,21 @@ final class CameraController: NSObject {
         }
 
         let id = settings.uniqueID
-        captureHandlers[id] = completion
-        captureFrames[id] = []
-        captureExpected[id] = wantsBracket ? 3 : 1
+        jobs[id] = CaptureJob(
+            completion: completion,
+            bracketed: wantsBracket,
+            torchAtCapture: torchOn,
+            outstanding: wantsBracket ? 3 : 1,
+            wantsTorchPair: wantsTorchPair
+        )
+        torchForRequest[id] = torchOn
 
-        // ⚑ Applied on the MAIN thread, from the cached coordinator angle. The previous version
-        // read `UIDevice.current.orientation` right here — on Capacitor's background call queue,
-        // where that property is not valid — and the field stills came back unrotated while the
-        // preview, which is driven from a main-thread notification, rotated correctly. Same
-        // class as any other "the thing consulted was not the thing that governs".
-        let angle = captureRotationAngle
-        let connection = photoOutput.connection(with: .video)
-        if Thread.isMainThread {
-            applyRotation(angle, to: connection)
-        } else {
-            DispatchQueue.main.sync { applyRotation(angle, to: connection) }
-        }
+        // ⚑ On main, from the cached coordinator angle. The previous version read
+        // `UIDevice.current.orientation` right here — on Capacitor's background call queue, where
+        // that property is not valid — and the field stills came back unrotated while the preview,
+        // driven from a main-thread notification, rotated correctly. Same class as any other
+        // "the thing consulted was not the thing that governs".
+        applyRotation(captureRotationAngle, to: photoOutput.connection(with: .video))
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
@@ -845,79 +1002,508 @@ final class CameraController: NSObject {
         return value
     }
 
+    /**
+     A delivered exposure, routed to whichever path asked for it.
+
+     Two paths, two queues, and each piece of state is touched from exactly one of them: traverse
+     bookkeeping lives on `visionQueue` (where the accumulator that fires it already runs), and
+     capture jobs live on main. The routing question — which path is this id — is therefore asked
+     on `visionQueue`, because that is the queue that owns the set being consulted.
+     */
     fileprivate func finish(id: Int64, data: Data?, error: Error?) {
-        guard let completion = captureHandlers[id] else { return }
+        visionQueue.async { [weak self] in
+            guard let self else { return }
+            if self.traverseRequestIds.contains(id) {
+                self.completeTraverseFrame(id: id, data: data, error: error)
+            } else {
+                DispatchQueue.main.async { self.completeCaptureFrame(id: id, data: data, error: error) }
+            }
+        }
+    }
+
+    private func completeCaptureFrame(id: Int64, data: Data?, error: Error?) {
+        guard let job = jobs[id] else { return }
+        let requestedWithTorch = torchForRequest[id] ?? false
+
         if let error {
-            captureHandlers[id] = nil
-            captureFrames[id] = nil
-            captureExpected[id] = nil
-            completion(.failure(CameraError.captureFailed(error.localizedDescription)))
+            release(job)
+            job.completion(.failure(CameraError.captureFailed(error.localizedDescription)))
             return
         }
-        if let data { captureFrames[id, default: []].append(data) }
-        guard let frames = captureFrames[id], frames.count >= (captureExpected[id] ?? 1) else { return }
+        if let data { job.frames.append(CaptureJob.Frame(data: data, torch: requestedWithTorch)) }
+        job.outstanding -= 1
+        guard job.outstanding <= 0 else { return }
 
-        captureHandlers[id] = nil
-        captureFrames[id] = nil
-        captureExpected[id] = nil
+        // The unlit half of the pair is owed. Fire it before completing, so both frames arrive as
+        // one capture — the concierge pressed once and must get one result back.
+        if job.wantsTorchPair && !job.pairFired {
+            job.pairFired = true
+            fireTorchPair(for: job)
+            return
+        }
 
-        // Written to disk and returned as paths rather than base64: three 12 MP frames as base64 is
-        // tens of megabytes crossing the bridge as a string, and the web layer wants a Blob at the
-        // far end of it anyway.
+        release(job)
+        if job.wantsTorchPair { setTorch(job.torchAtCapture) }
+        let angle = Double(captureRotationAngle)
+        let currentMode = mode
+        let wantsDeskew = goal.detectPageEdges
+        let wantsText = goal.liveText
+        processingQueue.async { [weak self] in
+            self?.assemble(job: job, id: id, rotationAngle: angle, mode: currentMode,
+                           wantsDeskew: wantsDeskew, wantsText: wantsText)
+        }
+    }
+
+    /// Every settings id pointing at this job — a torch pair registers two.
+    private func release(_ job: CaptureJob) {
+        for (key, value) in jobs where value === job {
+            jobs[key] = nil
+            torchForRequest[key] = nil
+        }
+    }
+
+    private func fireTorchPair(for job: CaptureJob) {
+        setTorch(false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
+            guard let self else { return }
+            // The scene is genuinely darker now, so this frame wants the exposure system's own
+            // answer rather than the lit frame's settings — which is what continuous AE gives it,
+            // once it has had `torchPairSettleSeconds` to converge.
+            let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            settings.photoQualityPrioritization = .quality
+            let id = settings.uniqueID
+            self.jobs[id] = job
+            self.torchForRequest[id] = false
+            job.outstanding = 1
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+    }
+
+    /// The expensive half — deskew, disk, OCR — off the main thread.
+    private func assemble(job: CaptureJob, id: Int64, rotationAngle: Double, mode: CameraMode,
+                          wantsDeskew: Bool, wantsText: Bool) {
         // ⚑ Document is a DIFFERENT CAMERA, not a photograph with a label. Built as the latter it
         // produces a curled invoice at an angle that reads badly — so the page is found and
         // flattened here, and `deskewed` reports whether it actually was.
         var deskewed = false
-        var outgoing = frames
-        if goal.detectPageEdges, let first = outgoing.first, let flattened = Self.flattenPage(jpeg: first) {
-            outgoing[0] = flattened
+        var outgoing = job.frames
+        if wantsDeskew, let first = outgoing.first, let flattened = Self.flattenPage(jpeg: first.data) {
+            outgoing[0] = CaptureJob.Frame(data: flattened, torch: first.torch)
             deskewed = true
         }
 
+        // Written to disk and returned as paths rather than base64: three 12 MP frames as base64 is
+        // tens of megabytes crossing the bridge as a string, and the web layer wants a Blob at the
+        // far end of it anyway.
         var written: [[String: Any]] = []
-        for (index, data) in outgoing.enumerated() {
+        var reads: [[String: Any]?] = []
+        for (index, frame) in outgoing.enumerated() {
             let name = "hs-capture-\(id)-\(index).jpg"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-            do {
-                try data.write(to: url, options: .atomic)
-                written.append([
-                    "path": url.path,
-                    "bytes": data.count,
-                    "index": index,
-                    // Read off the written bytes. 1 on a portrait shot means the rotation never
-                    // reached the photo connection — the 2026-08-15 finding, now self-reporting.
-                    // A deskewed document frame is legitimately 1: the page was straightened
-                    // into upright pixels, so there is nothing left for the tag to say.
-                    "exifOrientation": Self.exifOrientation(of: data)
-                ])
-            } catch { continue }
+            guard (try? frame.data.write(to: url, options: .atomic)) != nil else { continue }
+            // ⚑ Read EVERY frame, not just the first. On a torch pair that is the whole point:
+            // two independent reads of one plate, and where they disagree is where the glare was.
+            let read = wantsText ? Self.readAccurately(jpeg: frame.data) : nil
+            reads.append(read)
+            var entry: [String: Any] = [
+                "path": url.path,
+                "bytes": frame.data.count,
+                "index": index,
+                // Read off the written bytes. 1 on a portrait shot means the rotation never
+                // reached the photo connection — the 2026-08-15 finding, now self-reporting.
+                // A deskewed document frame is legitimately 1: the page was straightened
+                // into upright pixels, so there is nothing left for the tag to say.
+                "exifOrientation": Self.exifOrientation(of: frame.data),
+                "torch": frame.torch
+            ]
+            if let read { entry["ocr"] = read }
+            written.append(entry)
         }
         guard !written.isEmpty else {
-            completion(.failure(CameraError.captureFailed("could not write frames to disk")))
+            job.completion(.failure(CameraError.captureFailed("could not write frames to disk")))
             return
         }
 
         var payload: [String: Any] = [
             "frames": written,
             "mode": mode.rawValue,
-            "torchUsed": torchOn,
-            "bracketed": written.count > 1,
+            "torchUsed": job.torchAtCapture,
+            "bracketed": job.bracketed,
+            "torchPaired": job.pairFired,
             // Reported rather than assumed: a document capture where no page was found is a
             // photograph of a page, and the difference matters to whoever reads it later.
             "deskewed": deskewed,
             // The angle asked of the photo connection, beside the orientation each frame came
             // back carrying. Two numbers that must agree; printed so they can be seen not to.
-            "rotationAngle": Double(captureRotationAngle),
+            "rotationAngle": rotationAngle,
             "at": ISO8601DateFormatter().string(from: Date())
         ]
 
-        // The read on the CAPTURED frame, at the accurate recognition level rather than the fast
-        // one the live loop uses. Returned because the declared surface returns it; stored by
-        // nobody, because there is nowhere for it to land (#163).
-        if goal.liveText, let first = frames.first, let ocr = Self.readAccurately(jpeg: first) {
-            payload["ocr"] = ocr
+        /*
+         ⚑ How much the lit and unlit reads of the same plate agree.
+
+         The pair is two independent reads by construction; this is the one number that says
+         whether they *found the same characters*, so a glare that erased something announces
+         itself instead of waiting to be noticed at the desk. Fingerprinted — sorted alphanumerics
+         — for the same reason auto-capture is: the fast and accurate recognisers reorder lines
+         and split them, and none of that is disagreement.
+
+         Gated on a pair existing AND both reads returning text. A number computed from one read,
+         or from none, would be an alarm on a case where there is nothing to say.
+         */
+        if job.pairFired, reads.count >= 2,
+           let lit = reads[0]?["text"] as? String, let unlit = reads[1]?["text"] as? String {
+            payload["torchPairAgreement"] = Self.agreement(between: lit, and: unlit)
         }
-        completion(.success(payload))
+        // The top-level read stays frame 0's — the declared surface, unchanged. Stored by nobody,
+        // because there is nowhere for it to land (#163).
+        if let first = reads.first, let read = first { payload["ocr"] = read }
+        job.completion(.success(payload))
+    }
+
+    // MARK: traverse
+
+    /**
+     The traverse (owner rulings 2026-08-16). **Renamed from *pan*, and the rename is a
+     correction.**
+
+     A pan is a spin about the vertical axis, which is nearly a pure rotation and therefore nearly
+     a pure translation at the frame plane. **Real rooms are not coverable that way.** The owner's
+     mechanical room is an L: getting round the corner means walking several feet, and walking
+     gives **parallax** — near objects slide faster than far ones, and no translation-only model
+     describes that. ⚑ *A word that says stand still and spin produces concierges who stand still
+     and spin, in rooms that cannot be covered by spinning.*
+
+     So the rule the concierge follows is **never break contact** — rotating, walking, going round
+     a corner, all fine — and the only question asked of each adjacent pair is whether the two
+     frames share content.
+
+     ⚑ **Which is exactly why the verdict has three values and not two.** A false gap — telling
+     the desk something was missed when the concierge merely walked — is worse than no flag at
+     all, because it sends somebody back to a room that was covered. So `unverified` is a
+     first-class answer: *the translation model does not describe this pair, so this mechanism
+     cannot say.* Collapsing that into `gap` would be the alarm-on-the-majority-case failure, in
+     the one place it costs a return visit.
+     */
+    private final class TraverseRun {
+        let startedAt = Date()
+        var frames: [[String: Any]] = []
+        var pairs: [[String: Any]] = []
+        /// Signed, normalised, accumulated since the last kept frame. Signed on purpose: panning
+        /// right then back left returns you to where you were, and no frame is owed.
+        var travel = CGPoint.zero
+        var previousBuffer: CVPixelBuffer?
+        var lastKeptBuffer: CVPixelBuffer?
+        var pendingBuffer: CVPixelBuffer?
+        var awaitingFrame = false
+        var index = 0
+        var unmet: [String] = []
+        var torchLatched = false
+    }
+
+    /// Fraction of frame width to travel before the next still. 0.40 leaves ~60% nominal overlap.
+    private static let traverseTargetTravel: CGFloat = 0.40
+    /// Below this, contact is not established and the pair is a gap.
+    private static let traverseMinimumOverlap = 0.25
+    /// Above this, the two halves of the frame moved differently — parallax — and a single
+    /// translation does not describe the pair, so no claim is made about it either way.
+    private static let traverseDisparityTolerance = 0.08
+    /// Registration runs at every other frame during a traverse rather than every sixth: a fast
+    /// move between analysed frames is a pair the accumulator cannot register, and the
+    /// accumulator is what decides when to fire.
+    private static let traverseEveryNthFrame = 2
+    /// Working width for registration. Overlap is a geometric question, not a detail question.
+    private static let traverseWorkingWidth = 384
+
+    private var traverse: TraverseRun?
+    private var traverseRequestIds: Set<Int64> = []
+    /// Read from main (`capture`, `evaluateTorch`) and written on `visionQueue`. A stale read is
+    /// worth one capture's worth of wrong pairing decision at a run boundary, and a lock across
+    /// those two paths would cost more than that.
+    private var isTraversing = false
+    private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
+
+    func startTraverse(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        guard session.isRunning else {
+            completion(.failure(CameraError.notRunning))
+            return
+        }
+        var unmet: [String] = []
+        /*
+         ⚑ Locked, and the owner has ruled on the trade: **lock it and let the window blow.** The
+         traverse is for the objects, the runs between them and anything a purposeful capture
+         would miss — not for a pretty window, and the room shot covers the bright end.
+
+         Focus and white balance lock for the same reason as exposure. Without the focus lock the
+         lens hunts somewhere in the middle of the move and one frame in the run is soft; without
+         the white balance lock the frames do not even colour-match, and a concierge looking at
+         the result cannot tell that from a lighting change in the room.
+         */
+        if let device {
+            do {
+                try device.lockForConfiguration()
+                if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
+                else { unmet.append("lockedExposure") }
+                if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
+                else { unmet.append("lockedWhiteBalance") }
+                if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
+                else { unmet.append("lockedFocus") }
+                device.unlockForConfiguration()
+            } catch {
+                unmet.append("configuration")
+            }
+        }
+        // The rotation is fixed for the run, like the exposure. Frames individually re-rotated
+        // part-way through a continuous move would not be one traverse.
+        applyRotation(captureRotationAngle, to: photoOutput.connection(with: .video))
+        let latched = torchOn
+
+        visionQueue.async { [weak self] in
+            guard let self else { return }
+            let run = TraverseRun()
+            run.unmet = unmet
+            run.torchLatched = latched
+            self.traverse = run
+            self.isTraversing = true
+            DispatchQueue.main.async {
+                completion(.success([
+                    "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
+                    "targetTravel": Double(Self.traverseTargetTravel),
+                    "minimumOverlap": Self.traverseMinimumOverlap,
+                    "disparityTolerance": Self.traverseDisparityTolerance,
+                    "torchLatched": latched,
+                    "rotationAngle": Double(self.captureRotationAngle),
+                    "unmet": unmet
+                ]))
+            }
+        }
+    }
+
+    func stopTraverse(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        visionQueue.async { [weak self] in
+            guard let self else { return }
+            guard let run = self.traverse else {
+                DispatchQueue.main.async { completion(.failure(CameraError.notTraversing)) }
+                return
+            }
+            self.traverse = nil
+            self.isTraversing = false
+            self.traverseRequestIds.removeAll()
+            let payload: [String: Any] = [
+                "frames": run.frames,
+                "pairs": run.pairs,
+                "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
+                "endedAt": ISO8601DateFormatter().string(from: Date()),
+                "torchLatched": run.torchLatched,
+                "unmet": run.unmet,
+                // ⚑ The count the binder actually asks for. A traverse with one unverified pair
+                // is a different object from one with none, and summing it here means nobody
+                // downstream has to know the verdict vocabulary to ask the question.
+                "gaps": run.pairs.filter { ($0["contiguity"] as? String) == "gap" }.count,
+                "unverified": run.pairs.filter { ($0["contiguity"] as? String) == "unverified" }.count
+            ]
+            DispatchQueue.main.async {
+                self.restoreContinuousModes()
+                completion(.success(payload))
+            }
+        }
+    }
+
+    private func restoreContinuousModes() {
+        guard let device else { return }
+        do {
+            try device.lockForConfiguration()
+            if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            }
+            if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
+            device.unlockForConfiguration()
+        } catch { /* the next apply(mode:) sets these again */ }
+        evaluateTorch()
+    }
+
+    /// The accumulator. Runs on `visionQueue`, every other frame, for the whole traverse.
+    private func advanceTraverse(with pixelBuffer: CVPixelBuffer) {
+        guard let run = traverse, !run.awaitingFrame else { return }
+        guard let working = downscaled(pixelBuffer, crop: nil) else { return }
+
+        // The first frame is kept unconditionally: there is nothing to have travelled from.
+        guard let previous = run.previousBuffer else {
+            run.previousBuffer = working
+            requestTraverseFrame(run: run, buffer: working)
+            return
+        }
+        run.previousBuffer = working
+        guard let step = translationFraction(from: previous, to: working) else { return }
+        run.travel.x += step.x
+        run.travel.y += step.y
+        if hypot(run.travel.x, run.travel.y) >= Self.traverseTargetTravel {
+            requestTraverseFrame(run: run, buffer: working)
+        }
+    }
+
+    private func requestTraverseFrame(run: TraverseRun, buffer: CVPixelBuffer) {
+        run.awaitingFrame = true
+        run.pendingBuffer = buffer
+        run.travel = .zero
+        // `.speed` because a traverse is a burst and the operator is still moving: a frame that
+        // arrives late is a frame taken somewhere else. Quality prioritisation is right for a
+        // deliberate plate and wrong here.
+        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+        settings.photoQualityPrioritization = .speed
+        traverseRequestIds.insert(settings.uniqueID)
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    private func completeTraverseFrame(id: Int64, data: Data?, error: Error?) {
+        traverseRequestIds.remove(id)
+        guard let run = traverse else { return }
+        defer {
+            run.awaitingFrame = false
+            run.pendingBuffer = nil
+        }
+        guard error == nil, let data else { return }
+
+        let index = run.index
+        run.index += 1
+        let name = "hs-traverse-\(Int(run.startedAt.timeIntervalSince1970))-\(index).jpg"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return }
+        run.frames.append([
+            "path": url.path,
+            "bytes": data.count,
+            "index": index,
+            "exifOrientation": Self.exifOrientation(of: data),
+            "at": ISO8601DateFormatter().string(from: Date())
+        ])
+
+        if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
+            run.pairs.append(measureOverlap(from: previous, to: current, from: index - 1, to: index))
+        }
+        run.lastKeptBuffer = run.pendingBuffer
+        // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
+        // survive the bridge as a JS null, it survives as something the far side cannot read.
+        var progress: [String: Any] = ["frames": run.frames.count, "pairs": run.pairs]
+        if let last = run.pairs.last { progress["lastPair"] = last }
+        onTraverse?(progress)
+    }
+
+    /**
+     What one adjacent pair shares, and how much to trust the answer.
+
+     Three registrations, not one: the whole frame, its left half and its right half. ⚑ **If a
+     single translation describes the pair, the two halves agree; under parallax they do not** —
+     near content slides faster than far content, which is precisely what walking round a corner
+     does. `disparity` is that difference, and it is the number that decides whether `overlap`
+     means anything.
+
+     Homography would not rescue this. A homography is exact for a plane or for pure rotation, and
+     parallax across a room's depth is neither — so the honest move is to *detect* that the model
+     does not apply rather than to fit a fancier wrong one.
+     */
+    private func measureOverlap(from previous: CVPixelBuffer, to current: CVPixelBuffer,
+                                from fromIndex: Int, to toIndex: Int) -> [String: Any] {
+        let left = CGRect(x: 0, y: 0, width: 0.5, height: 1)
+        let right = CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
+        let full = translationFraction(from: previous, to: current)
+        let leftShift = crops(previous, current, left).flatMap { translationFraction(from: $0.0, to: $0.1) }
+        let rightShift = crops(previous, current, right).flatMap { translationFraction(from: $0.0, to: $0.1) }
+
+        var record: [String: Any] = ["from": fromIndex, "to": toIndex]
+        guard let full, let leftShift, let rightShift else {
+            record["measured"] = false
+            record["contiguity"] = "unverified"
+            return record
+        }
+        // Half-crop x-translations are fractions of a half width; halve them to speak about the
+        // whole frame. Heights are unchanged by the crop, so y needs no conversion.
+        let disparity = hypot((leftShift.x - rightShift.x) * 0.5, leftShift.y - rightShift.y)
+        let overlap = max(0, 1 - abs(full.x)) * max(0, 1 - abs(full.y))
+
+        let contiguity: String
+        if Double(disparity) > Self.traverseDisparityTolerance {
+            // ⚑ Not a gap. The model does not describe this pair, so this mechanism has nothing
+            // to say about whether contact was kept — and saying "gap" here is the false alarm
+            // that sends somebody back to a room they already covered.
+            contiguity = "unverified"
+        } else if Double(overlap) < Self.traverseMinimumOverlap {
+            contiguity = "gap"
+        } else {
+            contiguity = "contiguous"
+        }
+
+        record["measured"] = true
+        record["dx"] = Double(full.x)
+        record["dy"] = Double(full.y)
+        record["overlap"] = Double(overlap)
+        record["disparity"] = Double(disparity)
+        record["contiguity"] = contiguity
+        return record
+    }
+
+    private func crops(_ a: CVPixelBuffer, _ b: CVPixelBuffer, _ rect: CGRect) -> (CVPixelBuffer, CVPixelBuffer)? {
+        guard let ca = downscaled(a, crop: rect), let cb = downscaled(b, crop: rect) else { return nil }
+        return (ca, cb)
+    }
+
+    /// Translation between two buffers, normalised to each axis's own extent. `nil` when Vision
+    /// could not align them at all — which is information, not an error to swallow.
+    private func translationFraction(from previous: CVPixelBuffer, to current: CVPixelBuffer) -> CGPoint? {
+        let width = CGFloat(CVPixelBufferGetWidth(current))
+        let height = CGFloat(CVPixelBufferGetHeight(current))
+        guard width > 0, height > 0 else { return nil }
+        let request = VNTranslationalImageRegistrationRequest(targetedCVPixelBuffer: current)
+        // A fresh handler per pair: the shared one carries the live loop's sequence state, and
+        // interleaving two sequences through it would make each one's history the other's noise.
+        do { try VNSequenceRequestHandler().perform([request], on: previous) } catch { return nil }
+        guard let observation = request.results?.first as? VNImageTranslationAlignmentObservation else { return nil }
+        let t = observation.alignmentTransform
+        return CGPoint(x: t.tx / width, y: t.ty / height)
+    }
+
+    /// A small BGRA copy, optionally of a normalised sub-rectangle. Registration is a geometric
+    /// question; running it at sensor resolution would cost twenty times as much to answer it.
+    private func downscaled(_ buffer: CVPixelBuffer, crop: CGRect?) -> CVPixelBuffer? {
+        var image = CIImage(cvPixelBuffer: buffer)
+        if let crop {
+            let e = image.extent
+            image = image.cropped(to: CGRect(x: e.origin.x + crop.origin.x * e.width,
+                                             y: e.origin.y + crop.origin.y * e.height,
+                                             width: crop.width * e.width,
+                                             height: crop.height * e.height))
+        }
+        guard image.extent.width > 0 else { return nil }
+        let scale = CGFloat(Self.traverseWorkingWidth) / image.extent.width
+        let scaled = image
+            .transformed(by: CGAffineTransform(translationX: -image.extent.origin.x, y: -image.extent.origin.y))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let height = max(1, Int((scaled.extent.height).rounded()))
+        var out: CVPixelBuffer?
+        let attributes: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary]
+        guard CVPixelBufferCreate(kCFAllocatorDefault, Self.traverseWorkingWidth, height,
+                                  kCVPixelFormatType_32BGRA, attributes as CFDictionary, &out) == kCVReturnSuccess,
+              let out else { return nil }
+        ciContext.render(scaled, to: out)
+        return out
+    }
+
+    /// Jaccard overlap of the two reads' alphanumeric character multisets, 0…1.
+    private static func agreement(between lhs: String, and rhs: String) -> Double {
+        func bag(_ s: String) -> [Character: Int] {
+            var counts: [Character: Int] = [:]
+            for ch in s.uppercased() where ch.isLetter || ch.isNumber { counts[ch, default: 0] += 1 }
+            return counts
+        }
+        let a = bag(lhs), b = bag(rhs)
+        guard !a.isEmpty || !b.isEmpty else { return 1 }
+        var shared = 0, total = 0
+        for key in Set(a.keys).union(b.keys) {
+            let x = a[key] ?? 0, y = b[key] ?? 0
+            shared += min(x, y)
+            total += max(x, y)
+        }
+        return total == 0 ? 1 : Double(shared) / Double(total)
     }
 
     /**
@@ -995,12 +1581,32 @@ final class CameraController: NSObject {
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard goal.liveText, !analysing else { return }
-        frameCounter += 1
-        guard frameCounter % analyseEveryNthFrame == 0 else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        frameCounter += 1
 
+        /*
+         ⚑ The traverse accumulator runs FIRST and outside the text-mode guard, at its own faster
+         cadence. Two reasons, and both were defects waiting to happen:
+
+         - The guard used to be `goal.liveText` at the top of this method, so in object mode there
+           were no analysed frames **at all** — and a traverse is exactly the thing you do in
+           object mode. The accumulator would have measured nothing and fired no stills.
+         - Every sixth frame is 5 Hz. A quick move covers more than half a frame width between
+           two of those, which is a pair the registration cannot align — so the accumulator would
+           lose track precisely when the operator moved fastest, which is when it matters.
+
+         Text recognition is skipped outright while traversing: a traverse does not want a live
+         plate read, and leaving it on would put a 12 MP-class request on the same queue as the
+         accumulator that decides when to fire.
+         */
+        if isTraversing {
+            if frameCounter % Self.traverseEveryNthFrame == 0 { advanceTraverse(with: pixelBuffer) }
+            return
+        }
+
+        guard frameCounter % analyseEveryNthFrame == 0 else { return }
         measureMotion(of: pixelBuffer)
+        guard goal.liveText, !analysing else { return }
 
         analysing = true
         let request = VNRecognizeTextRequest { [weak self] request, _ in

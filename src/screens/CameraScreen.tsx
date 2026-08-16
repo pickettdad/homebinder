@@ -36,17 +36,24 @@ import {
   frameBlob,
   frameStateOf,
   frameUrl,
+  glareSuspected,
+  traverseVerdict,
   onModeStatus,
   onTextBoxes,
+  onTraverse,
   requestMode,
   startCamera,
+  startTraverse,
   stopCamera,
+  stopTraverse,
   type CameraCapabilities,
   type CameraMode,
   type CaptureResult,
   type FrameState,
   type ModeStatusEvent,
   type TextBoxesEvent,
+  type TraverseProgressEvent,
+  type TraverseResult,
 } from "../native/hsCamera";
 
 const MODE_BUTTONS: { mode: CameraMode; glyph: string; hint: string }[] = [
@@ -216,10 +223,14 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const [text, setText] = useState<TextBoxesEvent | null>(null);
   const [shots, setShots] = useState<CaptureResult[]>([]);
   const [viewing, setViewing] = useState<CaptureResult | null>(null);
+  const [frameIndex, setFrameIndex] = useState(0);
   const [oneToOne, setOneToOne] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showInstruments, setShowInstruments] = useState(false);
+  const [traversing, setTraversing] = useState(false);
+  const [traverseProgress, setTraverseProgress] = useState<TraverseProgressEvent | null>(null);
+  const [traverseResult, setTraverseResult] = useState<TraverseResult | null>(null);
   /**
    * Auto-capture is the feature that turns roughly two hundred taps into thirty-four, so it is on
    * by default in the mode that has it. It is also switchable, because judging one deliberate
@@ -297,6 +308,35 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    * ⚑ The container is created with no type and no label, and nothing here asks for one. It
    * declares *this is a thing and I am now photographing it*, never what the thing is.
    */
+  /**
+   * The traverse, driven from the instruments panel.
+   *
+   * ⚑ The *mechanism* only. No capture kind, no in-frame guidance, and nothing filed — the
+   * frames land in the app's temporary directory and the record comes back as numbers. The owner
+   * held the surface back because the traverse and the run trace may be one primitive, and a
+   * door built tonight would harden around the narrower of the two.
+   */
+  const beginTraverse = useCallback(async () => {
+    setTraverseResult(null);
+    setTraverseProgress(null);
+    try {
+      await startTraverse();
+      setTraversing(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const endTraverse = useCallback(async () => {
+    try {
+      setTraverseResult(await stopTraverse());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTraversing(false);
+    }
+  }, []);
+
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;
     if (!currentZone) return;
@@ -332,12 +372,14 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       }
     });
     const offStatus = onModeStatus(setStatus);
+    const offTraverse = onTraverse(setTraverseProgress);
     startCamera("text")
       .then((result) => setCapabilities(result.capabilities))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     return () => {
       offText();
       offStatus();
+      offTraverse();
       void stopCamera().catch(() => {});
     };
   }, [available, shoot]);
@@ -354,6 +396,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   };
 
   const frameState = frameStateOf(status);
+  // Clamped rather than trusted: a stack of three followed by a stack of one would otherwise
+  // leave the index pointing past the end and render nothing at all.
+  const shown = viewing?.frames[Math.min(frameIndex, viewing.frames.length - 1)];
 
   if (!available) {
     return (
@@ -484,6 +529,69 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           )}
           <p>session · <span className="font-mono text-slate-100">{status.sessionRunning ? "running" : "stopped"}</span></p>
           {capabilities && <p className="mt-1 text-slate-500">brackets {capabilities.maxBracketedFrames} · torch {String(capabilities.torch)}</p>}
+
+          {/*
+            ⚑ The traverse, as an INSTRUMENT and deliberately not a door. It lives inside the
+            instruments panel — beside the thermal and light readouts, behind a toggle, in
+            monospace — because the owner held the capture kind back: a surface built now would
+            harden around a kind whose job may be about to double if the run trace turns out to
+            be the same primitive. This is the thing that lets tomorrow's L-walk be measured, and
+            nothing a concierge would ever find.
+          */}
+          <div className="mt-2 border-t border-slate-700 pt-2">
+            <button
+              type="button"
+              onClick={() => void (traversing ? endTraverse() : beginTraverse())}
+              className={`w-full rounded-lg px-3 py-2 text-xs ring-1 ${
+                traversing ? "bg-brass-500 text-slate-950 ring-brass-400" : "bg-slate-900 text-slate-300 ring-slate-600"
+              }`}
+            >
+              {traversing ? "stop traverse" : "start traverse"}
+            </button>
+            {traversing && traverseProgress && (
+              <p className="mt-1">
+                frames · <span className="font-mono text-slate-100">{traverseProgress.frames}</span>
+                {traverseProgress.lastPair?.measured && (
+                  <>
+                    {" · overlap "}
+                    <span className="font-mono text-slate-100">
+                      {(traverseProgress.lastPair.overlap ?? 0).toFixed(2)}
+                    </span>
+                    {" · disparity "}
+                    <span className="font-mono text-slate-100">
+                      {(traverseProgress.lastPair.disparity ?? 0).toFixed(3)}
+                    </span>
+                  </>
+                )}
+                {traverseProgress.lastPair && (
+                  <span
+                    className={
+                      traverseProgress.lastPair.contiguity === "gap"
+                        ? "text-rose-400"
+                        : traverseProgress.lastPair.contiguity === "unverified"
+                          ? "text-amber-400"
+                          : "text-emerald-400"
+                    }
+                  >
+                    {" "}
+                    {traverseProgress.lastPair.contiguity}
+                  </span>
+                )}
+              </p>
+            )}
+            {traverseResult && !traversing && (
+              <p className="mt-1">
+                {/* The verdict first, the counts after — a diagnostic decides whether there is
+                    anything to say before it says what. */}
+                <span className="font-mono text-slate-100">{traverseVerdict(traverseResult)}</span> ·{" "}
+                {traverseResult.frames.length} frames · {traverseResult.gaps} gap
+                {traverseResult.gaps === 1 ? "" : "s"} · {traverseResult.unverified} unverified
+                {traverseResult.unmet.length > 0 && (
+                  <span className="text-amber-400"> · unmet {traverseResult.unmet.join(", ")}</span>
+                )}
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -500,7 +608,10 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               <button
                 key={shot.at + shot.frames[0]!.path}
                 type="button"
-                onClick={() => setViewing(shot)}
+                onClick={() => {
+                  setFrameIndex(0);
+                  setViewing(shot);
+                }}
                 className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-500"
               >
                 <img src={frameUrl(shot.frames[0]!.path)} alt="" className="h-full w-full object-cover" />
@@ -570,7 +681,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         </div>
       </footer>
 
-      {viewing && (
+      {viewing && shown && (
         <div className="absolute inset-0 z-50 flex flex-col bg-slate-950">
           <div className="flex items-center justify-between gap-2 p-3">
             <button
@@ -590,7 +701,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               </button>
               <button
                 type="button"
-                onClick={() => void shareFrame(viewing)}
+                onClick={() => void shareFrame(viewing, frameIndex)}
                 className="rounded-lg px-3 py-2 text-sm text-slate-300 ring-1 ring-slate-600"
               >
                 Send
@@ -599,19 +710,59 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           </div>
           <div className="flex-1 overflow-auto">
             <img
-              src={frameUrl(viewing.frames[0]!.path)}
+              src={frameUrl(shown.path)}
               alt=""
               className={oneToOne ? "max-w-none" : "h-full w-full object-contain"}
             />
           </div>
+
+          {/*
+            ⚑ Every frame in the stack is reachable (owner ruling 2026-08-16). The reviewer used
+            to show frame 0 and nothing else — so a bracket of three, or the unlit half of a torch
+            pair, existed on disk and could not be looked at. **The frame being judged may not be
+            the best one in the stack**, and judging legibility off the wrong frame is worse than
+            not judging it: it produces a confident verdict about a photograph nobody saw.
+
+            Each frame is labelled with what it IS, not its ordinal. "no torch" is the answer to
+            the question being asked; "frame 2" is not.
+          */}
+          {viewing.frames.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto px-3 pb-1">
+              {viewing.frames.map((frame, index) => (
+                <button
+                  key={frame.path}
+                  type="button"
+                  onClick={() => setFrameIndex(index)}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs ring-1 ${
+                    index === frameIndex
+                      ? "bg-slate-100 text-slate-900 ring-slate-100"
+                      : "bg-slate-900 text-slate-300 ring-slate-600"
+                  }`}
+                >
+                  {frameLabel(viewing, index)}
+                  {frame.ocr && (
+                    <span className="ml-1 font-mono opacity-70">{frame.ocr.meanConfidence.toFixed(2)}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
           <p className="p-3 text-xs text-slate-500">
             {viewing.mode} · {viewing.frames.length} frame{viewing.frames.length > 1 ? "s" : ""} ·{" "}
-            {viewing.torchUsed ? "torch on" : "no torch"}
+            {frameLabel(viewing, frameIndex)}
             {" · "}
             {/* ⚑ Printed because two JPEGs could not settle it by argument. On a portrait shot,
                 orientation 1 with a 90° request means the rotation never reached the connection. */}
-            {viewing.rotationAngle}° asked · exif {viewing.frames[0]!.exifOrientation}
-            {viewing.ocr && ` · read ${viewing.ocr.meanConfidence.toFixed(2)}`}
+            {viewing.rotationAngle}° asked · exif {shown.exifOrientation}
+            {shown.ocr && ` · read ${shown.ocr.meanConfidence.toFixed(2)}`}
+            {/* Gated on a pair AND two reads — see `glareSuspected`. Silence is the ordinary case. */}
+            {glareSuspected(viewing) && (
+              <span className="text-amber-400">
+                {" · "}the two reads disagree ({Math.round((viewing.torchPairAgreement ?? 0) * 100)}%) — the
+                torch probably erased characters
+              </span>
+            )}
           </p>
         </div>
       )}
@@ -619,11 +770,32 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   );
 }
 
-/** Off the device so a plate can be judged on a big screen, which is where legibility is settled. */
-async function shareFrame(shot: CaptureResult): Promise<void> {
-  const response = await fetch(frameUrl(shot.frames[0]!.path));
+/**
+ * What a frame IS, not where it sits in the array.
+ *
+ * "no torch" answers the question the reviewer is asking; "frame 2" answers a different one that
+ * nobody has. On a torch pair the label is the whole reason the second frame exists.
+ */
+function frameLabel(shot: CaptureResult, index: number): string {
+  const frame = shot.frames[index];
+  if (!frame) return `frame ${index + 1}`;
+  if (shot.torchPaired) return frame.torch ? "torch" : "no torch";
+  if (shot.bracketed) return ["−1 EV", "0 EV", "+1 EV"][index] ?? `frame ${index + 1}`;
+  return `frame ${index + 1}`;
+}
+
+/** Off the device so a plate can be judged on a big screen, which is where legibility is settled.
+ *  Sends the frame being LOOKED AT — sending frame 0 while the reviewer is on the unlit one would
+ *  be the same confident-verdict-about-an-unseen-photograph failure, one step further along. */
+async function shareFrame(shot: CaptureResult, index: number): Promise<void> {
+  const frame = shot.frames[index] ?? shot.frames[0];
+  if (!frame) return;
+  const response = await fetch(frameUrl(frame.path));
   const blob = await response.blob();
-  const file = new File([blob], `hs-${shot.mode}-${shot.at.replace(/[:.]/g, "-")}.jpg`, { type: "image/jpeg" });
+  const suffix = shot.frames.length > 1 ? `-${frameLabel(shot, index).replace(/\s+/g, "")}` : "";
+  const file = new File([blob], `hs-${shot.mode}-${shot.at.replace(/[:.]/g, "-")}${suffix}.jpg`, {
+    type: "image/jpeg",
+  });
   if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
     await navigator.share({ files: [file], title: "HouseSteady capture" });
   }

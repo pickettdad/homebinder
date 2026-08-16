@@ -22,6 +22,21 @@ export interface HSShellEcho {
   plugin: { version: string; buildConfiguration: string };
 }
 
+/**
+ * Thermal and battery, readable with the camera shut down.
+ *
+ * ⚑ The camera's own `modeStatus` carries the same two figures, and `stop()` invalidates its
+ * timer — so the arm of the thermal walk that runs with the camera CLOSED had no instrument at
+ * all. `level` is 0…1 and iOS reports it in 5% steps, which is a fact about the instrument and
+ * the reason a drain figure needs tens of minutes before it means anything.
+ */
+export interface HSDeviceStatus {
+  thermalState: "nominal" | "fair" | "serious" | "critical" | "unknown";
+  battery: { level: number; state: string };
+  /** The device's own clock, so a pasted reading carries its time rather than a remembered one. */
+  at: string;
+}
+
 export interface HSShellHeartbeat {
   beat: number;
   of: number;
@@ -37,6 +52,7 @@ interface NativeHSShell {
   echo(options: { sentAt: number }): Promise<HSShellEcho>;
   /** Resolves with the value `UIApplication` actually holds, not the one that was asked for. */
   setIdleTimerDisabled(options: { disabled: boolean }): Promise<{ disabled: boolean }>;
+  deviceStatus(): Promise<HSDeviceStatus>;
   /**
    * ⚑ Returns the handle SYNCHRONOUSLY, not a promise for one — proven on device 2026-08-14.
    * `@capacitor/core`'s typed wrapper returns `Promise<PluginListenerHandle>`, and the raw
@@ -124,6 +140,13 @@ export async function setNativeIdleTimerDisabled(disabled: boolean): Promise<boo
   if (!plugin || typeof plugin.setIdleTimerDisabled !== "function") return null;
   const result = await plugin.setIdleTimerDisabled({ disabled });
   return result?.disabled === true;
+}
+
+/** Thermal + battery from the shell. `null` in the browser, which has neither to report. */
+export async function readDeviceStatus(): Promise<HSDeviceStatus | null> {
+  const plugin = nativePlugin();
+  if (!plugin || typeof plugin.deviceStatus !== "function") return null;
+  return plugin.deviceStatus();
 }
 
 /**

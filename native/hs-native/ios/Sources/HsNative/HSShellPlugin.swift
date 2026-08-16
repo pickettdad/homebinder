@@ -37,7 +37,8 @@ public class HSShellPlugin: CAPPlugin, CAPBridgedPlugin {
 
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "echo", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "setIdleTimerDisabled", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "setIdleTimerDisabled", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "deviceStatus", returnType: CAPPluginReturnPromise)
     ]
 
     /// The single declaration of the plugin's version. `native/hs-native/package.json` must carry
@@ -131,6 +132,49 @@ public class HSShellPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             UIApplication.shared.isIdleTimerDisabled = disabled
             call.resolve(["disabled": UIApplication.shared.isIdleTimerDisabled])
+        }
+    }
+
+    /**
+     Thermal state and battery, **independent of whether the camera is running.**
+
+     ⚑ The thermal walk is two arms — camera open, then camera closed with the app still up —
+     and the difference between them is the number that sizes a sleep feature. But the only
+     instrument was `modeStatus`, which the camera emits, and `stop()` invalidates its timer. So
+     the second arm had **no instrumentation at all**: the one the measurement is *about* was the
+     one that could not be measured, which would have sent the owner back to reading Settings ▸
+     Battery for a figure iOS reports in 5% steps.
+
+     Deliberately a poll and not a stream. A background timer running for the whole visit to
+     serve a diagnostic would be a small permanent cost paid for an occasional reading — and it
+     would itself be load on the thing being measured.
+     */
+    @objc func deviceStatus(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            let device = UIDevice.current
+            device.isBatteryMonitoringEnabled = true
+            let thermal: String
+            switch ProcessInfo.processInfo.thermalState {
+            case .nominal: thermal = "nominal"
+            case .fair: thermal = "fair"
+            case .serious: thermal = "serious"
+            case .critical: thermal = "critical"
+            @unknown default: thermal = "unknown"
+            }
+            let state: String
+            switch device.batteryState {
+            case .charging: state = "charging"
+            case .full: state = "full"
+            case .unplugged: state = "unplugged"
+            default: state = "unknown"
+            }
+            call.resolve([
+                "thermalState": thermal,
+                "battery": ["level": Double(device.batteryLevel), "state": state],
+                // The device's own clock, so a reading pasted into a report carries its time
+                // rather than the time somebody remembers taking it.
+                "at": Self.iso8601.string(from: Date())
+            ])
         }
     }
 

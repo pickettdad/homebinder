@@ -136,6 +136,14 @@ export interface ModeStatusEvent {
    *  this the panel shows a torch that is off while the light score says it should be on, and the
    *  two lines read as a contradiction rather than as a decision. */
   companionVetoActive: boolean;
+  /** ⚑ What `lightScore` is made of. `isoLoad` measures ISO against *this format's ceiling*, so a
+   *  sensor with a very high maximum reads a genuinely dim room as only mildly dark — which is the
+   *  candidate explanation for a torch that will not arm in a mechanical room. Reported so the
+   *  threshold can be judged against numbers rather than argued about. */
+  iso: number;
+  isoMax: number;
+  isoMin: number;
+  exposureMs: number;
   /** The glass actually in the session. */
   lens: CameraLens;
   /** ⚑ This mode refuses the choice — Text does, because a 120° lens bends straight lines near the

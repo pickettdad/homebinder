@@ -23,6 +23,7 @@ import { useApp } from "../store/sessionStore";
 import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
 import type { MediaRef } from "../engine/v2/fold";
+import { db } from "../storage/db";
 import type { FrameReadMeta, FrameRoleMeta } from "../engine/schema/events";
 import type { CaptureIntent } from "../engine/v2/events";
 import {
@@ -79,9 +80,23 @@ const MODE_BUTTONS: { mode: CameraMode; glyph: string; hint: string }[] = [
 ];
 
 /** Actions are drawn as a separate row: a mode stays until changed, an action starts a thing. */
+/*
+ ⚑ **Run trace is gone from here, by owner ruling (2026-08-17), and removal is the fix rather than
+ a rename.**
+
+ *A run trace is continuous by definition, and a single photograph of a pipe is an object shot
+ wearing a misleading label.* This button took one still and called it a trace — so the record
+ would have carried a declared capture kind whose defining property the artifact did not have,
+ which is worse than not declaring it at all: the desk would trust the label.
+
+ The video control on the zone screen stands, marked superseded-in-principle rather than retired.
+ It exists because nothing could read a sequence of photographs; the traverse can now read frames
+ in order with overlap recorded, which is what the video stood in for. But **the traverse cannot
+ yet trace a run end to end**, so the thing that can do the job today keeps doing it. It goes when
+ the traverse can — after scale-aware registration, not before.
+*/
 const ACTIONS: { id: string; glyph: string; hint: string; mode: CameraMode }[] = [
   { id: "room-shot", glyph: "⬛", hint: "Room shot", mode: "object" },
-  { id: "run-trace", glyph: "〰", hint: "Run trace", mode: "object" },
 ];
 
 const FRAME_COLOUR: Record<FrameState, string> = {
@@ -727,6 +742,17 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     }
   };
 
+  /** A filed frame off the device as its own file. Sending a screenshot of it loses the pixels
+   *  that any measurement has to be made on. */
+  const shareStoredFrame = async (frame: MediaRef) => {
+    const row = await db.media.get(frame.mediaId);
+    if (!row) return;
+    const file = new File([row.blob], `hs-frame-${frame.mediaId}.jpg`, { type: frame.mime });
+    if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "HouseSteady frame" });
+    }
+  };
+
   /** Off the device, because the whole question is whether a human can hear the click. */
   const shareAudioClip = async () => {
     if (!audioClip) return;
@@ -1217,6 +1243,16 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 {storedFrameLabel(shownFrame, storedIndex)} · {storedIndex + 1} of {frames.length}
               </span>
               <div className="flex shrink-0 gap-2">
+                {/* ⚑ Screenshots are not the frames. A harness built on re-rendered, re-cropped
+                    screenshots disagreed with the device on a pair whose value was known, so the
+                    scale question cannot be settled from them — it needs the file. */}
+                <button
+                  type="button"
+                  onClick={() => void shareStoredFrame(shownFrame)}
+                  className="rounded-lg bg-slate-900/70 px-3 py-2 text-sm text-slate-300 ring-1 ring-slate-600"
+                >
+                  send
+                </button>
                 <button
                   type="button"
                   onClick={() => setStoredActual((v) => !v)}
@@ -1361,10 +1397,10 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                     // which is the exact job the wide lens does — so opening that door should not
                     // also require remembering to change lens. Still a default: the control stays
                     // live and the concierge can go back to normal.
-                    await applyIntentLens(action.id === "room-shot" ? "room-shot" : "run-trace");
+                    await applyIntentLens("room-shot");
                     // The door declares what the next capture IS. Without this the kind never
                     // reached the record and `captureTargetFor`'s run-trace rule never fired.
-                    setPendingIntent(action.id === "room-shot" ? "room-shot" : "run-trace");
+                    setPendingIntent("room-shot");
                   })();
                   showToast(`${action.hint} — framed wide, one per zone`);
                 }}

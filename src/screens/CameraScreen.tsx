@@ -690,15 +690,23 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    *  actually settles the question, and it is small enough to send from a mechanical room. */
   const shareTraverseData = async () => {
     if (!traverseResult) return;
+    /*
+      ⚑ **Spread, never re-enumerated — and that is a structural fix, not a tidy-up.**
+
+      This object used to list its fields by hand, and it silently dropped `registration` the round
+      it was added: the stamp was computed in Swift, carried in the result, and thrown away by the
+      one thing that carries results off the device. **Sixth instance of rule 43, in the field added
+      specifically to make records comparable across mechanisms.**
+
+      An enumerated copy is the mechanism by which that keeps happening here — every future field
+      has to be remembered in a second place, and nothing fails when it is not. Spreading cannot
+      forget.
+    */
     const payload = {
-      startedAt: traverseResult.startedAt,
-      endedAt: traverseResult.endedAt,
-      frames: traverseResult.frames.length,
-      torchLatched: traverseResult.torchLatched,
-      unmet: traverseResult.unmet,
+      ...traverseResult,
+      frameCount: traverseResult.frames.length,
       lens: statusRef.current?.lens ?? null,
       diagnosis: traverseDiagnosis(traverseResult),
-      pairs: traverseResult.pairs,
     };
     const file = new File([JSON.stringify(payload, null, 2)], `hs-traverse-${traverseResult.startedAt.replace(/[:.]/g, "-")}.json`, {
       type: "application/json",

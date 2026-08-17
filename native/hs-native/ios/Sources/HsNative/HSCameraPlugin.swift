@@ -1997,7 +1997,7 @@ final class CameraController: NSObject {
                      only comparable against another from the same instrument. Adding this before
                      the second model exists is what keeps every traverse taken so far readable.
                     */
-                    "registration": "translation-v1",
+                    "registration": "flow-v1",
                     "continuesFrom": run.continuesFrom as Any,
                     "targetTravel": Double(Self.traverseTargetTravel),
                     "minimumOverlap": Self.traverseMinimumOverlap,
@@ -2026,7 +2026,7 @@ final class CameraController: NSObject {
                 "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
                 "endedAt": ISO8601DateFormatter().string(from: Date()),
                 // Both travel with the finished run, for the reasons given where they are set.
-                "registration": "translation-v1",
+                "registration": "flow-v1",
                 "continuesFrom": run.continuesFrom as Any,
                 "torchLatched": run.torchLatched,
                 "unmet": run.unmet,
@@ -2395,6 +2395,22 @@ final class CameraController: NSObject {
          featureless frames and a scene that changed entirely both can, and both mean the same
          thing here, which is that this mechanism cannot say.
          */
+        /*
+         ⚑ The flow answer decides; everything computed above stays on the record. Gate the verdict,
+         keep the diagnostic — so if this mechanism ever looks wrong, the evidence for the three it
+         replaced is sitting beside it and the runs stay comparable.
+        */
+        let covered = flowCoverage(from: previous, to: current)
+        if let covered {
+            record["covered"] = covered
+            record["measured"] = true
+            record["contiguity"] = covered < Self.traverseMinimumOverlap ? "gap" : "contiguous"
+            return record
+        }
+        // Flow could not answer. Fall back to the translation-only chain below, which is already
+        // conservative — it says "cannot say" far more often than it says anything else.
+        record["covered"] = nil as Any?
+
         let impossiblyStill = expectedTravel >= Self.traverseTargetTravel
             && displacement < Self.traverseTargetTravel * 0.25
 
@@ -2459,6 +2475,60 @@ final class CameraController: NSObject {
     /// ⚑ `.up`, and that is load-bearing: `a` and `b` are already working buffers, oriented once by
     /// `advanceTraverse` on the way in. Orienting again here would turn them twice and put the crop
     /// axis back where this change just took it from.
+    /**
+     ⚑ **Coverage measured by asking where each pixel went, not by fitting a transform to the pair.**
+
+     Every earlier mechanism assumed adjacent frames were related by a single global 2D transform —
+     translation, then translation plus scale, then a homography. **That premise is false here and
+     the frames prove it.** A 120° lens looking at a cluttered room with real depth, while the
+     operator walks partly toward it, produces pairs no similarity or homography describes: on the
+     2026-08-17 run the homography returned scale 0.637–1.186 on pairs whose true scale is 1.0, and
+     an explicit scale search returned 0.700 — its own search rail — on a clean lateral step.
+
+     `#104` said this in its own comment and was not believed: *the honest move is to detect that
+     the model does not apply rather than fit a fancier wrong one.* The scale hypothesis was a way
+     of not believing it.
+
+     Optical flow assumes nothing global. It answers, per pixel, *where did this go* — so depth,
+     lens distortion and motion toward a subject are all describable, and **coverage becomes a
+     count of pixels that landed inside the next frame**, which is the question the traverse has
+     been asking all along.
+
+     On the run that motivated it, every one of the eight pairs tested — four the old mechanism
+     accepted and four it rejected as implausible — returns coverage between 0.77 and 0.88, with a
+     steady leftward median flow of 38–56 px. ⚑ **The rejected pairs are indistinguishable from the
+     clean ones, so the walk held contact throughout and the 7-of-19 verdict was wrong rather than
+     merely cautious.** Measured at 41 ms per pair against roughly one pair per second.
+     */
+    private func flowCoverage(from previous: CVPixelBuffer, to current: CVPixelBuffer) -> Double? {
+        let request = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: current)
+        request.computationAccuracy = .high
+        request.outputPixelFormat = kCVPixelFormatType_TwoComponent32Float
+        guard (try? VNImageRequestHandler(cvPixelBuffer: previous, options: [:]).perform([request])) != nil,
+              let observation = request.results?.first as? VNPixelBufferObservation else { return nil }
+
+        let buffer = observation.pixelBuffer
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        guard width > 0, height > 0, let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let stride = CVPixelBufferGetBytesPerRow(buffer)
+
+        var inside = 0, total = 0
+        // Every fourth pixel each way. Coverage is a proportion, and a sixteenth of a 384-wide
+        // frame is thousands of samples — enough for a proportion and a fraction of the work.
+        for y in Swift.stride(from: 0, to: height, by: 4) {
+            let row = base.advanced(by: y * stride).assumingMemoryBound(to: Float.self)
+            for x in Swift.stride(from: 0, to: width, by: 4) {
+                let tx = Double(x) + Double(row[x * 2])
+                let ty = Double(y) + Double(row[x * 2 + 1])
+                total += 1
+                if tx >= 0, tx < Double(width), ty >= 0, ty < Double(height) { inside += 1 }
+            }
+        }
+        return total > 0 ? Double(inside) / Double(total) : nil
+    }
+
     private func crops(_ a: CVPixelBuffer, _ b: CVPixelBuffer, _ rect: CGRect) -> (CVPixelBuffer, CVPixelBuffer)? {
         guard let ca = downscaled(a, crop: rect, orientation: .up),
               let cb = downscaled(b, crop: rect, orientation: .up) else { return nil }

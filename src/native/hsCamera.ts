@@ -214,6 +214,12 @@ export interface TraversePair {
    *  so a run can under-count by exactly the amount it could not see. The other half of the corner
    *  discriminator — `maxStep` only sees the steps that succeeded. */
   droppedSteps?: number;
+  /** ⚑ The share of the frame that landed inside its neighbour, measured by optical flow — the
+   *  verdict since `flow-v1`. Every earlier mechanism fitted a global 2D transform to the pair and
+   *  the frames refute that premise: a 120° lens, a room with depth and a walk partly toward it
+   *  produce pairs no similarity or homography describes. Flow assumes nothing global and answers
+   *  the question actually being asked, which is how much of this was already seen. */
+  covered?: number;
   /** ⚑ Vision's homography scale between the pair, RECORDED AND NOT ACTED ON. The powder room
    *  settled that motion toward a subject is the traverse's problem rather than the corner's, so a
    *  registration carrying scale is the known fix — this is the evidence needed to build it without

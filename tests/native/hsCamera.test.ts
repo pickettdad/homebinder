@@ -186,19 +186,29 @@ describe("what a traverse's own numbers say about why it could not describe itse
     expect(empty.measured).toBe(0);
   });
 
-  it("counts the three different kinds of cannot-say apart", () => {
-    // They collapsed into one word before, and the counts could not tell them apart — so a run
-    // failing because registration never locked on looked identical to one failing on parallax.
-    const pairs: TraversePair[] = [
-      { from: 0, to: 1, measured: false, contiguity: "unverified", reason: "unregistered" },
-      { from: 1, to: 2, measured: true, contiguity: "unverified", reason: "impossiblyStill" },
-      measured(0.09, 0.01, 2),
-    ];
-    expect(traverseDiagnosis({ pairs }).reasons).toEqual({
-      unregistered: 1,
-      impossiblyStill: 1,
-      disparity: 1,
-    });
+  it("counts every kind of cannot-say apart from every other", () => {
+    /*
+     ⚑ Asserted as the RULE, not as a list of the kinds that happen to exist today.
+
+     The first cut compared the whole `reasons` object with `toEqual` against three names — an
+     inventory — and adding two legitimate kinds broke it, which is the exact failure the standing
+     rule names: *a test that enumerates what currently exists fires on every legitimate addition.*
+     Written here as "each pair is counted under its own reason and under no other", which held at
+     three kinds and holds at five.
+    */
+    const kinds = ["unregistered", "impossiblyStill", "implausibleShift", "crossCheck"] as const;
+    const pairs: TraversePair[] = kinds.map((reason, i) => ({
+      from: i,
+      to: i + 1,
+      measured: false,
+      contiguity: "unverified" as const,
+      reason,
+    }));
+    const { reasons } = traverseDiagnosis({ pairs });
+
+    for (const kind of kinds) expect(reasons[kind]).toBe(1);
+    // And nothing is double-counted: the tally accounts for every pair exactly once.
+    expect(Object.values(reasons).reduce((a, b) => a + b, 0)).toBe(pairs.length);
   });
 });
 

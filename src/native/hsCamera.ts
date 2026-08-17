@@ -203,10 +203,16 @@ export interface TraversePair {
   /** How differently the frame's left and right halves moved — the parallax measure. */
   disparity?: number;
   contiguity: "contiguous" | "gap" | "unverified";
-  /** ⚑ WHICH kind of "cannot say". Three different things used to collapse into one word, and the
-   *  counts could not tell them apart: registration failed outright, the accumulator and the pair
-   *  contradicted each other, or the two half-frames disagreed. */
-  reason?: "unregistered" | "impossiblyStill" | "disparity";
+  /** ⚑ WHICH kind of "cannot say" — one word used to cover all of these, and the counts could not
+   *  tell them apart. `implausibleShift`: the whole-frame registration returned a displacement the
+   *  trigger says is impossible. `crossCheck`: the accumulator's path and the pair's displacement
+   *  disagree. `impossiblyStill`: travelled a full target and the pair claims nothing moved.
+   *  `unregistered`: Vision could not align the pair at all. `disparity` is retired — the
+   *  half-split no longer decides anything (see `measureOverlap`). */
+  reason?: "unregistered" | "impossiblyStill" | "disparity" | "implausibleShift" | "crossCheck";
+  /** ⚑ The trust check that now decides: how far the accumulator's path length sits from the
+   *  pair's own displacement. Two independent measurements of one travel, both whole-frame. */
+  crossCheck?: number;
   /** ⚑ The two components apart, because they are not the same quantity: `x` is a fraction of
    *  frame WIDTH, `y` a fraction of frame HEIGHT. If the failure is nearly all `y`, the tolerance
    *  is being spent on vertical registration noise between two half-frames. */
@@ -244,7 +250,13 @@ export interface TraverseDiagnosis {
   medianDisparity: number | null;
   medianDisparityX: number | null;
   medianDisparityY: number | null;
-  reasons: { unregistered: number; impossiblyStill: number; disparity: number };
+  reasons: {
+    unregistered: number;
+    impossiblyStill: number;
+    disparity: number;
+    implausibleShift: number;
+    crossCheck: number;
+  };
   /** Which axis is spending the tolerance — `null` when neither dominates. */
   dominant: "vertical" | "horizontal" | null;
 }
@@ -285,6 +297,8 @@ export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): Traver
       unregistered: pairs.filter((p) => p.reason === "unregistered").length,
       impossiblyStill: pairs.filter((p) => p.reason === "impossiblyStill").length,
       disparity: pairs.filter((p) => p.reason === "disparity").length,
+      implausibleShift: pairs.filter((p) => p.reason === "implausibleShift").length,
+      crossCheck: pairs.filter((p) => p.reason === "crossCheck").length,
     },
     dominant,
   };

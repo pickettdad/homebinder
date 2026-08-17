@@ -818,7 +818,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               {status.motionLive ? (
                 <>
                   <span className="font-mono text-slate-100">{text.motion.toFixed(4)}</span>
-                  <span className="text-slate-500"> (still under {text.stillThreshold})</span>
+                  {/* Fixed to four places: the gate is computed now, not a constant, and printing
+                      a raw float spilled 0.01353200318753853 across two lines in the field. */}
+                  <span className="text-slate-500"> (still under {text.stillThreshold.toFixed(4)})</span>
                   {text.still && <span className="text-emerald-400"> steady</span>}
                 </>
               ) : (
@@ -963,7 +965,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 disparity med · <span className="font-mono text-slate-100">{diagnosis.medianDisparity?.toFixed(4)}</span>
                 {" "}(x {diagnosis.medianDisparityX?.toFixed(4)} · y {diagnosis.medianDisparityY?.toFixed(4)})
                 <br />
-                cannot-say · {diagnosis.reasons.disparity} halves disagree ·{" "}
+                cannot-say · {diagnosis.reasons.crossCheck} cross-check · {diagnosis.reasons.implausibleShift} implausible ·{" "}
                 {diagnosis.reasons.impossiblyStill} impossibly still · {diagnosis.reasons.unregistered} unregistered
                 {diagnosis.dominant && (
                   <>
@@ -1147,11 +1149,16 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 complaint if the confirmation never arrives. **Nothing here claims the torch is on
                 until the camera says so** — it only stops pretending nothing happened.
               */
+              /* ⚑ Pending is tested FIRST, and that ordering is the whole fix. Testing `torchOn`
+                 first made the dim state reachable only on the way *on*: switching off left the
+                 button solid amber until confirmation arrived, which is the same lag the owner
+                 reported, surviving in one direction (2026-08-17). A pending state that only shows
+                 for one of the two transitions is not a third state, it is a decoration. */
               className={`h-14 w-14 rounded-full text-lg ring-1 transition-colors ${
-                status?.torchOn
-                  ? "bg-amber-400 text-slate-900 ring-amber-300"
-                  : torchPending
-                    ? "bg-amber-400/40 text-amber-100 ring-amber-400/60"
+                torchPending
+                  ? "bg-amber-400/40 text-amber-100 ring-amber-400/60"
+                  : status?.torchOn
+                    ? "bg-amber-400 text-slate-900 ring-amber-300"
                     : "bg-slate-900/70 text-slate-200 ring-slate-600"
               }`}
             >

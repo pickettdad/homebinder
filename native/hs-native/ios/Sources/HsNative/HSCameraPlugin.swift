@@ -1888,6 +1888,16 @@ final class CameraController: NSObject {
     /// pair exists because one target's worth of travel accumulated, so several times that is not
     /// a fast operator, it is a bad number. See `measureOverlap`.
     private static let traversePlausibleShiftFactor: CGFloat = 2.5
+    /**
+     How far the accumulator's path length and the pair's own displacement may disagree before the
+     pair is `unverified`.
+
+     A quarter of the target travel, read off the trigger rather than fitted — two measurements of
+     one displacement that differ by more than a quarter of it are not measuring the same thing. On
+     the 2026-08-17 runs the survivors sit at a median of 0.0055 and 0.0154, an order of magnitude
+     inside this, so it is a bound on nonsense and not a knob on the verdict.
+     */
+    private static let traverseCrossCheckTolerance: CGFloat = 0.05
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
@@ -2191,12 +2201,41 @@ final class CameraController: NSObject {
             return record
         }
 
-        if worstHalf > Self.traverseHalfSanityBound {
-            record["measured"] = false
-            record["contiguity"] = "unverified"
-            record["reason"] = "unregistered"
-            return record
-        }
+        /*
+         ⚑ **The half-split no longer decides anything. It is recorded and it is not consulted.**
+
+         It was the trust check from the start: split the frame, register each side, and treat a
+         disagreement as parallax the translation model cannot describe. The reasoning was sound
+         and the measurement is not — **a half-frame has half the texture**, and in a real
+         mechanical room that is below what translational registration needs.
+
+         The 2026-08-17 runs settle it. Of the pairs surviving the plausibility gate above, the
+         half-check passes **3 of 17** on normal and **3 of 9** on wide — while those same pairs
+         carry a median overlap of **0.78** and their two independent displacement measurements
+         agree to a median of **0.0055** and **0.0154**. *The half-split was rejecting pairs that
+         two whole-frame measurements agree are fine, four times out of five.*
+
+         So the trust check moves to the one the design session named and the data now supports on
+         both lenses: **the accumulator's path length against the pair's own displacement.** Two
+         genuinely independent measurements of the same travel — one a running sum at 15 Hz, the
+         other a single keyframe-to-keyframe registration — both reading the **whole** frame, so
+         neither inherits the problem that broke the halves.
+
+         ⚑ **Ordering mattered and nearly went wrong.** Adopting this before the plausibility gate
+         would have been adopting a check built from the same broken registration that gate now
+         removes: on the wide runs the two numbers disagreed by 0.33 and 0.46 precisely because
+         both were corrupt. Registration first, then the check. That objection is now spent.
+
+         The bound is read off the trigger, like the gate above: a pair exists because one target's
+         worth of travel accumulated, so two measurements of that travel disagreeing by more than a
+         quarter of it are not measuring the same thing.
+
+         `disparity`, `disparityX`, `disparityY` and `halfVsWhole` are all still computed and still
+         written to the record — gate the verdict, keep the diagnostic, so that if this check ever
+         looks wrong the evidence for the previous one is sitting beside it.
+         */
+        let crossCheck = abs(displacement - expectedTravel)
+        record["crossCheck"] = Double(crossCheck)
 
         /*
          ⚑ **The false NEGATIVE, which is the one nobody looks for.**
@@ -2223,12 +2262,12 @@ final class CameraController: NSObject {
         if impossiblyStill {
             contiguity = "unverified"
             reason = "impossiblyStill"
-        } else if Double(disparity) > Self.traverseDisparityTolerance {
-            // ⚑ Not a gap. The model does not describe this pair, so this mechanism has nothing
-            // to say about whether contact was kept — and saying "gap" here is the false alarm
-            // that sends somebody back to a room they already covered.
+        } else if crossCheck > Self.traverseCrossCheckTolerance {
+            // ⚑ Not a gap. The two measurements do not agree, so this mechanism has nothing to say
+            // about whether contact was kept — and saying "gap" here is the false alarm that sends
+            // somebody back to a room they already covered.
             contiguity = "unverified"
-            reason = "disparity"
+            reason = "crossCheck"
         } else if Double(overlap) < Self.traverseMinimumOverlap {
             contiguity = "gap"
         } else {

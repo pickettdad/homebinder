@@ -357,6 +357,14 @@ export interface TraverseFrame {
 
 export interface TraverseStarted {
   startedAt: string;
+  /** ⚑ Which registration model produced every number in this run. `overlap`, `displacement`,
+   *  `crossCheck` and the plausibility gate are all defined against the translation-only model —
+   *  a reader with no way to tell which model produced a number cannot compare two runs. Same
+   *  reasoning as `engine` on an OCR read. */
+  registration: string;
+  /** The leg this run declares itself a continuation of. ⚑ A statement about the concierge's
+   *  hands, never about coverage — *I chose to stop here*, not *nothing was missed*. */
+  continuesFrom?: string | null;
   targetTravel: number;
   minimumOverlap: number;
   disparityTolerance: number;
@@ -366,6 +374,8 @@ export interface TraverseStarted {
 }
 
 export interface TraverseResult {
+  registration: string;
+  continuesFrom?: string | null;
   frames: TraverseFrame[];
   pairs: TraversePair[];
   startedAt: string;
@@ -440,7 +450,7 @@ interface NativeCamera {
     torchOverride?: boolean;
   }): Promise<void>;
   capture(): Promise<CaptureResult>;
-  startTraverse(): Promise<TraverseStarted>;
+  startTraverse(options: { continuesFrom?: string }): Promise<TraverseStarted>;
   stopTraverse(): Promise<TraverseResult>;
   stop(): Promise<void>;
   addListener(
@@ -551,7 +561,23 @@ export const adjustCamera = (options: {
  * contact** — rotate, walk, turn a corner — and the only question per adjacent pair is whether
  * the two frames share content.
  */
-export const startTraverse = () => requireCamera().startTraverse();
+/**
+ * Start a traverse, optionally declaring it the continuation of a leg just ended.
+ *
+ * ⚑ **A declared break is a recorded act, and that is why it does not weaken *never break
+ * contact*.** The rule's failure mode was an invisible one — a concierge who stopped and started
+ * again left nothing behind saying so, and the desk read two runs it could not relate. Declaring
+ * the break makes the discontinuity **observable**, which is strictly more honest than a rule
+ * quietly violated.
+ *
+ * ⚑ And explicitly NOT the corner fix. The corner is motion toward a subject and it occurs in any
+ * tight space — the powder-room walk scores the same as the corner with no corner in it. If pause
+ * became the answer to that, a concierge would pause constantly and the one continuous act would
+ * dissolve into a series of stills. This is for the breaks that are genuinely necessary: a doorway,
+ * an obstacle, a person in the way.
+ */
+export const startTraverse = (continuesFrom?: string) =>
+  requireCamera().startTraverse(continuesFrom ? { continuesFrom } : {});
 export const stopTraverse = () => requireCamera().stopTraverse();
 
 function subscribe<T>(event: CameraEvent, handler: (data: T) => void): () => void {

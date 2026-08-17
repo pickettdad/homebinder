@@ -78,6 +78,14 @@ export interface FrameRoleMeta {
   /** Exposure bias in stops, on a bracketed frame. */
   ev?: number;
   lens?: string;
+  /** ⚑ Which registration model produced this run's measurements. Stamped while there is only one,
+   *  because two kinds of record that look identical cannot be compared — the same reasoning
+   *  `FrameReadMeta.engine` carries for a reader. */
+  registration?: string;
+  /** The leg this one declares itself a continuation of. ⚑ A statement about the concierge's own
+   *  hands — *I chose to stop here* — and never a claim that nothing was missed across the break.
+   *  That claim is the desk's, and this field deliberately does not make it. */
+  continuesFrom?: string;
 }
 
 export interface CaptureMediaMeta {

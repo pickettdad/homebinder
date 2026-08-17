@@ -1120,6 +1120,26 @@ final class CameraController: NSObject {
             // Why the torch is off when the light score says it should be on. Without this the
             // companion veto is an invisible hand and the panel reads as a contradiction.
             "companionVetoActive": companionVetoUntil.map { Date() < $0 } ?? false,
+            /*
+             ⚑ **What the light score is actually made of**, because the score alone cannot say
+             whether the arm threshold is wrong or the room is simply not that dark.
+
+             The owner walked into a dark room on 2026-08-17 with auto-capture on and the torch
+             never fired; his mechanical room reads 0.25–0.50 against an arm threshold of 0.62.
+             `lightScore` is `0.7 · isoLoad + 0.3 · shutterLoad`, and `isoLoad` is ISO measured
+             against **this format's ceiling** — so a sensor with a very high maximum reads a dim
+             room as only mildly dark, and the score can sit near the middle of its range in a room
+             nobody could read a plate in.
+
+             That is a claim about numbers nobody has looked at. These are those numbers. ⚑ It
+             deliberately does NOT move the threshold: 0.62 was set before this session and how it
+             was calibrated is not recorded anywhere, so changing it now would be replacing one
+             unexplained constant with another.
+            */
+            "iso": Double(device?.iso ?? 0),
+            "isoMax": Double(device?.activeFormat.maxISO ?? 0),
+            "isoMin": Double(device?.activeFormat.minISO ?? 0),
+            "exposureMs": device.map { CMTimeGetSeconds($0.exposureDuration) * 1000 } ?? 0,
             // The glass in use, what this mode defaults to, and whether the concierge may change
             // it. All three, because "wide is off" and "wide is not allowed here" are different
             // sentences and a single boolean would say neither.
@@ -2047,6 +2067,7 @@ final class CameraController: NSObject {
         // whole frame. Heights are unchanged by the crop, so y needs no conversion.
         let disparity = hypot((leftShift.x - rightShift.x) * 0.5, leftShift.y - rightShift.y)
         let overlap = max(0, 1 - abs(full.x)) * max(0, 1 - abs(full.y))
+        let displacement = hypot(full.x, full.y)
 
         /*
          ⚑ **A half that did not register is not a half that disagreed**, and the first cut could
@@ -2070,16 +2091,35 @@ final class CameraController: NSObject {
         let leftVsWhole = hypot(leftShift.x * 0.5 - full.x, leftShift.y - full.y)
         let rightVsWhole = hypot(rightShift.x * 0.5 - full.x, rightShift.y - full.y)
         let worstHalf = max(leftVsWhole, rightVsWhole)
+
+        /*
+         ⚑ **Every pair carries the whole-frame numbers, whichever way it exits.**
+
+         The first cut returned here with only `dx`, `dy` and `halfVsWhole`, and that blinded the
+         one question the run was taken to answer. On 2026-08-17 the halves failed on 20 of 30
+         pairs — and on the 10 that survived, the accumulator's path length and the pair's own
+         displacement agreed to a median of **0.0027**, two independent measurements of the same
+         travel landing within a quarter of one percent of frame width.
+
+         That is a **better trust check than the half-split and it is already computed**: it reads
+         the whole frame on both sides, so it does not inherit the half-texture problem that is
+         failing two thirds of the pairs. But it could not be tested on the failing pairs, because
+         this early return dropped exactly those two numbers. *An instrument that stops recording
+         at the moment the interesting thing happens is not an instrument.*
+        */
+        record["expectedTravel"] = Double(expectedTravel)
+        record["displacement"] = Double(displacement)
+        record["halfVsWhole"] = Double(worstHalf)
+        record["dx"] = Double(full.x)
+        record["dy"] = Double(full.y)
+        record["overlap"] = Double(overlap)
+
         if worstHalf > Self.traverseHalfSanityBound {
             record["measured"] = false
             record["contiguity"] = "unverified"
             record["reason"] = "unregistered"
-            record["halfVsWhole"] = Double(worstHalf)
-            record["dx"] = Double(full.x)
-            record["dy"] = Double(full.y)
             return record
         }
-        record["halfVsWhole"] = Double(worstHalf)
 
         /*
          ⚑ **The false NEGATIVE, which is the one nobody looks for.**
@@ -2098,7 +2138,6 @@ final class CameraController: NSObject {
          featureless frames and a scene that changed entirely both can, and both mean the same
          thing here, which is that this mechanism cannot say.
          */
-        let displacement = hypot(full.x, full.y)
         let impossiblyStill = expectedTravel >= Self.traverseTargetTravel
             && displacement < Self.traverseTargetTravel * 0.25
 
@@ -2119,15 +2158,10 @@ final class CameraController: NSObject {
             contiguity = "contiguous"
         }
 
+        // dx, dy, overlap, expectedTravel and displacement are already on the record — written
+        // above so that a pair which exits early still carries them.
         record["measured"] = true
-        record["dx"] = Double(full.x)
-        record["dy"] = Double(full.y)
-        record["overlap"] = Double(overlap)
         record["disparity"] = Double(disparity)
-        // Both numbers, printed. If the tolerances turn out wrong in a real mechanical room they
-        // are wrong as data somebody can read, not as a mechanism that behaves oddly.
-        record["expectedTravel"] = Double(expectedTravel)
-        record["displacement"] = Double(displacement)
         record["contiguity"] = contiguity
         if let reason { record["reason"] = reason }
 

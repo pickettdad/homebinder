@@ -281,8 +281,11 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const statusRef = useRef<ModeStatusEvent | null>(null);
   statusRef.current = status;
   const [openCapture, setOpenCapture] = useState<MediaRef | null>(null);
-  /** When the read first went steady-and-readable, so the wait can be told from the capture. */
-  const steadySince = useRef<number | null>(null);
+  /** mediaId → the capture it came from, for this session only. See `shoot`. */
+  const sessionFrames = useRef<Map<string, CaptureResult>>(new Map());
+  /** When characters worth shooting first appeared — the start of the wait the concierge feels,
+   *  which begins well before the camera calls the iPad still. */
+  const readableSince = useRef<number | null>(null);
   const [timing, setTiming] = useState<{ waitedMs: number; captureMs: number } | null>(null);
   const [audioProbe, setAudioProbe] = useState<AudioProbeStarted | null>(null);
   const [audioClip, setAudioClip] = useState<AudioProbeResult | null>(null);
@@ -358,7 +361,27 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       const frame = result.frames[0];
       if (currentZone && frame) {
         const blob = await frameBlob(frame);
-        await capturePhotoV2(captureTargetFor(openRef.current, currentZone, undefined), blob, "image/jpeg");
+        const mediaId = await capturePhotoV2(
+          captureTargetFor(openRef.current, currentZone, undefined), blob, "image/jpeg",
+        );
+        /*
+          ⚑ **The link back from the filed capture to the frames it came from**, and it exists to
+          undo a regression this session caused.
+
+          Field 4g moved the bottom strip to the filed record and argued the 1:1 reviewer could
+          stay in the harness, "which is where a plate gets judged and always has been". **The
+          field refuted that within a day**: the owner shoots plates inside a real zone, and there
+          he was left with one thumbnail he could not open past, no exposure stack and no 1:1.
+
+          *The camera's whole acceptance test is a person judging a plate at 100%* — so removing
+          that from the one place a bad capture can still be retaken for free took the test out of
+          the room it exists for.
+
+          One map, this session only. Nothing is persisted, because the other frames are not
+          persisted either (see the viewer): this restores review of what is still in hand, and
+          claims nothing about captures from an earlier visit.
+        */
+        sessionFrames.current.set(mediaId, result);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -460,14 +483,27 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         Measured before anything is changed, because the owner's two sentences have two different
         fixes and the numbers say which he is feeling.
       */
-      const ready = event.stable && worthShooting;
-      if (ready && steadySince.current === null) steadySince.current = Date.now();
-      if (!ready) steadySince.current = null;
+      /*
+        ⚑ **The first cut timed the wrong interval, which is why it read `waited 0.0s`.**
 
-      if (autoRef.current && ready && Date.now() - lastAuto.current > 4000) {
-        const waited = steadySince.current === null ? 0 : Date.now() - steadySince.current;
+        It started the clock when `stable` arrived — but `stable` is *already* steady-and-readable,
+        so the shutter fires in the same event and the answer is always zero. The wait the
+        concierge actually feels begins when they have the plate framed and readable and are
+        holding still **waiting for the gate to open**, which is entirely before `stable`.
+
+        So the clock starts at "characters are present and worth shooting", whether or not the
+        camera has decided the iPad is still. That interval contains the thing under suspicion —
+        the 0.008 threshold and the six-frame window it is measured over — and the old one
+        contained none of it.
+      */
+      const worthHolding = worthShooting;
+      if (worthHolding && readableSince.current === null) readableSince.current = Date.now();
+      if (!worthHolding) readableSince.current = null;
+
+      if (autoRef.current && event.stable && worthShooting && Date.now() - lastAuto.current > 4000) {
+        const waited = readableSince.current === null ? 0 : Date.now() - readableSince.current;
         lastAuto.current = Date.now();
-        steadySince.current = null;
+        readableSince.current = null;
         const began = Date.now();
         void shoot().then(() => setTiming({ waitedMs: waited, captureMs: Date.now() - began }));
       }
@@ -722,6 +758,14 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               <span className="text-emerald-400"> · unlit frame read fine, torch held off</span>
             )}
           </p>
+          {/* Where that score came from. A room too dark to read a plate in should show ISO near
+              the ceiling; if it does not, the ceiling is what makes the score look mild and the
+              arm threshold is being asked the wrong question. */}
+          <p className="text-slate-500">
+            iso <span className="font-mono text-slate-300">{Math.round(status.iso)}</span>/
+            <span className="font-mono text-slate-300">{Math.round(status.isoMax)}</span> ·{" "}
+            <span className="font-mono text-slate-300">{status.exposureMs.toFixed(1)}</span>ms
+          </p>
           {/* Both angles, because the field bug was two rotation tables disagreeing. If these
               two and a frame's exifOrientation ever tell different stories, that IS the finding. */}
           <p>
@@ -762,11 +806,12 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             </p>
           )}
           <p>session · <span className="font-mono text-slate-100">{status.sessionRunning ? "running" : "stopped"}</span></p>
-          {/* The two halves of "it takes a while", apart. `waited` is the threshold's to answer;
-              `capture` is the reordered pair's and says nothing about steadiness. */}
+          {/* The two halves of "it takes a while", apart. `waited` runs from characters-on-screen
+              to shutter — the threshold's to answer; `capture` is the reordered pair's and says
+              nothing about steadiness. */}
           {timing && (
             <p>
-              last auto · waited <span className="font-mono text-slate-100">{(timing.waitedMs / 1000).toFixed(1)}s</span>
+              last auto · held <span className="font-mono text-slate-100">{(timing.waitedMs / 1000).toFixed(1)}s</span>
               {" · capture "}
               <span className="font-mono text-slate-100">{(timing.captureMs / 1000).toFixed(1)}s</span>
             </p>
@@ -806,7 +851,12 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           </div>
           {capabilities && (
             <p className="mt-1 text-slate-500">
-              brackets {capabilities.maxBracketedFrames} · torch {String(capabilities.torch)}
+              {/* ⚑ "has torch", not "torch on", and the rename is a correction. This line reports
+                  `device.hasTorch` — a permanent hardware fact — and reading it as the torch's
+                  live state on 2026-08-16 produced a whole false finding: 98 minutes of thermal
+                  walk reported as "the torch was lit throughout", which it was not. The live state
+                  has its own indicator, the amber pill in the header, and only that one moves. */}
+              brackets {capabilities.maxBracketedFrames} · has torch {String(capabilities.torch)}
               {status.lensAvailable && <> · lens {status.lens}{status.lensLocked ? " (locked)" : ""}</>}
               {/* Reported so the ultra-wide question is settled by a run rather than by a guess
                   about which iPad this is. Nothing switches lens yet — that needs a ruling. */}
@@ -966,7 +1016,24 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           what Field 4b built: this session's captures, tappable into the 1:1 reviewer — which is
           where a plate gets judged and always has been.
         */}
-        {zoneId && <ContextFilmstrip model={strip} label={zone?.label ?? "zone"} onOpen={setOpenCapture} />}
+        {zoneId && (
+          <ContextFilmstrip
+            model={strip}
+            label={zone?.label ?? "zone"}
+            /* Shot this visit → the full reviewer, with its exposure stack and 1:1. Filed earlier →
+               the flat viewer, which is all the record can offer. The strip does not need to know
+               the difference; the tap resolves it. */
+            onOpen={(capture) => {
+              const shot = sessionFrames.current.get(capture.mediaId);
+              if (shot) {
+                setFrameIndex(0);
+                setViewing(shot);
+              } else {
+                setOpenCapture(capture);
+              }
+            }}
+          />
+        )}
         {!zoneId && shots.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {shots.map((shot) => (

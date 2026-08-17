@@ -15,6 +15,7 @@ import {
   glareSuspected,
   lensPolicyFor,
   shouldOfferRetake,
+  storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
   type TraversePair,
@@ -210,6 +211,37 @@ describe("what a traverse's own numbers say about why it could not describe itse
     for (const kind of kinds) expect(reasons[kind]).toBe(1);
     // And nothing is double-counted: the tally accounts for every pair exactly once.
     expect(Object.values(reasons).reduce((a, b) => a + b, 0)).toBe(pairs.length);
+  });
+});
+
+describe("what a stored frame is called", () => {
+  const f = (frame?: { role: "primary" | "evidence" | "insurance"; torch?: boolean; ev?: number }) => ({ frame });
+
+  it("names a bracket by its exposure and a pair by its torch", () => {
+    expect(storedFrameLabel(f({ role: "insurance", ev: -1 }))).toBe("−1 EV");
+    expect(storedFrameLabel(f({ role: "insurance", ev: 1 }))).toBe("+1 EV");
+    expect(storedFrameLabel(f({ role: "evidence", torch: false }))).toBe("no torch");
+  });
+
+  it("⚑ names a traverse frame by its POSITION, which is the one place the ordinal is the answer", () => {
+    /*
+     `frameLabel` rejects the ordinal — "frame 2" answers a question nobody has about a bracket,
+     whose frames differ by exposure. A traverse is the opposite: its frames differ by where along
+     the walk they were taken, which the ordinal *is*.
+
+     And the panel names pairs by index — *look at frames 3, 4* — so without this every button on a
+     nineteen-frame walk read "frame" and the instruction could not be followed. That is what the
+     owner hit.
+    */
+    expect(storedFrameLabel(f({ role: "evidence" }), 2)).toBe("3");
+    expect(storedFrameLabel(f({ role: "primary" }), 0)).toBe("1");
+  });
+
+  it("⚑ never gives two frames of one capture the same label", () => {
+    // The invariant, not the strings: a label that repeats cannot be followed, whatever it says.
+    const walk = Array.from({ length: 19 }, () => f({ role: "evidence" as const }));
+    const labels = walk.map((frame, i) => storedFrameLabel(frame, i));
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });
 

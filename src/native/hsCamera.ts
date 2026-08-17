@@ -203,10 +203,25 @@ export interface TraversePair {
   /** How differently the frame's left and right halves moved — the parallax measure. */
   disparity?: number;
   contiguity: "contiguous" | "gap" | "unverified";
-  /** ⚑ WHICH kind of "cannot say". Three different things used to collapse into one word, and the
-   *  counts could not tell them apart: registration failed outright, the accumulator and the pair
-   *  contradicted each other, or the two half-frames disagreed. */
-  reason?: "unregistered" | "impossiblyStill" | "disparity";
+  /** ⚑ WHICH kind of "cannot say" — one word used to cover all of these, and the counts could not
+   *  tell them apart. `implausibleShift`: the whole-frame registration returned a displacement the
+   *  trigger says is impossible. `crossCheck`: the accumulator's path and the pair's displacement
+   *  disagree. `impossiblyStill`: travelled a full target and the pair claims nothing moved.
+   *  `unregistered`: Vision could not align the pair at all. `disparity` is retired — the
+   *  half-split no longer decides anything (see `measureOverlap`). */
+  reason?: "unregistered" | "impossiblyStill" | "disparity" | "implausibleShift" | "crossCheck";
+  /** ⚑ Steps that failed to register behind this pair. Invisible to the accumulator's travel sum,
+   *  so a run can under-count by exactly the amount it could not see. The other half of the corner
+   *  discriminator — `maxStep` only sees the steps that succeeded. */
+  droppedSteps?: number;
+  /** ⚑ Largest single accumulator step behind this pair. The corner discriminator: small steps
+   *  mean the accumulator was tracking and the pair mis-registered; large steps mean it was losing
+   *  ground and the pair's big displacement is real — which would make some of these honest gaps
+   *  rather than "cannot say". Recorded, not acted on. */
+  maxStep?: number;
+  /** ⚑ The trust check that now decides: how far the accumulator's path length sits from the
+   *  pair's own displacement. Two independent measurements of one travel, both whole-frame. */
+  crossCheck?: number;
   /** ⚑ The two components apart, because they are not the same quantity: `x` is a fraction of
    *  frame WIDTH, `y` a fraction of frame HEIGHT. If the failure is nearly all `y`, the tolerance
    *  is being spent on vertical registration noise between two half-frames. */
@@ -241,10 +256,19 @@ export interface TraversePair {
 export interface TraverseDiagnosis {
   pairs: number;
   measured: number;
+  /** ⚑ The check that decides. Listed first because the panel must lead with what the verdict
+   *  turned on — leading with `disparity`, which no longer gates, made a clean run read as broken. */
+  medianCrossCheck: number | null;
   medianDisparity: number | null;
   medianDisparityX: number | null;
   medianDisparityY: number | null;
-  reasons: { unregistered: number; impossiblyStill: number; disparity: number };
+  reasons: {
+    unregistered: number;
+    impossiblyStill: number;
+    disparity: number;
+    implausibleShift: number;
+    crossCheck: number;
+  };
   /** Which axis is spending the tolerance — `null` when neither dominates. */
   dominant: "vertical" | "horizontal" | null;
 }
@@ -259,6 +283,34 @@ const median = (values: number[]): number | null => {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 };
+
+/**
+ * The frames a person should look at, because arithmetic cannot settle what they answer.
+ *
+ * ⚑ **A rejected pair raises two different questions and this mechanism can only answer one.**
+ * `implausibleShift` says *this measurement is wrong* — and the 2026-08-17 walks back that up, with
+ * `maxStep` on rejected pairs at 0.010–0.026 against 0.013–0.034 on pairs that passed, so the
+ * accumulator was tracking while the pair claimed to have moved a whole frame width.
+ *
+ * It does **not** say whether anything in the room was missed. Those pairs report overlaps of
+ * 0.083–0.115, and if the reading is wrong then the true overlap is simply unknown — which is
+ * exactly the question a concierge answers in five seconds by looking at two photographs.
+ *
+ * So the frames are named. The alternative is arguing from numbers about something the owner can
+ * see, in the one corner of the room where he is closest to an object and most likely to have
+ * broken contact.
+ */
+export function framesNeedingEyes(result: Pick<TraverseResult, "pairs">): number[] {
+  const indices = new Set<number>();
+  for (const pair of result.pairs) {
+    // Only the pairs whose *measurement* is in doubt. A crossCheck disagreement is a smaller
+    // claim and a genuine gap is already reported as one — neither needs a person.
+    if (pair.reason !== "implausibleShift") continue;
+    indices.add(pair.from);
+    indices.add(pair.to);
+  }
+  return [...indices].sort((a, b) => a - b);
+}
 
 export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): TraverseDiagnosis {
   const pairs = result.pairs;
@@ -278,6 +330,9 @@ export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): Traver
   return {
     pairs: pairs.length,
     measured: measured.length,
+    medianCrossCheck: median(
+      measured.map((p) => p.crossCheck).filter((v): v is number => typeof v === "number"),
+    ),
     medianDisparity: pick("disparity"),
     medianDisparityX,
     medianDisparityY,
@@ -285,6 +340,8 @@ export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): Traver
       unregistered: pairs.filter((p) => p.reason === "unregistered").length,
       impossiblyStill: pairs.filter((p) => p.reason === "impossiblyStill").length,
       disparity: pairs.filter((p) => p.reason === "disparity").length,
+      implausibleShift: pairs.filter((p) => p.reason === "implausibleShift").length,
+      crossCheck: pairs.filter((p) => p.reason === "crossCheck").length,
     },
     dominant,
   };

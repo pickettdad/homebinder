@@ -10,6 +10,7 @@ import {
   CAMERA_MODES,
   cameraAvailable,
   frameLabel,
+  framesNeedingEyes,
   frameStateOf,
   glareSuspected,
   lensPolicyFor,
@@ -186,19 +187,63 @@ describe("what a traverse's own numbers say about why it could not describe itse
     expect(empty.measured).toBe(0);
   });
 
-  it("counts the three different kinds of cannot-say apart", () => {
-    // They collapsed into one word before, and the counts could not tell them apart — so a run
-    // failing because registration never locked on looked identical to one failing on parallax.
-    const pairs: TraversePair[] = [
-      { from: 0, to: 1, measured: false, contiguity: "unverified", reason: "unregistered" },
-      { from: 1, to: 2, measured: true, contiguity: "unverified", reason: "impossiblyStill" },
-      measured(0.09, 0.01, 2),
-    ];
-    expect(traverseDiagnosis({ pairs }).reasons).toEqual({
-      unregistered: 1,
-      impossiblyStill: 1,
-      disparity: 1,
-    });
+  it("counts every kind of cannot-say apart from every other", () => {
+    /*
+     ⚑ Asserted as the RULE, not as a list of the kinds that happen to exist today.
+
+     The first cut compared the whole `reasons` object with `toEqual` against three names — an
+     inventory — and adding two legitimate kinds broke it, which is the exact failure the standing
+     rule names: *a test that enumerates what currently exists fires on every legitimate addition.*
+     Written here as "each pair is counted under its own reason and under no other", which held at
+     three kinds and holds at five.
+    */
+    const kinds = ["unregistered", "impossiblyStill", "implausibleShift", "crossCheck"] as const;
+    const pairs: TraversePair[] = kinds.map((reason, i) => ({
+      from: i,
+      to: i + 1,
+      measured: false,
+      contiguity: "unverified" as const,
+      reason,
+    }));
+    const { reasons } = traverseDiagnosis({ pairs });
+
+    for (const kind of kinds) expect(reasons[kind]).toBe(1);
+    // And nothing is double-counted: the tally accounts for every pair exactly once.
+    expect(Object.values(reasons).reduce((a, b) => a + b, 0)).toBe(pairs.length);
+  });
+});
+
+describe("which frames a person has to look at", () => {
+  const pair = (from: number, reason?: TraversePair["reason"]): TraversePair => ({
+    from,
+    to: from + 1,
+    measured: reason === undefined,
+    contiguity: reason === undefined ? "contiguous" : "unverified",
+    reason,
+  });
+
+  it("⚑ names both frames of a pair whose MEASUREMENT is in doubt", () => {
+    /*
+     `implausibleShift` says the reading is wrong, not that coverage was lost — and those pairs
+     report overlaps of 0.083–0.115, so if the reading is wrong the true overlap is simply unknown.
+     That is a question a concierge settles in five seconds by looking at two photographs, and
+     arithmetic cannot settle it at all.
+    */
+    expect(framesNeedingEyes({ pairs: [pair(0), pair(1, "implausibleShift"), pair(2)] })).toEqual([1, 2]);
+  });
+
+  it("stays quiet about the failures a person cannot help with", () => {
+    // A crossCheck disagreement is a smaller claim, and a genuine gap already reports itself as
+    // one. Sending someone to look at every imperfect pair is the alarm-on-the-majority-case
+    // failure wearing a helpful face.
+    const pairs = [pair(0, "crossCheck"), pair(1, "impossiblyStill"), pair(2, "unregistered"), pair(3)];
+    expect(framesNeedingEyes({ pairs })).toEqual([]);
+  });
+
+  it("names each frame once however many pairs implicate it", () => {
+    // Adjacent rejects share a frame; asking twice for the same photograph is noise.
+    const pairs = [pair(4, "implausibleShift"), pair(5, "implausibleShift")];
+    expect(framesNeedingEyes({ pairs })).toEqual([4, 5, 6]);
   });
 });
 

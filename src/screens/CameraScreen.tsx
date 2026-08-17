@@ -23,6 +23,7 @@ import { useApp } from "../store/sessionStore";
 import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
 import type { MediaRef } from "../engine/v2/fold";
+import type { FrameReadMeta, FrameRoleMeta } from "../engine/schema/events";
 import {
   captureTargetFor,
   containerAfterZoneChange,
@@ -43,6 +44,7 @@ import {
   requestLens,
   startAudioProbe,
   stopAudioProbe,
+  framesNeedingEyes,
   traverseDiagnosis,
   traverseVerdict,
   type AudioProbeResult,
@@ -287,6 +289,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    *  which begins well before the camera calls the iPad still. */
   const readableSince = useRef<number | null>(null);
   const [timing, setTiming] = useState<{ waitedMs: number; captureMs: number } | null>(null);
+  /** What the torch was last asked to be, until the camera confirms it. See `toggleTorch`. */
+  const [torchAsked, setTorchAsked] = useState<boolean | null>(null);
+  const torchPending = torchAsked !== null && torchAsked !== (status?.torchOn ?? false);
   const [audioProbe, setAudioProbe] = useState<AudioProbeStarted | null>(null);
   const [audioClip, setAudioClip] = useState<AudioProbeResult | null>(null);
   const [capabilities, setCapabilities] = useState<CameraCapabilities | null>(null);
@@ -361,8 +366,45 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       const frame = result.frames[0];
       if (currentZone && frame) {
         const blob = await frameBlob(frame);
+        /*
+          ⚑ **Every frame of the capture is filed, and each says what it is.**
+
+          `frames[0]` is the primary — the one that counts, and the only one any count sees. The
+          unlit companion is `evidence`: it answers *did the torch erase characters*, a question
+          that survives for years, and on 2026-08-16 it produced the cleanest plate of two nights.
+          The remaining bracket exposures are `insurance`: three shots so that one reads, spent once
+          the desk has resolved the plate.
+
+          The distinction is marked here, at write time, because it cannot be recovered from the
+          pixels later — and a retention policy that keeps evidence and drops insurance is then a
+          filter over a field rather than a schema change nobody can make retroactively.
+        */
+        const captureId = result.at;
+        const roleOf = (index: number): FrameRoleMeta => ({
+          captureId,
+          role: index === 0 ? "primary" : result.frames[index]?.torch === false && result.torchPaired ? "evidence" : "insurance",
+          torch: result.frames[index]?.torch,
+          ev: result.bracketed && index < 3 ? [-1, 0, 1][index] : undefined,
+          lens: result.lens,
+        });
+        const readOf = (index: number): FrameReadMeta | undefined => {
+          const ocr = result.frames[index]?.ocr;
+          return ocr
+            ? { text: ocr.text, engine: ocr.engine, confidence: ocr.meanConfidence, osVersion: ocr.osVersion }
+            : undefined;
+        };
+        const siblings = await Promise.all(
+          result.frames.slice(1).map(async (f, i) => ({
+            blob: await frameBlob(f),
+            mime: "image/jpeg",
+            read: readOf(i + 1),
+            frame: roleOf(i + 1),
+          })),
+        );
         const mediaId = await capturePhotoV2(
           captureTargetFor(openRef.current, currentZone, undefined), blob, "image/jpeg",
+          undefined, undefined,
+          { read: readOf(0), frame: roleOf(0), siblings },
         );
         /*
           ⚑ **The link back from the filed capture to the frames it came from**, and it exists to
@@ -559,6 +601,24 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     }
   };
 
+  /**
+   * Ask the torch to change, and show that it was asked.
+   *
+   * ⚑ The request is cleared by the *confirmation*, not by a timer — `status.torchOn` reaching the
+   * asked-for value is what ends the pending state. A timer would clear it whether or not anything
+   * happened, which is the false-reassurance failure this button already avoids on the other side.
+   */
+  const toggleTorch = async () => {
+    const wanted = !status?.torchOn;
+    setTorchAsked(wanted);
+    try {
+      await adjustCamera({ torchOverride: wanted });
+    } catch (err) {
+      setTorchAsked(null);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const toggleAudioProbe = async () => {
     try {
       if (audioProbe) {
@@ -607,6 +667,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   };
 
   const diagnosis = traverseResult ? traverseDiagnosis(traverseResult) : null;
+  const eyes = traverseResult ? framesNeedingEyes(traverseResult) : [];
   const frameState = frameStateOf(status);
   // Clamped rather than trusted: a stack of three followed by a stack of one would otherwise
   // leave the index pointing past the end and render nothing at all.
@@ -691,7 +752,18 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           </span>
         )}
         <div className="flex items-center gap-2">
-          {status?.torchOn && <span className="rounded-full bg-amber-400/90 px-2 py-1 text-xs text-slate-900">torch</span>}
+          {/*
+            ⚑ **The torch word is gone, and removal is the answer rather than a third fix.**
+
+            It said the same thing as the torch button and said it a beat later, because it was
+            painted from `torchOn` alone while the button now carries asked / on / off. The owner
+            offered both options — teach it the same three states, or drop it — and two indicators
+            for one fact is the worse of the two whichever is faster: the moment they disagree, and
+            they did, the concierge has to work out which one to believe.
+
+            What survives is the one you can act on. The button is where the tap lands, so the
+            button is where the state belongs.
+          */}
           {frameState === "degraded" && (
             <span className="rounded-full bg-rose-500 px-2 py-1 text-xs text-white">
               {status?.unmet.join(", ")}
@@ -797,7 +869,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               {status.motionLive ? (
                 <>
                   <span className="font-mono text-slate-100">{text.motion.toFixed(4)}</span>
-                  <span className="text-slate-500"> (still under {text.stillThreshold})</span>
+                  {/* Fixed to four places: the gate is computed now, not a constant, and printing
+                      a raw float spilled 0.01353200318753853 across two lines in the field. */}
+                  <span className="text-slate-500"> (still under {text.stillThreshold.toFixed(4)})</span>
                   {text.still && <span className="text-emerald-400"> steady</span>}
                 </>
               ) : (
@@ -937,23 +1011,38 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               Printing a cause on ambiguous data is the alarm-on-the-majority-case failure landing
               on the one question where a confident wrong answer costs another wasted round.
             */}
-            {traverseResult && !traversing && diagnosis && diagnosis.measured > 0 && (
+            {/*
+              ⚑ **The panel led with a retired metric, which is the torch word's defect one screen
+              over.** `disparity` stopped gating anything when the trust check moved to the whole
+              frame — so on a run that scored 21 of 28 with no gaps it correctly read 0.4668, and
+              the owner read that as something being wrong. It also printed *the y axis is spending
+              the tolerance* against a tolerance nothing is spent on any more.
+
+              So the order follows the decision: what the verdict turned on first, then why the
+              rest could not be judged, then the retired number labelled as retired. The attribution
+              line is gone rather than repointed — an attribution for a check that no longer gates
+              is exactly the sentence that misled.
+            */}
+            {traverseResult && !traversing && diagnosis && (
               <p className="mt-1 text-slate-400">
-                disparity med · <span className="font-mono text-slate-100">{diagnosis.medianDisparity?.toFixed(4)}</span>
-                {" "}(x {diagnosis.medianDisparityX?.toFixed(4)} · y {diagnosis.medianDisparityY?.toFixed(4)})
+                cross-check med ·{" "}
+                <span className="font-mono text-slate-100">{diagnosis.medianCrossCheck?.toFixed(4) ?? "—"}</span>
+                {" "}· {diagnosis.measured} judged
                 <br />
-                cannot-say · {diagnosis.reasons.disparity} halves disagree ·{" "}
+                cannot-say · {diagnosis.reasons.crossCheck} cross-check · {diagnosis.reasons.implausibleShift} implausible ·{" "}
                 {diagnosis.reasons.impossiblyStill} impossibly still · {diagnosis.reasons.unregistered} unregistered
-                {diagnosis.dominant && (
+                {eyes.length > 0 && (
                   <>
                     <br />
-                    <span className="text-amber-400">
-                      {diagnosis.dominant === "vertical"
-                        ? "the y axis is spending the tolerance"
-                        : "the x axis is spending the tolerance"}
-                    </span>
+                    {/* ⚑ Not an alarm: the measurement is in doubt, not the coverage. The frames
+                        are named because a person settles in seconds what arithmetic cannot. */}
+                    <span className="text-amber-400">look at frames {eyes.join(", ")}</span>
                   </>
                 )}
+                <br />
+                <span className="text-slate-600">
+                  disparity {diagnosis.medianDisparity?.toFixed(4) ?? "—"} — recorded, not deciding
+                </span>
               </p>
             )}
             {traverseResult && !traversing && traverseResult.pairs.length > 0 && (
@@ -1109,9 +1198,34 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             <button
               type="button"
               aria-label="Torch"
-              onClick={() => void adjustCamera({ torchOverride: !status?.torchOn })}
-              className={`h-14 w-14 rounded-full text-lg ring-1 ${
-                status?.torchOn ? "bg-amber-400 text-slate-900 ring-amber-300" : "bg-slate-900/70 text-slate-200 ring-slate-600"
+              onClick={() => void toggleTorch()}
+              /*
+                ⚑ **Three states, not two** (owner report 2026-08-17: the torch lights immediately
+                but the button takes about a second to look pressed).
+
+                The lag is real and the rule that causes it is the right rule — the button is
+                painted from the confirmed state, never from the tap, because a control painted
+                from the tap is a silent failure with false reassurance on top. The `modeStatus`
+                stream is what confirms, and it runs on a five-second timer, so a tap can wait
+                nearly that long to be acknowledged.
+
+                The fix is therefore not to paint from the tap. It is to admit that *asked* is a
+                real state distinct from *on* and from *off*, and to show it: dimmed-amber while
+                the request is outstanding, solid once the camera confirms, and back to off with a
+                complaint if the confirmation never arrives. **Nothing here claims the torch is on
+                until the camera says so** — it only stops pretending nothing happened.
+              */
+              /* ⚑ Pending is tested FIRST, and that ordering is the whole fix. Testing `torchOn`
+                 first made the dim state reachable only on the way *on*: switching off left the
+                 button solid amber until confirmation arrived, which is the same lag the owner
+                 reported, surviving in one direction (2026-08-17). A pending state that only shows
+                 for one of the two transitions is not a third state, it is a decoration. */
+              className={`h-14 w-14 rounded-full text-lg ring-1 transition-colors ${
+                torchPending
+                  ? "bg-amber-400/40 text-amber-100 ring-amber-400/60"
+                  : status?.torchOn
+                    ? "bg-amber-400 text-slate-900 ring-amber-300"
+                    : "bg-slate-900/70 text-slate-200 ring-slate-600"
               }`}
             >
               ⚡

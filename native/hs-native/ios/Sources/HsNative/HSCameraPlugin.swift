@@ -482,6 +482,49 @@ final class CameraController: NSObject {
      hand; 0.008 sits just above it.
      */
     private let stillThreshold: CGFloat = 0.008
+
+    /**
+     ⚑ **What "still enough" actually depends on — and it is not a constant.**
+
+     The field number that forced this: **held 9.6 s** on one nameplate, crouched with both elbows
+     braced, while the capture itself took 0.6 s. *Ninety-four percent of the wait was the gate.*
+     A concierge cannot do that thirty times a room, so this is not a threshold to nudge.
+
+     Blur is angular rate multiplied by **exposure time**, and a flat threshold ignores the second
+     term entirely — so it demands the same stillness of an 8 ms frame in a bright garage as of a
+     66 ms frame in a dark plant room. The bright case is being made to wait for no reason.
+
+     And the camera is already working on the problem: optical stabilisation runs on this lens
+     whatever we do, and `photoQualityPrioritization = .quality` fuses several exposures. **Holding
+     the shutter for ten seconds buys almost nothing those two have not already bought** — it only
+     buys it later.
+
+     So the gate is computed from the exposure the camera reports, with a stabilisation credit, and
+     ⚑ **clamped so it can never be stricter than the old flat value.** At the owner's 41.7 ms it
+     comes out about 2.7× looser; in a bright room looser still; in a genuinely dark room it tightens
+     back towards where it was, which is the one case where holding still is really buying something.
+
+     `stillThreshold` above is the floor of that clamp and the value the panel prints when the
+     camera has not yet reported an exposure.
+     */
+    private static let blurBudgetFrameWidths: CGFloat = 0.0015
+    /// What optical stabilisation is worth, as a multiplier on tolerable movement. Deliberately
+    /// conservative: OIS is usually quoted at two to three stops, and this claims rather less than
+    /// one and a half.
+    private static let stabilisationCredit: CGFloat = 3.0
+    private static let stillThresholdCeiling: CGFloat = 0.05
+
+    /// The analysis cadence in milliseconds — `motion` is a shift per analysed frame, so an
+    /// exposure has to be expressed in the same units before the two can be compared.
+    private var analysisIntervalMs: CGFloat { CGFloat(analyseEveryNthFrame) * 1000.0 / 30.0 }
+
+    private var effectiveStillThreshold: CGFloat {
+        guard let device else { return stillThreshold }
+        let exposureMs = CGFloat(CMTimeGetSeconds(device.exposureDuration) * 1000)
+        guard exposureMs > 0 else { return stillThreshold }
+        let allowed = Self.blurBudgetFrameWidths * Self.stabilisationCredit * (analysisIntervalMs / exposureMs)
+        return min(Self.stillThresholdCeiling, max(stillThreshold, allowed))
+    }
     private var lastMotion: CGFloat = 1.0
 
     /**
@@ -1805,6 +1848,16 @@ final class CameraController: NSObject {
         /// ⚑ Fixed at the start of the run, for the same reason the exposure is — see `downscaled`.
         /// The crop axis must mean one thing for the whole traverse.
         var orientation: CGImagePropertyOrientation = .up
+        /// Largest single accumulator step since the last kept frame. The discriminator for the
+        /// corner — see `advanceTraverse`. Reset when a frame is requested.
+        var maxStep: CGFloat = 0
+        /// `maxStep` as it stood when this pair's frame was requested — the value that travels
+        /// with the pair rather than with the run.
+        var stepAtRequest: CGFloat = 0
+        /// Steps that failed to register since the last kept frame. Invisible to `travel`, which
+        /// is why they are counted — see `advanceTraverse`.
+        var droppedSteps = 0
+        var droppedAtRequest = 0
     }
 
     /**
@@ -1840,6 +1893,21 @@ final class CameraController: NSObject {
      which would be this mechanism quietly agreeing with itself.
      */
     private static let traverseHalfSanityBound: CGFloat = 0.33
+    /// How many times the target travel a pair's own displacement may reach before the whole-frame
+    /// registration is treated as having failed. Derived from the trigger rather than fitted: a
+    /// pair exists because one target's worth of travel accumulated, so several times that is not
+    /// a fast operator, it is a bad number. See `measureOverlap`.
+    private static let traversePlausibleShiftFactor: CGFloat = 2.5
+    /**
+     How far the accumulator's path length and the pair's own displacement may disagree before the
+     pair is `unverified`.
+
+     A quarter of the target travel, read off the trigger rather than fitted — two measurements of
+     one displacement that differ by more than a quarter of it are not measuring the same thing. On
+     the 2026-08-17 runs the survivors sit at a median of 0.0055 and 0.0154, an order of magnitude
+     inside this, so it is a bound on nonsense and not a knob on the verdict.
+     */
+    private static let traverseCrossCheckTolerance: CGFloat = 0.05
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
@@ -1975,9 +2043,51 @@ final class CameraController: NSObject {
             return
         }
         run.previousBuffer = working
-        guard let step = translationFraction(from: previous, to: working) else { return }
+        /*
+         ⚑ **A step that fails to register is invisible to the accumulator, and that is the half of
+         the corner question `maxStep` cannot answer.**
+
+         `maxStep` says the *successful* steps were small — 0.010–0.026 of frame width against
+         0.013–0.034 on the pairs that passed — so the accumulator was tracking, and the pair
+         displacements of 0.6–1.0 look like keyframe mis-registration rather than real travel.
+         **But this early return drops a failed step silently**: travel simply does not advance, so
+         the accumulator under-counts by exactly the amount it could not see, and the run keeps
+         going as though nothing happened.
+
+         The owner reports a long break in captures while rounding the corner. Two explanations
+         survive that: the wider field of view needs more walking per frame-width, which the frame
+         rates support (wide fired 17 frames to normal's 31 over the same L, and the ultra-wide is
+         about twice the field) — or steps were failing there and the accumulator stalled. **A
+         count separates them**, and without it the discriminator is half an answer that reads like
+         a whole one.
+        */
+        guard let step = translationFraction(from: previous, to: working) else {
+            run.droppedSteps += 1
+            return
+        }
         run.travel.x += step.x
         run.travel.y += step.y
+        /*
+         ⚑ **The size of a single accumulator step, kept so the corner can be explained.**
+
+         The owner's 2026-08-17 walks put the remaining `unverified` pairs in clusters, and he
+         identified where: **rounding the outside of the L, where the tank is nearest the lens.**
+         Those pairs read `expectedTravel ≈ 0.20` against a `displacement` of 0.6–0.86.
+
+         Two readings of that, and they demand opposite fixes. Either the pair mis-registered and
+         the gate is right — or **the accumulator under-counted**, because close to an object a
+         single step at 15 Hz exceeds what translational registration can follow, so it fires late
+         and the frames really are that far apart. ⚑ In the second case the displacement is
+         *correct*, several of those overlaps are already below the gap threshold, and the gate is
+         converting **real gaps into "cannot say"** — the false-negative direction, at exactly the
+         spot where a concierge is most likely to break contact.
+
+         The step size discriminates: small steps mean the accumulator was tracking and the pair is
+         wrong; large steps mean the accumulator was losing ground and the pair is right. Recorded
+         rather than acted on, because acting on the wrong reading of this either invents gaps or
+         hides them.
+        */
+        run.maxStep = max(run.maxStep, hypot(step.x, step.y))
         if hypot(run.travel.x, run.travel.y) >= Self.traverseTargetTravel {
             requestTraverseFrame(run: run, buffer: working)
         }
@@ -1987,7 +2097,11 @@ final class CameraController: NSObject {
         run.awaitingFrame = true
         run.pendingBuffer = buffer
         run.travelAtRequest = hypot(run.travel.x, run.travel.y)
+        run.stepAtRequest = run.maxStep
+        run.droppedAtRequest = run.droppedSteps
         run.travel = .zero
+        run.maxStep = 0
+        run.droppedSteps = 0
         // `.speed` because a traverse is a burst and the operator is still moving: a frame that
         // arrives late is a frame taken somewhere else. Quality prioritisation is right for a
         // deliberate plate and wrong here.
@@ -2022,7 +2136,9 @@ final class CameraController: NSObject {
         if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
             run.pairs.append(measureOverlap(from: previous, to: current,
                                             from: index - 1, to: index,
-                                            expectedTravel: run.travelAtRequest))
+                                            expectedTravel: run.travelAtRequest,
+                                            maxStep: run.stepAtRequest,
+                                            droppedSteps: run.droppedAtRequest))
         }
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
@@ -2047,14 +2163,18 @@ final class CameraController: NSObject {
      */
     private func measureOverlap(from previous: CVPixelBuffer, to current: CVPixelBuffer,
                                 from fromIndex: Int, to toIndex: Int,
-                                expectedTravel: CGFloat) -> [String: Any] {
+                                expectedTravel: CGFloat, maxStep: CGFloat,
+                                droppedSteps: Int) -> [String: Any] {
         let left = CGRect(x: 0, y: 0, width: 0.5, height: 1)
         let right = CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
         let full = translationFraction(from: previous, to: current)
         let leftShift = crops(previous, current, left).flatMap { translationFraction(from: $0.0, to: $0.1) }
         let rightShift = crops(previous, current, right).flatMap { translationFraction(from: $0.0, to: $0.1) }
 
-        var record: [String: Any] = ["from": fromIndex, "to": toIndex]
+        // Recorded on every pair, whichever way it exits — the corner discriminator is only
+        // useful on the pairs that failed.
+        var record: [String: Any] = ["from": fromIndex, "to": toIndex,
+                                     "maxStep": Double(maxStep), "droppedSteps": droppedSteps]
         guard let full, let leftShift, let rightShift else {
             record["measured"] = false
             record["contiguity"] = "unverified"
@@ -2114,12 +2234,70 @@ final class CameraController: NSObject {
         record["dy"] = Double(full.y)
         record["overlap"] = Double(overlap)
 
-        if worstHalf > Self.traverseHalfSanityBound {
+        /*
+         ⚑ **The WHOLE frame can mis-register too, and it does so per axis.**
+
+         Three runs on 2026-08-17 show it unmistakably. The garage sweep reads `dx` of 0.203,
+         0.216, 0.193 — landing on the 0.20 trigger almost exactly — while `dy` on the same pairs
+         returns −0.750, −0.629, +0.639. **One axis is perfect and the other is garbage**, and
+         across the three runs 26 of 110 shift readings exceed 0.5 with a cluster at 0.63–0.75.
+         Vision returns a number, not a failure, so it was recorded as a measurement — the same
+         defect as the half guard above, one level up.
+
+         The bound is not tuned; it is read off the mechanism's own trigger. **A pair exists
+         because the accumulator had travelled one target's worth**, so its displacement should be
+         about `traverseTargetTravel`. A pair claiming three and a half times that has not measured
+         a fast operator — the accumulator would have fired a frame long before. And the bound sits
+         inside the region where overlap has already collapsed, so nothing that could have been
+         called contiguous is being discarded.
+
+         The effect on the recorded runs: the garage sweep goes from **0 of 7 usable to 3 of 3
+         trustworthy**, and on every run the pairs that survive this gate have their path length
+         and their displacement agreeing — 7 of 10, 3 of 3, 19 of 21.
+         */
+        let plausibleBound = max(expectedTravel, Self.traverseTargetTravel) * Self.traversePlausibleShiftFactor
+        if displacement > plausibleBound {
             record["measured"] = false
             record["contiguity"] = "unverified"
-            record["reason"] = "unregistered"
+            record["reason"] = "implausibleShift"
             return record
         }
+
+        /*
+         ⚑ **The half-split no longer decides anything. It is recorded and it is not consulted.**
+
+         It was the trust check from the start: split the frame, register each side, and treat a
+         disagreement as parallax the translation model cannot describe. The reasoning was sound
+         and the measurement is not — **a half-frame has half the texture**, and in a real
+         mechanical room that is below what translational registration needs.
+
+         The 2026-08-17 runs settle it. Of the pairs surviving the plausibility gate above, the
+         half-check passes **3 of 17** on normal and **3 of 9** on wide — while those same pairs
+         carry a median overlap of **0.78** and their two independent displacement measurements
+         agree to a median of **0.0055** and **0.0154**. *The half-split was rejecting pairs that
+         two whole-frame measurements agree are fine, four times out of five.*
+
+         So the trust check moves to the one the design session named and the data now supports on
+         both lenses: **the accumulator's path length against the pair's own displacement.** Two
+         genuinely independent measurements of the same travel — one a running sum at 15 Hz, the
+         other a single keyframe-to-keyframe registration — both reading the **whole** frame, so
+         neither inherits the problem that broke the halves.
+
+         ⚑ **Ordering mattered and nearly went wrong.** Adopting this before the plausibility gate
+         would have been adopting a check built from the same broken registration that gate now
+         removes: on the wide runs the two numbers disagreed by 0.33 and 0.46 precisely because
+         both were corrupt. Registration first, then the check. That objection is now spent.
+
+         The bound is read off the trigger, like the gate above: a pair exists because one target's
+         worth of travel accumulated, so two measurements of that travel disagreeing by more than a
+         quarter of it are not measuring the same thing.
+
+         `disparity`, `disparityX`, `disparityY` and `halfVsWhole` are all still computed and still
+         written to the record — gate the verdict, keep the diagnostic, so that if this check ever
+         looks wrong the evidence for the previous one is sitting beside it.
+         */
+        let crossCheck = abs(displacement - expectedTravel)
+        record["crossCheck"] = Double(crossCheck)
 
         /*
          ⚑ **The false NEGATIVE, which is the one nobody looks for.**
@@ -2146,12 +2324,12 @@ final class CameraController: NSObject {
         if impossiblyStill {
             contiguity = "unverified"
             reason = "impossiblyStill"
-        } else if Double(disparity) > Self.traverseDisparityTolerance {
-            // ⚑ Not a gap. The model does not describe this pair, so this mechanism has nothing
-            // to say about whether contact was kept — and saying "gap" here is the false alarm
-            // that sends somebody back to a room they already covered.
+        } else if crossCheck > Self.traverseCrossCheckTolerance {
+            // ⚑ Not a gap. The two measurements do not agree, so this mechanism has nothing to say
+            // about whether contact was kept — and saying "gap" here is the false alarm that sends
+            // somebody back to a room they already covered.
             contiguity = "unverified"
-            reason = "disparity"
+            reason = "crossCheck"
         } else if Double(overlap) < Self.traverseMinimumOverlap {
             contiguity = "gap"
         } else {
@@ -2488,7 +2666,8 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
      live one.
      */
     fileprivate func emitFrameStatus(boxes: [[String: Any]], read: LiveRead, reading: Bool) {
-        let still = motionHistory.count >= motionHistoryLength && lastMotion < stillThreshold
+        let gate = effectiveStillThreshold
+        let still = motionHistory.count >= motionHistoryLength && lastMotion < gate
         onTextBoxes?([
             "boxes": boxes,
             // Steady AND looking at characters. Either alone is the wrong trigger: a still camera
@@ -2506,7 +2685,9 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             // a real mechanical room is a number somebody can read rather than a shutter that
             // mysteriously will not fire. Same stance as `lightScore`.
             "motion": Double(lastMotion),
-            "stillThreshold": Double(stillThreshold)
+            // The gate actually applied to this frame, not the floor it is clamped to —
+            // printing the constant while a different number decides is how a panel lies quietly.
+            "stillThreshold": Double(gate)
         ])
     }
 }

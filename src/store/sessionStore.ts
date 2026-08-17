@@ -7,7 +7,13 @@
  */
 import { create } from "zustand";
 import type { RouteConfig } from "../engine/schema/routeConfig";
-import type { EventPayload, SessionEvent } from "../engine/schema/events";
+import type {
+  CaptureMediaMeta,
+  EventPayload,
+  FrameReadMeta,
+  FrameRoleMeta,
+  SessionEvent,
+} from "../engine/schema/events";
 import { fold, type SessionState } from "../engine/fold";
 import { uuidv7 } from "../engine/ids";
 import { sha256Hex } from "../engine/canonical";
@@ -157,6 +163,13 @@ interface AppStore {
     mime?: string,
     durationMs?: number,
     intent?: CaptureIntent,
+    /** ⚑ The rest of one capture. Optional throughout: every existing caller passes one frame and
+     *  keeps behaving exactly as it did, which is what an additive change has to mean. */
+    extras?: {
+      read?: FrameReadMeta;
+      frame?: FrameRoleMeta;
+      siblings?: { blob: Blob; mime?: string; read?: FrameReadMeta; frame?: FrameRoleMeta }[];
+    },
   ): Promise<string>;
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
   discardMediaV2(mediaId: string): Promise<void>;
@@ -420,23 +433,65 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "AnchorRemoved", anchorId }]);
   },
 
-  async capturePhotoV2(target, file, mimeOverride, durationMs, intent) {
+  async capturePhotoV2(target, file, mimeOverride, durationMs, intent, extras) {
     const { sessionId } = get();
     if (!sessionId) throw new Error("no active session");
     assertEditable(get().v2Session, targetZoneId(get().v2Session, target));
     const mediaId = uuidv7();
     const mime = mimeOverride ?? ((file instanceof File ? file.type : "") || "image/jpeg");
     const sha256 = await sha256Hex(file);
+    const capturedAt = new Date().toISOString();
     const row: MediaRow = {
       id: mediaId, sessionId, kind: "photo",
       targetKind: target.kind, targetId: target.kind === "inbox" ? undefined : target.id,
-      mime, bytes: file.size, sha256, capturedAt: new Date().toISOString(), durationMs, blob: file,
+      mime, bytes: file.size, sha256, capturedAt, durationMs, blob: file,
     };
+
+    /*
+     ⚑ **The other frames of one capture, written instead of discarded.**
+
+     Until now only `frames[0]` reached storage; the rest lived in the native temp directory and
+     went with it. That included the unlit companion, **which measured as the cleanest plate of two
+     nights — 0.000% clipped against 7.31% on its own lit twin.** The pair was computed, compared by
+     `torchPairAgreement`, and then thrown away except the first frame: a ruling the owner made,
+     built, and vindicated by measurement, producing an artifact nothing kept.
+
+     They are rows and manifest entries like any other file, and they are **not** separate photos —
+     they never enter `photos`, so no count moves. See `PhotoAdded.siblings`.
+    */
+    const siblingRows: MediaRow[] = [];
+    const siblingMeta: CaptureMediaMeta[] = [];
+    for (const sib of extras?.siblings ?? []) {
+      const sibId = uuidv7();
+      const sibMime = sib.mime ?? "image/jpeg";
+      siblingRows.push({
+        id: sibId, sessionId, kind: "photo",
+        targetKind: target.kind, targetId: target.kind === "inbox" ? undefined : target.id,
+        mime: sibMime, bytes: sib.blob.size, sha256: await sha256Hex(sib.blob), capturedAt,
+        blob: sib.blob,
+      });
+      siblingMeta.push({
+        mediaId: sibId,
+        sha256: siblingRows[siblingRows.length - 1]!.sha256,
+        mime: sibMime,
+        bytes: sib.blob.size,
+        read: sib.read,
+        frame: sib.frame,
+      });
+    }
+
     await get().dispatchV2(
       // `intent` rides the EVENT only, never MediaRow — the same shape as `caption`. MediaRow
       // is blob storage; the log is the record, and one home for a fact is the whole point.
-      [{ type: "PhotoAdded", media: { mediaId, sha256, mime, bytes: file.size }, target, durationMs, intent }],
-      [row],
+      [{
+        type: "PhotoAdded",
+        media: { mediaId, sha256, mime, bytes: file.size, read: extras?.read, frame: extras?.frame },
+        target,
+        durationMs,
+        intent,
+        siblings: siblingMeta.length ? siblingMeta : undefined,
+      }],
+      [row, ...siblingRows],
     );
     return mediaId;
   },

@@ -234,6 +234,19 @@ export type V2SessionEvent =
       target: CaptureTarget;
       durationMs?: number;
       intent?: CaptureIntent;
+      /**
+       * ⚑ **The other frames of the same capture, carried under the primary rather than beside it.**
+       *
+       * The alternative was one `PhotoAdded` per frame, which is more uniform and wrong: every
+       * count in the app reads `photos.length`, so a bracketed plate would turn "6 photographs
+       * here" into 24 overnight, and the strip would show four thumbnails of one act. **A sibling
+       * is part of one capture, not a photograph in its own right** — the concierge pressed once —
+       * and the shape should say so.
+       *
+       * They are still real files with real ids: the manifest lists every one, so nothing is
+       * hidden from the record. What they are not is separately countable.
+       */
+      siblings?: CaptureMediaMeta[];
     })
   | (EventBase & { type: "VoiceNoteAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
   | (EventBase & { type: "MediaDiscarded"; mediaId: string })

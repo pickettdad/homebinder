@@ -37,11 +37,59 @@ export interface RoomInstance {
   label: string; // "Bedroom 2"
 }
 
+/**
+ * A device read of one frame.
+ *
+ * ⚑ **On the frame, never on the object.** Five photographs of one water heater produce five reads
+ * at five confidences, and collapsing them onto the pin would force a choice about which one is
+ * *the* read — a choice nothing in the field is qualified to make.
+ *
+ * `engine` is a reader IDENTITY rather than a vendor name: a read is only comparable against
+ * another read from the same recogniser on the same OS, so the revision and the build travel with
+ * it (Register #135). Without that, two reads that disagree cannot be told from two readers that
+ * disagree.
+ */
+export interface FrameReadMeta {
+  text: string;
+  engine: string;
+  confidence: number;
+  osVersion?: string;
+}
+
+/**
+ * What this frame is within its capture, when a capture produced more than one.
+ *
+ * ⚑ **The two kinds are different in kind and marked as such** (design session, 2026-08-17).
+ * `evidence` is the unlit companion: it answers *did the torch erase characters*, and that question
+ * survives for years — it measured as the cleanest plate of two nights, 0.000% clipped against
+ * 7.31%. `insurance` is the rest of a bracket: three exposures so that one reads, and once the desk
+ * has resolved the plate the other two have done their job.
+ *
+ * Marked at write time because a retention policy that drops insurance and keeps evidence is then a
+ * filter rather than a schema change — and the distinction cannot be recovered afterwards from the
+ * pixels.
+ */
+export interface FrameRoleMeta {
+  /** Groups the frames of one capture. The concierge pressed once. */
+  captureId: string;
+  role: "primary" | "evidence" | "insurance";
+  /** Whether the torch was lit for THIS frame. On a pair the two differ, which is the whole point. */
+  torch?: boolean;
+  /** Exposure bias in stops, on a bracketed frame. */
+  ev?: number;
+  lens?: string;
+}
+
 export interface CaptureMediaMeta {
   mediaId: string;
   sha256: string;
   mime: string;
   bytes: number;
+  /** ⚑ Additive, and additions are the emitting side's call alone under the version policy
+   *  ratified 2026-08-15 — the receiver ignores what it does not consume. Absent on every capture
+   *  written before this shipped, which is exactly what "non-breaking" has to mean. */
+  read?: FrameReadMeta;
+  frame?: FrameRoleMeta;
 }
 
 export type SessionEvent =

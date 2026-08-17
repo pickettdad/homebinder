@@ -12,7 +12,7 @@
  * `media/<zone>/_canvas/…`, zone-targeted media with no pin under `media/<zone>/_zone/…`,
  * inbox/unassigned under `media/_misc/_inbox/…`.
  */
-import type { Source } from "../schema/events";
+import type { FrameReadMeta, FrameRoleMeta, Source } from "../schema/events";
 import type { CaptureIntent, PinFlag, PinTypeRef, V2SessionEvent, VisitKind } from "../v2/events";
 import type {
   AnchorState,
@@ -51,6 +51,16 @@ function extensionFor(mime: string): string {
  *  (`photos`) collections beside stills, so kind is derived from mime, never assumed. */
 export type MediaKindV3 = "photo" | "voice" | "video";
 
+/**
+ * A frame that is not the photograph the concierge took.
+ *
+ * ⚑ Derived from the role rather than from a separate flag, so the two cannot disagree. Absent
+ * `frame` means a capture written before siblings existed, which is one photograph — the reading
+ * an additive field has to have for every record already in the field.
+ */
+const isSibling = (m: { frame?: FrameRoleMeta }): boolean =>
+  m.frame !== undefined && m.frame.role !== "primary";
+
 const kindOf = (mime: string): MediaKindV3 =>
   mime.startsWith("image") ? "photo" : mime.startsWith("video") ? "video" : "voice";
 
@@ -84,6 +94,13 @@ export interface MediaFileEntryV3 {
    */
   capturedAt: string;
   durationMs?: number;
+  /** ⚑ The device read of THIS frame. Additive under the ratified version policy — the binder
+   *  ignores what it does not yet consume, which is behaviour rather than a favour. */
+  read?: FrameReadMeta;
+  /** What this frame is within its capture. `evidence` survives; `insurance` is spendable once
+   *  the desk has resolved the plate. Marked at write time because it cannot be recovered from
+   *  the pixels afterwards. */
+  frame?: FrameRoleMeta;
   caption?: string;
   /** Which declared capture kind this was (§4.1a/§4.1b); absent = ordinary. */
   intent?: CaptureIntent;
@@ -177,7 +194,7 @@ export interface ManifestV3<TConfig = unknown> {
 
 function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
   const out: MediaFileEntryV3[] = [];
-  const push = (m: MediaRef, kind: MediaKindV3, owner: MediaOwner, group: string, sub: string) =>
+  const push = (m: MediaRef, kind: MediaKindV3, owner: MediaOwner, group: string, sub: string) => {
     out.push({
       mediaId: m.mediaId,
       kind,
@@ -192,7 +209,38 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
       caption: m.caption,
       intent: m.intent,
       source: m.source,
+      read: m.read,
+      frame: m.frame,
     });
+    /*
+     ⚑ **Siblings are listed here and nowhere else, which is the whole point of the shape.**
+
+     They are real files with real ids and real hashes, so the manifest — the trust root — names
+     every one of them, beside its primary and owned by the same thing. What they are not is
+     separately *countable*: they never enter `zone.photos` or `pin.photos`, so no count in the app
+     or in `counts.photos` moves because a plate happened to need a bracket.
+
+     Recursion is deliberately one level. A sibling of a sibling is not a thing a capture can
+     produce, and treating it as possible would invite a shape nothing writes.
+    */
+    for (const sib of m.siblings ?? []) {
+      out.push({
+        mediaId: sib.mediaId,
+        kind: kindOf(sib.mime),
+        owner,
+        group,
+        file: `media/${group}/${sub}/${sib.mediaId}.${extensionFor(sib.mime)}`,
+        mime: sib.mime,
+        bytes: sib.bytes,
+        sha256: sib.sha256,
+        capturedAt: sib.at,
+        intent: sib.intent,
+        source: sib.source,
+        read: sib.read,
+        frame: sib.frame,
+      });
+    }
+  };
 
   for (const zone of state.zones) {
     // kindOf, not "photo": videos ride in the visual collection beside stills.
@@ -278,8 +326,18 @@ export function buildManifestV3<TConfig = unknown>(args: {
       zones: state.zones.length,
       pins: state.pins.length,
       canvases: state.zones.reduce((n, z) => n + z.canvases.length, 0),
-      photos: media.filter((m) => m.kind === "photo").length,
-      videos: media.filter((m) => m.kind === "video").length,
+      /*
+       ⚑ **Counted over photographs, not over files** — and the two stopped being the same thing
+       when a capture began keeping its other frames.
+
+       `mediaFiles` and `mediaBytes` below still count every file, because those answer *did it all
+       arrive intact*, which is a question about files. `photos` answers *how many photographs were
+       taken*, which is a question about acts: the concierge pressed once, and a bracket is not
+       three photographs of three things. Left alone, a plate that happened to need a bracket would
+       have turned six into twenty-four in the binder.
+      */
+      photos: media.filter((m) => m.kind === "photo" && !isSibling(m)).length,
+      videos: media.filter((m) => m.kind === "video" && !isSibling(m)).length,
       voiceNotes: media.filter((m) => m.kind === "voice").length,
       notes: state.notes.size,
       chats: state.chats.size,

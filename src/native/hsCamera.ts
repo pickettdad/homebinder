@@ -214,6 +214,17 @@ export interface TraversePair {
    *  so a run can under-count by exactly the amount it could not see. The other half of the corner
    *  discriminator — `maxStep` only sees the steps that succeeded. */
   droppedSteps?: number;
+  /** ⚑ Vision's homography scale between the pair, RECORDED AND NOT ACTED ON. The powder room
+   *  settled that motion toward a subject is the traverse's problem rather than the corner's, so a
+   *  registration carrying scale is the known fix — this is the evidence needed to build it without
+   *  guessing, because it cannot be validated from screenshots. `homographyScaleX` and `…Y` are
+   *  kept apart because a similarity has ONE scale and a homography that has drifted into
+   *  perspective does not: the gap between them says whether the fit is trustworthy. */
+  homographyScale?: number;
+  homographyScaleX?: number;
+  homographyScaleY?: number;
+  homographyTx?: number;
+  homographyTy?: number;
   /** ⚑ Largest single accumulator step behind this pair. The corner discriminator: small steps
    *  mean the accumulator was tracking and the pair mis-registered; large steps mean it was losing
    *  ground and the pair's big displacement is real — which would make some of these honest gaps

@@ -2260,6 +2260,55 @@ final class CameraController: NSObject {
         record["expectedTravel"] = Double(expectedTravel)
         record["displacement"] = Double(displacement)
         record["halfVsWhole"] = Double(worstHalf)
+        /*
+         ⚑ **The half-shifts now ride every exit, and finding this cost a round.**
+
+         They were written after the contiguity block, so a pair rejected by the plausibility gate
+         carried none of them — and those are precisely the pairs any scale model has to be tested
+         against. Replaying the recorded runs to derive scale offline turned up four usable pairs
+         out of nine, all of them ones that had passed. **Rule 43 inside the instrument built to
+         answer rule 43's own question.**
+        */
+        record["leftDx"] = Double(leftShift.x)
+        record["leftDy"] = Double(leftShift.y)
+        record["rightDx"] = Double(rightShift.x)
+        record["rightDy"] = Double(rightShift.y)
+
+        /*
+         ⚑ **The scale estimate, MEASURED AND NOT ACTED ON.**
+
+         The powder room settled that motion toward a subject is the traverse's problem rather than
+         the corner's, so a registration carrying scale is the known fix. This is not that
+         registration — it is the evidence needed to build it without guessing.
+
+         Two candidate ways to get scale were considered and one is already refuted. Deriving it
+         from the two half-frames is arithmetically clean — a scene scaling by `s` about the centre
+         separates the half-crops by exactly `s - 1` — and it inherits the noise that retired the
+         half-split as a trust check: replayed against the recorded walks it returned scale 1.83 and
+         **-0.055** on pairs that had registered cleanly. Building the new model on the measurement
+         the old model was retired for is the mistake this session warned the design session about
+         two rounds ago.
+
+         So Vision's own homography is asked instead, and its answer is recorded beside the
+         translation-only verdict rather than replacing it. It cannot be validated from the
+         screenshots the owner sends — those are re-rendered and re-cropped, and a harness built on
+         them disagreed with the device on a pair whose value is known. **One walk with this
+         recorded settles it on real buffers**, and then the switch is one line with evidence
+         behind it.
+        */
+        let scaleRequest = VNHomographicImageRegistrationRequest(targetedCVPixelBuffer: current)
+        if (try? VNSequenceRequestHandler().perform([scaleRequest], on: previous)) != nil,
+           let warp = (scaleRequest.results?.first as? VNImageHomographicAlignmentObservation)?.warpTransform {
+            let sx = (warp.columns.0.x * warp.columns.0.x + warp.columns.0.y * warp.columns.0.y).squareRoot()
+            let sy = (warp.columns.1.x * warp.columns.1.x + warp.columns.1.y * warp.columns.1.y).squareRoot()
+            record["homographyScale"] = Double((sx + sy) / 2)
+            // Both axes, because a similarity has one scale and a homography that has drifted into
+            // perspective does not — the gap between them says whether the fit is trustworthy.
+            record["homographyScaleX"] = Double(sx)
+            record["homographyScaleY"] = Double(sy)
+            record["homographyTx"] = Double(warp.columns.2.x) / Double(CVPixelBufferGetWidth(current))
+            record["homographyTy"] = Double(warp.columns.2.y) / Double(CVPixelBufferGetHeight(current))
+        }
         record["dx"] = Double(full.x)
         record["dy"] = Double(full.y)
         record["overlap"] = Double(overlap)

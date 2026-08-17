@@ -1848,6 +1848,12 @@ final class CameraController: NSObject {
         /// ⚑ Fixed at the start of the run, for the same reason the exposure is — see `downscaled`.
         /// The crop axis must mean one thing for the whole traverse.
         var orientation: CGImagePropertyOrientation = .up
+        /// Largest single accumulator step since the last kept frame. The discriminator for the
+        /// corner — see `advanceTraverse`. Reset when a frame is requested.
+        var maxStep: CGFloat = 0
+        /// `maxStep` as it stood when this pair's frame was requested — the value that travels
+        /// with the pair rather than with the run.
+        var stepAtRequest: CGFloat = 0
     }
 
     /**
@@ -2036,6 +2042,27 @@ final class CameraController: NSObject {
         guard let step = translationFraction(from: previous, to: working) else { return }
         run.travel.x += step.x
         run.travel.y += step.y
+        /*
+         ⚑ **The size of a single accumulator step, kept so the corner can be explained.**
+
+         The owner's 2026-08-17 walks put the remaining `unverified` pairs in clusters, and he
+         identified where: **rounding the outside of the L, where the tank is nearest the lens.**
+         Those pairs read `expectedTravel ≈ 0.20` against a `displacement` of 0.6–0.86.
+
+         Two readings of that, and they demand opposite fixes. Either the pair mis-registered and
+         the gate is right — or **the accumulator under-counted**, because close to an object a
+         single step at 15 Hz exceeds what translational registration can follow, so it fires late
+         and the frames really are that far apart. ⚑ In the second case the displacement is
+         *correct*, several of those overlaps are already below the gap threshold, and the gate is
+         converting **real gaps into "cannot say"** — the false-negative direction, at exactly the
+         spot where a concierge is most likely to break contact.
+
+         The step size discriminates: small steps mean the accumulator was tracking and the pair is
+         wrong; large steps mean the accumulator was losing ground and the pair is right. Recorded
+         rather than acted on, because acting on the wrong reading of this either invents gaps or
+         hides them.
+        */
+        run.maxStep = max(run.maxStep, hypot(step.x, step.y))
         if hypot(run.travel.x, run.travel.y) >= Self.traverseTargetTravel {
             requestTraverseFrame(run: run, buffer: working)
         }
@@ -2045,7 +2072,9 @@ final class CameraController: NSObject {
         run.awaitingFrame = true
         run.pendingBuffer = buffer
         run.travelAtRequest = hypot(run.travel.x, run.travel.y)
+        run.stepAtRequest = run.maxStep
         run.travel = .zero
+        run.maxStep = 0
         // `.speed` because a traverse is a burst and the operator is still moving: a frame that
         // arrives late is a frame taken somewhere else. Quality prioritisation is right for a
         // deliberate plate and wrong here.
@@ -2080,7 +2109,8 @@ final class CameraController: NSObject {
         if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
             run.pairs.append(measureOverlap(from: previous, to: current,
                                             from: index - 1, to: index,
-                                            expectedTravel: run.travelAtRequest))
+                                            expectedTravel: run.travelAtRequest,
+                                            maxStep: run.stepAtRequest))
         }
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
@@ -2105,14 +2135,16 @@ final class CameraController: NSObject {
      */
     private func measureOverlap(from previous: CVPixelBuffer, to current: CVPixelBuffer,
                                 from fromIndex: Int, to toIndex: Int,
-                                expectedTravel: CGFloat) -> [String: Any] {
+                                expectedTravel: CGFloat, maxStep: CGFloat) -> [String: Any] {
         let left = CGRect(x: 0, y: 0, width: 0.5, height: 1)
         let right = CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
         let full = translationFraction(from: previous, to: current)
         let leftShift = crops(previous, current, left).flatMap { translationFraction(from: $0.0, to: $0.1) }
         let rightShift = crops(previous, current, right).flatMap { translationFraction(from: $0.0, to: $0.1) }
 
-        var record: [String: Any] = ["from": fromIndex, "to": toIndex]
+        // Recorded on every pair, whichever way it exits — the corner discriminator is only
+        // useful on the pairs that failed.
+        var record: [String: Any] = ["from": fromIndex, "to": toIndex, "maxStep": Double(maxStep)]
         guard let full, let leftShift, let rightShift else {
             record["measured"] = false
             record["contiguity"] = "unverified"

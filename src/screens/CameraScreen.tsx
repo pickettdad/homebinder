@@ -712,7 +712,18 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           </span>
         )}
         <div className="flex items-center gap-2">
-          {status?.torchOn && <span className="rounded-full bg-amber-400/90 px-2 py-1 text-xs text-slate-900">torch</span>}
+          {/*
+            ⚑ **The torch word is gone, and removal is the answer rather than a third fix.**
+
+            It said the same thing as the torch button and said it a beat later, because it was
+            painted from `torchOn` alone while the button now carries asked / on / off. The owner
+            offered both options — teach it the same three states, or drop it — and two indicators
+            for one fact is the worse of the two whichever is faster: the moment they disagree, and
+            they did, the concierge has to work out which one to believe.
+
+            What survives is the one you can act on. The button is where the tap lands, so the
+            button is where the state belongs.
+          */}
           {frameState === "degraded" && (
             <span className="rounded-full bg-rose-500 px-2 py-1 text-xs text-white">
               {status?.unmet.join(", ")}

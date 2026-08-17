@@ -210,6 +210,11 @@ export interface TraversePair {
    *  `unregistered`: Vision could not align the pair at all. `disparity` is retired — the
    *  half-split no longer decides anything (see `measureOverlap`). */
   reason?: "unregistered" | "impossiblyStill" | "disparity" | "implausibleShift" | "crossCheck";
+  /** ⚑ Largest single accumulator step behind this pair. The corner discriminator: small steps
+   *  mean the accumulator was tracking and the pair mis-registered; large steps mean it was losing
+   *  ground and the pair's big displacement is real — which would make some of these honest gaps
+   *  rather than "cannot say". Recorded, not acted on. */
+  maxStep?: number;
   /** ⚑ The trust check that now decides: how far the accumulator's path length sits from the
    *  pair's own displacement. Two independent measurements of one travel, both whole-frame. */
   crossCheck?: number;

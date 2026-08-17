@@ -45,6 +45,7 @@ import {
   startAudioProbe,
   stopAudioProbe,
   framesNeedingEyes,
+  storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
   type AudioProbeResult,
@@ -283,6 +284,8 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const statusRef = useRef<ModeStatusEvent | null>(null);
   statusRef.current = status;
   const [openCapture, setOpenCapture] = useState<MediaRef | null>(null);
+  /** Which frame of a filed capture is being looked at. Reset by opening a different one. */
+  const [storedIndex, setStoredIndex] = useState(0);
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
   const sessionFrames = useRef<Map<string, CaptureResult>>(new Map());
   /** When characters worth shooting first appeared — the start of the wait the concierge feels,
@@ -471,13 +474,63 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
 
   const endTraverse = useCallback(async () => {
     try {
-      setTraverseResult(await stopTraverse());
+      const result = await stopTraverse();
+      setTraverseResult(result);
+
+      /*
+        ⚑ **A traverse filed nothing at all, and nobody noticed because the numbers arrived.**
+
+        Every run wrote its frames to the native temp directory, returned their paths, computed
+        overlap across them — and then the screen kept the verdict and dropped the photographs. Six
+        walks of a mechanical room produced no coverage of it whatsoever.
+
+        It also made last round's instrument useless: the panel names *look at frames 3, 4* and
+        there were no frames to look at. **An instrument that points at something unreachable is
+        not an instrument** — and that is the same defect as the message on the stored viewer, and
+        as the panel headlining a retired metric, three times in three rounds.
+
+        Filed as ONE capture with `intent: "pan"`, because that is what it is: §4.1a's pan, one
+        continuous act the concierge started once. Frame 0 is the primary and the rest are its
+        siblings, so a thirty-frame walk adds **one** to the count of photographs in this room —
+        the same rule a bracket already follows, for the same reason.
+
+        Every frame is `evidence` rather than `insurance`: each covers a different part of the
+        wall, none is a spare exposure of the same thing, and none becomes spendable once
+        something has been read.
+      */
+      const currentZone = zoneRef.current;
+      const [first, ...rest] = result.frames;
+      if (currentZone && first) {
+        const roleFor = (index: number): FrameRoleMeta => ({
+          captureId: result.startedAt,
+          role: index === 0 ? "primary" : "evidence",
+          lens: statusRef.current?.lens,
+        });
+        const blobFor = async (path: string) => (await fetch(frameUrl(path))).blob();
+        const siblings = await Promise.all(
+          rest.map(async (f, i) => ({
+            blob: await blobFor(f.path),
+            mime: "image/jpeg",
+            frame: roleFor(i + 1),
+          })),
+        );
+        await capturePhotoV2(
+          // ⚑ To the zone, never the open container — the same rule a run trace follows. A pan
+          // covers a room; filing it inside the furnace would assert the room belongs to it.
+          { kind: "zone", id: currentZone },
+          await blobFor(first.path),
+          "image/jpeg",
+          undefined,
+          "pan",
+          { frame: roleFor(0), siblings },
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setTraversing(false);
     }
-  }, []);
+  }, [capturePhotoV2]);
 
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;
@@ -1073,29 +1126,63 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         them is a manifest question and a cross-repo contract, not this session's to settle (#163's
         neighbour).
       */}
-      {openCapture && (
-        <div className="absolute inset-0 z-40 flex flex-col bg-slate-950/95">
-          <div className="flex items-center justify-between p-3">
-            <span className="text-xs text-slate-400">
-              filed frame · the bracket's other exposures are not stored
-            </span>
-            <button
-              type="button"
-              onClick={() => setOpenCapture(null)}
-              className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200"
-            >
-              close
-            </button>
+      {/*
+        ⚑ **Every frame of a filed capture, from the record.**
+
+        This viewer used to show one image and say *the bracket's other exposures are not stored* —
+        which was true when it was written and became false the moment siblings shipped, so the
+        screen went on asserting an absence the record had already filled. **A message that was
+        accurate once is not a message that stays accurate**, and nothing made it re-check.
+
+        Reading from the stored siblings rather than from this session's in-memory map is also what
+        makes it work at all on a capture from an earlier visit — which is most of them, and was the
+        case the owner hit.
+      */}
+      {openCapture && (() => {
+        const frames = [openCapture, ...(openCapture.siblings ?? [])];
+        const shownFrame = frames[Math.min(storedIndex, frames.length - 1)] ?? openCapture;
+        return (
+          <div className="absolute inset-0 z-40 flex flex-col bg-slate-950/95">
+            <div className="flex items-center justify-between gap-2 p-3">
+              <span className="text-xs text-slate-400">
+                {storedFrameLabel(shownFrame)} · {storedIndex + 1} of {frames.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setOpenCapture(null)}
+                className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200"
+              >
+                close
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center p-2">
+              <MediaThumb
+                mediaId={shownFrame.mediaId}
+                mime={shownFrame.mime}
+                className="max-h-full max-w-full object-contain"
+              />
+            </div>
+            {frames.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto p-3">
+                {frames.map((f, index) => (
+                  <button
+                    key={f.mediaId}
+                    type="button"
+                    onClick={() => setStoredIndex(index)}
+                    className={`shrink-0 rounded-lg px-3 py-2 text-xs ring-1 ${
+                      index === storedIndex
+                        ? "bg-slate-100 text-slate-900 ring-slate-100"
+                        : "bg-slate-900/70 text-slate-300 ring-slate-600"
+                    }`}
+                  >
+                    {storedFrameLabel(f)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="flex min-h-0 flex-1 items-center justify-center p-2">
-            <MediaThumb
-              mediaId={openCapture.mediaId}
-              mime={openCapture.mime}
-              className="max-h-full max-w-full object-contain"
-            />
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       <footer className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-3">
         {/*
@@ -1118,6 +1205,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 setFrameIndex(0);
                 setViewing(shot);
               } else {
+                setStoredIndex(0);
                 setOpenCapture(capture);
               }
             }}

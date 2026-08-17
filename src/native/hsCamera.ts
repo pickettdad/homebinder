@@ -701,3 +701,28 @@ export function frameStateOf(status: { mode: CameraMode; unmet: string[]; sessio
 export function shouldOfferRetake(event: Pick<TextBoxesEvent, "characterCount" | "marginal">): boolean {
   return event.characterCount > 0 && event.marginal;
 }
+
+/**
+ * What a FILED frame is, read off the record rather than off this session.
+ *
+ * ⚑ The sibling of `frameLabel`, which names frames still in hand. This one names frames that have
+ * been stored, and it exists because the stored viewer could not tell one from another — it showed
+ * the first and asserted the rest were not kept, which stopped being true the moment siblings
+ * shipped.
+ *
+ * Names what the role means to a person, not the role word: *no torch* and *−1 EV* answer the
+ * question a reviewer is asking, and "evidence" answers a question about our own bookkeeping.
+ */
+export function storedFrameLabel(frame: {
+  frame?: { role: "primary" | "evidence" | "insurance"; torch?: boolean; ev?: number };
+}): string {
+  const meta = frame.frame;
+  if (!meta) return "frame";
+  if (typeof meta.ev === "number") {
+    const ev = meta.ev > 0 ? `+${meta.ev} EV` : meta.ev < 0 ? `−${Math.abs(meta.ev)} EV` : "0 EV";
+    return meta.torch === false ? `no torch · ${ev}` : ev;
+  }
+  if (meta.torch === false) return "no torch";
+  if (meta.role === "primary") return "kept";
+  return "frame";
+}

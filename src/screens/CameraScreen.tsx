@@ -481,7 +481,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    * held the surface back because the traverse and the run trace may be one primitive, and a
    * door built tonight would harden around the narrower of the two.
    */
-  const beginTraverse = useCallback(async () => {
+  const beginTraverse = useCallback(async (continuesFrom?: string) => {
     setTraverseResult(null);
     setTraverseProgress(null);
     try {
@@ -495,7 +495,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           await requestLens(policy.default);
         }
       }
-      await startTraverse();
+      await startTraverse(continuesFrom);
       setTraversing(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -531,10 +531,19 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       const currentZone = zoneRef.current;
       const [first, ...rest] = result.frames;
       if (currentZone && first) {
+        /*
+          ⚑ The join and the registration model ride the FILED capture, not just the panel — which
+          is rule 43 applied to this change while writing it. A leg that declares itself a
+          continuation, and a number that is only meaningful against the model that produced it,
+          are both facts the desk needs and neither survives in the traverse result alone: that
+          object lives until the next run and then goes.
+        */
         const roleFor = (index: number): FrameRoleMeta => ({
           captureId: result.startedAt,
           role: index === 0 ? "primary" : "evidence",
           lens: statusRef.current?.lens,
+          registration: result.registration,
+          continuesFrom: result.continuesFrom ?? undefined,
         });
         const blobFor = async (path: string) => (await fetch(frameUrl(path))).blob();
         const siblings = await Promise.all(
@@ -1140,6 +1149,28 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               <p className="mt-1">
                 <button type="button" onClick={() => void shareTraverseData()} className="underline">
                   send traverse numbers
+                </button>
+              </p>
+            )}
+            {/*
+              ⚑ **Resume declares a break; it does not claim coverage across one.**
+
+              *I chose to stop here* is a fact the concierge is qualified to state. *Nothing was
+              missed between the legs* belongs to the desk, and this button records no opinion on
+              it — which is why the join is `declared` and never `contiguous`.
+
+              Offered beside "start traverse" rather than instead of it, because the two mean
+              different things and the record distinguishes them: a declared continuation, or two
+              unrelated pans.
+            */}
+            {traverseResult && !traversing && (
+              <p className="mt-1">
+                <button
+                  type="button"
+                  onClick={() => void beginTraverse(traverseResult.startedAt)}
+                  className="rounded-lg bg-slate-900/70 px-2 py-1 text-xs text-slate-200 ring-1 ring-slate-600"
+                >
+                  resume — declare a break
                 </button>
               </p>
             )}

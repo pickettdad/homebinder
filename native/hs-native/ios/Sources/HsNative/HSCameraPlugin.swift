@@ -189,7 +189,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Camera is not running — call start first")
             return
         }
-        controller.startTraverse { result in
+        controller.startTraverse(continuesFrom: call.getString("continuesFrom")) { result in
             switch result {
             case .success(let payload): call.resolve(payload)
             case .failure(let error): call.reject(error.localizedDescription)
@@ -1851,6 +1851,15 @@ final class CameraController: NSObject {
         /// Largest single accumulator step since the last kept frame. The discriminator for the
         /// corner — see `advanceTraverse`. Reset when a frame is requested.
         var maxStep: CGFloat = 0
+        /**
+         ⚑ The previous leg this run declares itself a continuation of, if any.
+
+         **A declaration about the concierge's own hands, never about coverage.** *I chose to stop
+         here* is a fact they are qualified to state; *nothing was missed between the legs* is the
+         desk's to decide and this records no opinion on it. That distinction is the whole shape —
+         it is why the join is `declared` rather than `contiguous`.
+        */
+        var continuesFrom: String?
         /// `maxStep` as it stood when this pair's frame was requested — the value that travels
         /// with the pair rather than with the run.
         var stepAtRequest: CGFloat = 0
@@ -1923,7 +1932,8 @@ final class CameraController: NSObject {
     private var isTraversing = false
     private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
 
-    func startTraverse(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+    func startTraverse(continuesFrom: String? = nil,
+                       completion: @escaping (Result<[String: Any], Error>) -> Void) {
         guard session.isRunning else {
             completion(.failure(CameraError.notRunning))
             return
@@ -1967,11 +1977,28 @@ final class CameraController: NSObject {
             run.unmet = unmet
             run.torchLatched = latched
             run.orientation = orientation
+            run.continuesFrom = continuesFrom
             self.traverse = run
             self.isTraversing = true
             DispatchQueue.main.async {
                 completion(.success([
                     "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
+                    /*
+                     ⚑ **Which registration model produced every number in this run.**
+
+                     Stamped now, while there is only one, because the moment a second exists the
+                     records become indistinguishable — and `overlap`, `displacement`, `crossCheck`
+                     and the plausibility gate are all *defined against the translation-only model*.
+                     A pair that reads 0.729 under translation reads differently under one that
+                     carries scale, and a reader with no way to tell which produced a number cannot
+                     compare two runs.
+
+                     Exactly the reasoning `engine` already carries on an OCR read: a measurement is
+                     only comparable against another from the same instrument. Adding this before
+                     the second model exists is what keeps every traverse taken so far readable.
+                    */
+                    "registration": "translation-v1",
+                    "continuesFrom": run.continuesFrom as Any,
                     "targetTravel": Double(Self.traverseTargetTravel),
                     "minimumOverlap": Self.traverseMinimumOverlap,
                     "disparityTolerance": Self.traverseDisparityTolerance,
@@ -1998,6 +2025,9 @@ final class CameraController: NSObject {
                 "pairs": run.pairs,
                 "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
                 "endedAt": ISO8601DateFormatter().string(from: Date()),
+                // Both travel with the finished run, for the reasons given where they are set.
+                "registration": "translation-v1",
+                "continuesFrom": run.continuesFrom as Any,
                 "torchLatched": run.torchLatched,
                 "unmet": run.unmet,
                 // ⚑ The count the binder actually asks for. A traverse with one unverified pair

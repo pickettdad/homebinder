@@ -323,12 +323,29 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
             {zones.length === 1 ? "" : "s"} walked
           </p>
         </div>
-        {/* §0.4: the export is the completion gate — a visit is not done until it is out
-            of the app. In capture mode there is no walk list to go back to, so the only exit
-            leads where the visit actually ends. */}
-        <BigButton variant="ghost" onClick={() => navigate({ name: "export2" })}>
-          Finish
-        </BigButton>
+        {/*
+          §0.4: the export is the completion gate — a visit is not done until it is out of the app,
+          so `Finish` leads where the visit actually ends.
+
+          ⚑ **But it was the ONLY exit, and that made leaving a room indistinguishable from ending
+          the visit** (owner report, 2026-08-16 evening). The reasoning was that capture mode has
+          no walk list to go back to — true, and it does not follow that there is nowhere to go.
+          Home is a real place and the viewfinder has always had a button to it; the screen between
+          them did not. A concierge who wanted to put the iPad down for a minute had one control
+          and it exported the visit.
+
+          Leaving does not end anything: the events are already on disk and the zone is still open
+          when they come back. That is exactly why this is a `ghost` beside `Finish` rather than a
+          confirm — there is nothing to confirm.
+        */}
+        <div className="flex shrink-0 items-center gap-2">
+          <BigButton variant="ghost" onClick={() => navigate({ name: "home" })}>
+            Home
+          </BigButton>
+          <BigButton variant="ghost" onClick={() => navigate({ name: "export2" })}>
+            Finish
+          </BigButton>
+        </div>
       </header>
 
       {/* Above the zone switcher and the camera, so it reads before the walk starts and is

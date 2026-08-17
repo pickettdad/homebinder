@@ -287,6 +287,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    *  which begins well before the camera calls the iPad still. */
   const readableSince = useRef<number | null>(null);
   const [timing, setTiming] = useState<{ waitedMs: number; captureMs: number } | null>(null);
+  /** What the torch was last asked to be, until the camera confirms it. See `toggleTorch`. */
+  const [torchAsked, setTorchAsked] = useState<boolean | null>(null);
+  const torchPending = torchAsked !== null && torchAsked !== (status?.torchOn ?? false);
   const [audioProbe, setAudioProbe] = useState<AudioProbeStarted | null>(null);
   const [audioClip, setAudioClip] = useState<AudioProbeResult | null>(null);
   const [capabilities, setCapabilities] = useState<CameraCapabilities | null>(null);
@@ -556,6 +559,24 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     });
     if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: "HouseSteady traverse numbers" });
+    }
+  };
+
+  /**
+   * Ask the torch to change, and show that it was asked.
+   *
+   * ⚑ The request is cleared by the *confirmation*, not by a timer — `status.torchOn` reaching the
+   * asked-for value is what ends the pending state. A timer would clear it whether or not anything
+   * happened, which is the false-reassurance failure this button already avoids on the other side.
+   */
+  const toggleTorch = async () => {
+    const wanted = !status?.torchOn;
+    setTorchAsked(wanted);
+    try {
+      await adjustCamera({ torchOverride: wanted });
+    } catch (err) {
+      setTorchAsked(null);
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -1109,9 +1130,29 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             <button
               type="button"
               aria-label="Torch"
-              onClick={() => void adjustCamera({ torchOverride: !status?.torchOn })}
-              className={`h-14 w-14 rounded-full text-lg ring-1 ${
-                status?.torchOn ? "bg-amber-400 text-slate-900 ring-amber-300" : "bg-slate-900/70 text-slate-200 ring-slate-600"
+              onClick={() => void toggleTorch()}
+              /*
+                ⚑ **Three states, not two** (owner report 2026-08-17: the torch lights immediately
+                but the button takes about a second to look pressed).
+
+                The lag is real and the rule that causes it is the right rule — the button is
+                painted from the confirmed state, never from the tap, because a control painted
+                from the tap is a silent failure with false reassurance on top. The `modeStatus`
+                stream is what confirms, and it runs on a five-second timer, so a tap can wait
+                nearly that long to be acknowledged.
+
+                The fix is therefore not to paint from the tap. It is to admit that *asked* is a
+                real state distinct from *on* and from *off*, and to show it: dimmed-amber while
+                the request is outstanding, solid once the camera confirms, and back to off with a
+                complaint if the confirmation never arrives. **Nothing here claims the torch is on
+                until the camera says so** — it only stops pretending nothing happened.
+              */
+              className={`h-14 w-14 rounded-full text-lg ring-1 transition-colors ${
+                status?.torchOn
+                  ? "bg-amber-400 text-slate-900 ring-amber-300"
+                  : torchPending
+                    ? "bg-amber-400/40 text-amber-100 ring-amber-400/60"
+                    : "bg-slate-900/70 text-slate-200 ring-slate-600"
               }`}
             >
               ⚡

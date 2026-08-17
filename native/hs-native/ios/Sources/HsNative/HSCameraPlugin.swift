@@ -482,6 +482,49 @@ final class CameraController: NSObject {
      hand; 0.008 sits just above it.
      */
     private let stillThreshold: CGFloat = 0.008
+
+    /**
+     ⚑ **What "still enough" actually depends on — and it is not a constant.**
+
+     The field number that forced this: **held 9.6 s** on one nameplate, crouched with both elbows
+     braced, while the capture itself took 0.6 s. *Ninety-four percent of the wait was the gate.*
+     A concierge cannot do that thirty times a room, so this is not a threshold to nudge.
+
+     Blur is angular rate multiplied by **exposure time**, and a flat threshold ignores the second
+     term entirely — so it demands the same stillness of an 8 ms frame in a bright garage as of a
+     66 ms frame in a dark plant room. The bright case is being made to wait for no reason.
+
+     And the camera is already working on the problem: optical stabilisation runs on this lens
+     whatever we do, and `photoQualityPrioritization = .quality` fuses several exposures. **Holding
+     the shutter for ten seconds buys almost nothing those two have not already bought** — it only
+     buys it later.
+
+     So the gate is computed from the exposure the camera reports, with a stabilisation credit, and
+     ⚑ **clamped so it can never be stricter than the old flat value.** At the owner's 41.7 ms it
+     comes out about 2.7× looser; in a bright room looser still; in a genuinely dark room it tightens
+     back towards where it was, which is the one case where holding still is really buying something.
+
+     `stillThreshold` above is the floor of that clamp and the value the panel prints when the
+     camera has not yet reported an exposure.
+     */
+    private static let blurBudgetFrameWidths: CGFloat = 0.0015
+    /// What optical stabilisation is worth, as a multiplier on tolerable movement. Deliberately
+    /// conservative: OIS is usually quoted at two to three stops, and this claims rather less than
+    /// one and a half.
+    private static let stabilisationCredit: CGFloat = 3.0
+    private static let stillThresholdCeiling: CGFloat = 0.05
+
+    /// The analysis cadence in milliseconds — `motion` is a shift per analysed frame, so an
+    /// exposure has to be expressed in the same units before the two can be compared.
+    private var analysisIntervalMs: CGFloat { CGFloat(analyseEveryNthFrame) * 1000.0 / 30.0 }
+
+    private var effectiveStillThreshold: CGFloat {
+        guard let device else { return stillThreshold }
+        let exposureMs = CGFloat(CMTimeGetSeconds(device.exposureDuration) * 1000)
+        guard exposureMs > 0 else { return stillThreshold }
+        let allowed = Self.blurBudgetFrameWidths * Self.stabilisationCredit * (analysisIntervalMs / exposureMs)
+        return min(Self.stillThresholdCeiling, max(stillThreshold, allowed))
+    }
     private var lastMotion: CGFloat = 1.0
 
     /**
@@ -1840,6 +1883,11 @@ final class CameraController: NSObject {
      which would be this mechanism quietly agreeing with itself.
      */
     private static let traverseHalfSanityBound: CGFloat = 0.33
+    /// How many times the target travel a pair's own displacement may reach before the whole-frame
+    /// registration is treated as having failed. Derived from the trigger rather than fitted: a
+    /// pair exists because one target's worth of travel accumulated, so several times that is not
+    /// a fast operator, it is a bad number. See `measureOverlap`.
+    private static let traversePlausibleShiftFactor: CGFloat = 2.5
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
@@ -2113,6 +2161,35 @@ final class CameraController: NSObject {
         record["dx"] = Double(full.x)
         record["dy"] = Double(full.y)
         record["overlap"] = Double(overlap)
+
+        /*
+         ⚑ **The WHOLE frame can mis-register too, and it does so per axis.**
+
+         Three runs on 2026-08-17 show it unmistakably. The garage sweep reads `dx` of 0.203,
+         0.216, 0.193 — landing on the 0.20 trigger almost exactly — while `dy` on the same pairs
+         returns −0.750, −0.629, +0.639. **One axis is perfect and the other is garbage**, and
+         across the three runs 26 of 110 shift readings exceed 0.5 with a cluster at 0.63–0.75.
+         Vision returns a number, not a failure, so it was recorded as a measurement — the same
+         defect as the half guard above, one level up.
+
+         The bound is not tuned; it is read off the mechanism's own trigger. **A pair exists
+         because the accumulator had travelled one target's worth**, so its displacement should be
+         about `traverseTargetTravel`. A pair claiming three and a half times that has not measured
+         a fast operator — the accumulator would have fired a frame long before. And the bound sits
+         inside the region where overlap has already collapsed, so nothing that could have been
+         called contiguous is being discarded.
+
+         The effect on the recorded runs: the garage sweep goes from **0 of 7 usable to 3 of 3
+         trustworthy**, and on every run the pairs that survive this gate have their path length
+         and their displacement agreeing — 7 of 10, 3 of 3, 19 of 21.
+         */
+        let plausibleBound = max(expectedTravel, Self.traverseTargetTravel) * Self.traversePlausibleShiftFactor
+        if displacement > plausibleBound {
+            record["measured"] = false
+            record["contiguity"] = "unverified"
+            record["reason"] = "implausibleShift"
+            return record
+        }
 
         if worstHalf > Self.traverseHalfSanityBound {
             record["measured"] = false
@@ -2488,7 +2565,8 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
      live one.
      */
     fileprivate func emitFrameStatus(boxes: [[String: Any]], read: LiveRead, reading: Bool) {
-        let still = motionHistory.count >= motionHistoryLength && lastMotion < stillThreshold
+        let gate = effectiveStillThreshold
+        let still = motionHistory.count >= motionHistoryLength && lastMotion < gate
         onTextBoxes?([
             "boxes": boxes,
             // Steady AND looking at characters. Either alone is the wrong trigger: a still camera
@@ -2506,7 +2584,9 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             // a real mechanical room is a number somebody can read rather than a shutter that
             // mysteriously will not fire. Same stance as `lightScore`.
             "motion": Double(lastMotion),
-            "stillThreshold": Double(stillThreshold)
+            // The gate actually applied to this frame, not the floor it is clamped to —
+            // printing the constant while a different number decides is how a panel lies quietly.
+            "stillThreshold": Double(gate)
         ])
     }
 }

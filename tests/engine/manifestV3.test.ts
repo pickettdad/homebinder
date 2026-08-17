@@ -264,3 +264,69 @@ describe("zone close reason — the gap survives the export (ruling 2026-08-08)"
     expect(closeWith(undefined, "done").zones[0]!.closeReasonId).toBeUndefined();
   });
 });
+
+describe("the other frames of one capture", () => {
+  /*
+   ⚑ The shape exists to satisfy two demands that pull opposite ways.
+
+   The record must hold every frame: the unlit companion answers *did the torch erase characters*,
+   it measured as the cleanest plate of two nights, and it was being written to a temp directory
+   and discarded. So the manifest — the trust root — has to name it.
+
+   And no count may move. Every count in the app reads `photos.length`, so a bracketed plate filed
+   as four photographs would turn "6 photographs here" into 24 overnight. **A sibling is part of one
+   capture, not a photograph in its own right** — the concierge pressed once.
+  */
+  const primary = { mediaId: "f0", sha256: "sha0", mime: "image/jpeg", bytes: 10 };
+  const evidence = { mediaId: "f1", sha256: "sha1", mime: "image/jpeg", bytes: 11 };
+  const insurance = { mediaId: "f2", sha256: "sha2", mime: "image/jpeg", bytes: 12 };
+
+  const withSiblings = () => {
+    const events = mkEvents([
+      { type: "SessionInitialized", configId: "cfg", configVersion: "1.0", configHash: "h", propertyFlags: [] },
+      { type: "ZoneCreated", zoneId: "z1", zoneType: "utility", label: "Utility", attributes: {} },
+      {
+        type: "PhotoAdded",
+        media: { ...primary, frame: { captureId: "cap1", role: "primary" } },
+        target: { kind: "zone", id: "z1" },
+        siblings: [
+          { ...evidence, frame: { captureId: "cap1", role: "evidence", torch: false } },
+          { ...insurance, frame: { captureId: "cap1", role: "insurance", ev: -1 } },
+        ],
+      },
+    ]);
+    const state = foldV2(events);
+    return {
+      state,
+      manifest: buildManifestV3({
+        state, events, configSnapshot: { layers: [] },
+        exportedAt: "2026-08-17T00:00:00.000Z", appVersion: "0.5.0",
+      }),
+    };
+  };
+
+  it("⚑ lists every frame in the manifest, because the record must hold what was captured", () => {
+    const { manifest } = withSiblings();
+    const ids = manifest.media.map((m) => m.mediaId);
+    for (const id of ["f0", "f1", "f2"]) expect(ids).toContain(id);
+    // And each carries what it is, since the role cannot be recovered from the pixels later.
+    expect(manifest.media.find((m) => m.mediaId === "f1")?.frame?.role).toBe("evidence");
+    expect(manifest.media.find((m) => m.mediaId === "f2")?.frame?.role).toBe("insurance");
+  });
+
+  it("⚑ moves no count, however many frames one capture produced", () => {
+    const { state, manifest } = withSiblings();
+    // The invariant, stated over the counts rather than over these three ids: one press, one
+    // photograph, whatever the camera had to do to get it.
+    expect(state.zones[0]!.photos).toHaveLength(1);
+    expect(manifest.totals.photos).toBe(1);
+  });
+
+  it("keeps siblings with their primary's owner, so nothing is filed somewhere else", () => {
+    const { manifest } = withSiblings();
+    const owners = manifest.media
+      .filter((m) => ["f0", "f1", "f2"].includes(m.mediaId))
+      .map((m) => JSON.stringify(m.owner));
+    expect(new Set(owners).size).toBe(1);
+  });
+});

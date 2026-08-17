@@ -1854,6 +1854,10 @@ final class CameraController: NSObject {
         /// `maxStep` as it stood when this pair's frame was requested — the value that travels
         /// with the pair rather than with the run.
         var stepAtRequest: CGFloat = 0
+        /// Steps that failed to register since the last kept frame. Invisible to `travel`, which
+        /// is why they are counted — see `advanceTraverse`.
+        var droppedSteps = 0
+        var droppedAtRequest = 0
     }
 
     /**
@@ -2039,7 +2043,28 @@ final class CameraController: NSObject {
             return
         }
         run.previousBuffer = working
-        guard let step = translationFraction(from: previous, to: working) else { return }
+        /*
+         ⚑ **A step that fails to register is invisible to the accumulator, and that is the half of
+         the corner question `maxStep` cannot answer.**
+
+         `maxStep` says the *successful* steps were small — 0.010–0.026 of frame width against
+         0.013–0.034 on the pairs that passed — so the accumulator was tracking, and the pair
+         displacements of 0.6–1.0 look like keyframe mis-registration rather than real travel.
+         **But this early return drops a failed step silently**: travel simply does not advance, so
+         the accumulator under-counts by exactly the amount it could not see, and the run keeps
+         going as though nothing happened.
+
+         The owner reports a long break in captures while rounding the corner. Two explanations
+         survive that: the wider field of view needs more walking per frame-width, which the frame
+         rates support (wide fired 17 frames to normal's 31 over the same L, and the ultra-wide is
+         about twice the field) — or steps were failing there and the accumulator stalled. **A
+         count separates them**, and without it the discriminator is half an answer that reads like
+         a whole one.
+        */
+        guard let step = translationFraction(from: previous, to: working) else {
+            run.droppedSteps += 1
+            return
+        }
         run.travel.x += step.x
         run.travel.y += step.y
         /*
@@ -2073,8 +2098,10 @@ final class CameraController: NSObject {
         run.pendingBuffer = buffer
         run.travelAtRequest = hypot(run.travel.x, run.travel.y)
         run.stepAtRequest = run.maxStep
+        run.droppedAtRequest = run.droppedSteps
         run.travel = .zero
         run.maxStep = 0
+        run.droppedSteps = 0
         // `.speed` because a traverse is a burst and the operator is still moving: a frame that
         // arrives late is a frame taken somewhere else. Quality prioritisation is right for a
         // deliberate plate and wrong here.
@@ -2110,7 +2137,8 @@ final class CameraController: NSObject {
             run.pairs.append(measureOverlap(from: previous, to: current,
                                             from: index - 1, to: index,
                                             expectedTravel: run.travelAtRequest,
-                                            maxStep: run.stepAtRequest))
+                                            maxStep: run.stepAtRequest,
+                                            droppedSteps: run.droppedAtRequest))
         }
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
@@ -2135,7 +2163,8 @@ final class CameraController: NSObject {
      */
     private func measureOverlap(from previous: CVPixelBuffer, to current: CVPixelBuffer,
                                 from fromIndex: Int, to toIndex: Int,
-                                expectedTravel: CGFloat, maxStep: CGFloat) -> [String: Any] {
+                                expectedTravel: CGFloat, maxStep: CGFloat,
+                                droppedSteps: Int) -> [String: Any] {
         let left = CGRect(x: 0, y: 0, width: 0.5, height: 1)
         let right = CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
         let full = translationFraction(from: previous, to: current)
@@ -2144,7 +2173,8 @@ final class CameraController: NSObject {
 
         // Recorded on every pair, whichever way it exits — the corner discriminator is only
         // useful on the pairs that failed.
-        var record: [String: Any] = ["from": fromIndex, "to": toIndex, "maxStep": Double(maxStep)]
+        var record: [String: Any] = ["from": fromIndex, "to": toIndex,
+                                     "maxStep": Double(maxStep), "droppedSteps": droppedSteps]
         guard let full, let leftShift, let rightShift else {
             record["measured"] = false
             record["contiguity"] = "unverified"

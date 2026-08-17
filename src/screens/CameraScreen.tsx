@@ -23,6 +23,7 @@ import { useApp } from "../store/sessionStore";
 import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
 import type { MediaRef } from "../engine/v2/fold";
+import type { FrameReadMeta, FrameRoleMeta } from "../engine/schema/events";
 import {
   captureTargetFor,
   containerAfterZoneChange,
@@ -43,6 +44,7 @@ import {
   requestLens,
   startAudioProbe,
   stopAudioProbe,
+  framesNeedingEyes,
   traverseDiagnosis,
   traverseVerdict,
   type AudioProbeResult,
@@ -364,8 +366,45 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       const frame = result.frames[0];
       if (currentZone && frame) {
         const blob = await frameBlob(frame);
+        /*
+          ⚑ **Every frame of the capture is filed, and each says what it is.**
+
+          `frames[0]` is the primary — the one that counts, and the only one any count sees. The
+          unlit companion is `evidence`: it answers *did the torch erase characters*, a question
+          that survives for years, and on 2026-08-16 it produced the cleanest plate of two nights.
+          The remaining bracket exposures are `insurance`: three shots so that one reads, spent once
+          the desk has resolved the plate.
+
+          The distinction is marked here, at write time, because it cannot be recovered from the
+          pixels later — and a retention policy that keeps evidence and drops insurance is then a
+          filter over a field rather than a schema change nobody can make retroactively.
+        */
+        const captureId = result.at;
+        const roleOf = (index: number): FrameRoleMeta => ({
+          captureId,
+          role: index === 0 ? "primary" : result.frames[index]?.torch === false && result.torchPaired ? "evidence" : "insurance",
+          torch: result.frames[index]?.torch,
+          ev: result.bracketed && index < 3 ? [-1, 0, 1][index] : undefined,
+          lens: result.lens,
+        });
+        const readOf = (index: number): FrameReadMeta | undefined => {
+          const ocr = result.frames[index]?.ocr;
+          return ocr
+            ? { text: ocr.text, engine: ocr.engine, confidence: ocr.meanConfidence, osVersion: ocr.osVersion }
+            : undefined;
+        };
+        const siblings = await Promise.all(
+          result.frames.slice(1).map(async (f, i) => ({
+            blob: await frameBlob(f),
+            mime: "image/jpeg",
+            read: readOf(i + 1),
+            frame: roleOf(i + 1),
+          })),
+        );
         const mediaId = await capturePhotoV2(
           captureTargetFor(openRef.current, currentZone, undefined), blob, "image/jpeg",
+          undefined, undefined,
+          { read: readOf(0), frame: roleOf(0), siblings },
         );
         /*
           ⚑ **The link back from the filed capture to the frames it came from**, and it exists to
@@ -628,6 +667,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   };
 
   const diagnosis = traverseResult ? traverseDiagnosis(traverseResult) : null;
+  const eyes = traverseResult ? framesNeedingEyes(traverseResult) : [];
   const frameState = frameStateOf(status);
   // Clamped rather than trusted: a stack of three followed by a stack of one would otherwise
   // leave the index pointing past the end and render nothing at all.
@@ -971,23 +1011,38 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               Printing a cause on ambiguous data is the alarm-on-the-majority-case failure landing
               on the one question where a confident wrong answer costs another wasted round.
             */}
-            {traverseResult && !traversing && diagnosis && diagnosis.measured > 0 && (
+            {/*
+              ⚑ **The panel led with a retired metric, which is the torch word's defect one screen
+              over.** `disparity` stopped gating anything when the trust check moved to the whole
+              frame — so on a run that scored 21 of 28 with no gaps it correctly read 0.4668, and
+              the owner read that as something being wrong. It also printed *the y axis is spending
+              the tolerance* against a tolerance nothing is spent on any more.
+
+              So the order follows the decision: what the verdict turned on first, then why the
+              rest could not be judged, then the retired number labelled as retired. The attribution
+              line is gone rather than repointed — an attribution for a check that no longer gates
+              is exactly the sentence that misled.
+            */}
+            {traverseResult && !traversing && diagnosis && (
               <p className="mt-1 text-slate-400">
-                disparity med · <span className="font-mono text-slate-100">{diagnosis.medianDisparity?.toFixed(4)}</span>
-                {" "}(x {diagnosis.medianDisparityX?.toFixed(4)} · y {diagnosis.medianDisparityY?.toFixed(4)})
+                cross-check med ·{" "}
+                <span className="font-mono text-slate-100">{diagnosis.medianCrossCheck?.toFixed(4) ?? "—"}</span>
+                {" "}· {diagnosis.measured} judged
                 <br />
                 cannot-say · {diagnosis.reasons.crossCheck} cross-check · {diagnosis.reasons.implausibleShift} implausible ·{" "}
                 {diagnosis.reasons.impossiblyStill} impossibly still · {diagnosis.reasons.unregistered} unregistered
-                {diagnosis.dominant && (
+                {eyes.length > 0 && (
                   <>
                     <br />
-                    <span className="text-amber-400">
-                      {diagnosis.dominant === "vertical"
-                        ? "the y axis is spending the tolerance"
-                        : "the x axis is spending the tolerance"}
-                    </span>
+                    {/* ⚑ Not an alarm: the measurement is in doubt, not the coverage. The frames
+                        are named because a person settles in seconds what arithmetic cannot. */}
+                    <span className="text-amber-400">look at frames {eyes.join(", ")}</span>
                   </>
                 )}
+                <br />
+                <span className="text-slate-600">
+                  disparity {diagnosis.medianDisparity?.toFixed(4) ?? "—"} — recorded, not deciding
+                </span>
               </p>
             )}
             {traverseResult && !traversing && traverseResult.pairs.length > 0 && (

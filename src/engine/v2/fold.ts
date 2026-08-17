@@ -11,7 +11,7 @@
  *   visit), discarded media
  *   leaves the ref lists but the event trail remains in the log.
  */
-import type { Source } from "../schema/events";
+import type { CaptureMediaMeta, FrameReadMeta, FrameRoleMeta, Source } from "../schema/events";
 import type {
   CaptureIntent,
   CaptureTarget,
@@ -38,6 +38,13 @@ export interface MediaRef {
    *  Rides the ref, so it survives MediaReassigned for free — the intent is a fact about
    *  the act of capture and does not change when the capture is re-filed. */
   intent?: CaptureIntent;
+  /** ⚑ The device read of THIS frame — never of the object. See `FrameReadMeta`. */
+  read?: FrameReadMeta;
+  /** What this frame is within its capture, when a capture produced more than one. */
+  frame?: FrameRoleMeta;
+  /** ⚑ The other frames of the same capture. Under the primary rather than beside it, so that
+   *  `photos.length` still counts what a person would call photographs — see `PhotoAdded`. */
+  siblings?: MediaRef[];
   source: Source;
 }
 
@@ -188,12 +195,22 @@ export function exportIsCurrent(state: SessionStateV2): boolean {
 }
 
 const mediaRef = (
-  media: { mediaId: string; sha256: string; mime: string; bytes: number },
+  media: CaptureMediaMeta,
   at: string,
   source: Source,
   durationMs?: number,
   intent?: CaptureIntent,
-): MediaRef => ({ ...media, at, source, durationMs, intent });
+  siblings?: CaptureMediaMeta[],
+): MediaRef => ({
+  ...media,
+  at,
+  source,
+  durationMs,
+  intent,
+  // Siblings inherit the capture's time, source and intent: they are the same act, and a frame
+  // that disagreed with its primary about when it was taken would be a second capture.
+  siblings: siblings?.map((sib) => ({ ...sib, at, source, intent })),
+});
 
 export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
@@ -478,7 +495,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
       }
 
       case "PhotoAdded":
-        if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs, e.intent), e.target, false)) orphan(e);
+        if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs, e.intent, e.siblings), e.target, false)) orphan(e);
         break;
       case "VoiceNoteAdded":
         if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs), e.target, true)) orphan(e);

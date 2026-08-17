@@ -210,6 +210,10 @@ export interface TraversePair {
    *  `unregistered`: Vision could not align the pair at all. `disparity` is retired — the
    *  half-split no longer decides anything (see `measureOverlap`). */
   reason?: "unregistered" | "impossiblyStill" | "disparity" | "implausibleShift" | "crossCheck";
+  /** ⚑ Steps that failed to register behind this pair. Invisible to the accumulator's travel sum,
+   *  so a run can under-count by exactly the amount it could not see. The other half of the corner
+   *  discriminator — `maxStep` only sees the steps that succeeded. */
+  droppedSteps?: number;
   /** ⚑ Largest single accumulator step behind this pair. The corner discriminator: small steps
    *  mean the accumulator was tracking and the pair mis-registered; large steps mean it was losing
    *  ground and the pair's big displacement is real — which would make some of these honest gaps
@@ -252,6 +256,9 @@ export interface TraversePair {
 export interface TraverseDiagnosis {
   pairs: number;
   measured: number;
+  /** ⚑ The check that decides. Listed first because the panel must lead with what the verdict
+   *  turned on — leading with `disparity`, which no longer gates, made a clean run read as broken. */
+  medianCrossCheck: number | null;
   medianDisparity: number | null;
   medianDisparityX: number | null;
   medianDisparityY: number | null;
@@ -277,6 +284,34 @@ const median = (values: number[]): number | null => {
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
 };
 
+/**
+ * The frames a person should look at, because arithmetic cannot settle what they answer.
+ *
+ * ⚑ **A rejected pair raises two different questions and this mechanism can only answer one.**
+ * `implausibleShift` says *this measurement is wrong* — and the 2026-08-17 walks back that up, with
+ * `maxStep` on rejected pairs at 0.010–0.026 against 0.013–0.034 on pairs that passed, so the
+ * accumulator was tracking while the pair claimed to have moved a whole frame width.
+ *
+ * It does **not** say whether anything in the room was missed. Those pairs report overlaps of
+ * 0.083–0.115, and if the reading is wrong then the true overlap is simply unknown — which is
+ * exactly the question a concierge answers in five seconds by looking at two photographs.
+ *
+ * So the frames are named. The alternative is arguing from numbers about something the owner can
+ * see, in the one corner of the room where he is closest to an object and most likely to have
+ * broken contact.
+ */
+export function framesNeedingEyes(result: Pick<TraverseResult, "pairs">): number[] {
+  const indices = new Set<number>();
+  for (const pair of result.pairs) {
+    // Only the pairs whose *measurement* is in doubt. A crossCheck disagreement is a smaller
+    // claim and a genuine gap is already reported as one — neither needs a person.
+    if (pair.reason !== "implausibleShift") continue;
+    indices.add(pair.from);
+    indices.add(pair.to);
+  }
+  return [...indices].sort((a, b) => a - b);
+}
+
 export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): TraverseDiagnosis {
   const pairs = result.pairs;
   const measured = pairs.filter((p) => p.measured);
@@ -295,6 +330,9 @@ export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): Traver
   return {
     pairs: pairs.length,
     measured: measured.length,
+    medianCrossCheck: median(
+      measured.map((p) => p.crossCheck).filter((v): v is number => typeof v === "number"),
+    ),
     medianDisparity: pick("disparity"),
     medianDisparityX,
     medianDisparityY,

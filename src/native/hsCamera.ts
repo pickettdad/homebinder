@@ -212,6 +212,10 @@ export interface TraversePair {
   rightDy?: number;
   expectedTravel?: number;
   displacement?: number;
+  /** ⚑ How far the worse half's translation sits from the whole frame's. Parallax nudges a half
+   *  away from the whole; it cannot send it a third of a frame away at any depth a room contains,
+   *  so a large value here is a failed registration reporting itself as a measurement. */
+  halfVsWhole?: number;
 }
 
 /**

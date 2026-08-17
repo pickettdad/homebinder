@@ -22,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../store/sessionStore";
 import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
+import type { MediaRef } from "../engine/v2/fold";
 import {
   captureTargetFor,
   containerAfterZoneChange,
@@ -212,7 +213,15 @@ function ObjectStrip({
  * through the strip instead. A strip that silently changes what it is showing is the same defect
  * with a different door.
  */
-function ContextFilmstrip({ model, label }: { model: ReturnType<typeof stripModel>; label: string }) {
+function ContextFilmstrip({
+  model,
+  label,
+  onOpen,
+}: {
+  model: ReturnType<typeof stripModel>;
+  label: string;
+  onOpen: (capture: MediaRef) => void;
+}) {
   return (
     <div className="flex flex-col gap-1">
       <p className="px-1 text-xs text-slate-400">
@@ -227,13 +236,21 @@ function ContextFilmstrip({ model, label }: { model: ReturnType<typeof stripMode
         )}
       </p>
       {model.captures.length > 0 && (
-        // Not tappable: this is the record, not a picker. Judging a plate at 1:1 happens in the
-        // harness, which is where it has always happened.
+        /* ⚑ Tappable, reversing the previous "this is the record, not a picker". The field
+           answered it (owner, 2026-08-16 evening): a thumbnail you cannot open is a thumbnail you
+           cannot check, and checking is the entire reason the strip shows what was filed. Opening
+           one is looking, not picking — nothing here changes where a capture went. */
         <div className="flex gap-2 overflow-x-auto pb-1">
           {model.captures.map((capture) => (
-            <div key={capture.mediaId} className="h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600">
+            <button
+              key={capture.mediaId}
+              type="button"
+              aria-label="Open capture"
+              onClick={() => onOpen(capture)}
+              className="h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600"
+            >
               <MediaThumb mediaId={capture.mediaId} mime={capture.mime} className="h-full w-full object-cover" />
-            </div>
+            </button>
           ))}
         </div>
       )}
@@ -263,6 +280,10 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    *  `beginTraverse` needs the lens state and is deliberately stable. */
   const statusRef = useRef<ModeStatusEvent | null>(null);
   statusRef.current = status;
+  const [openCapture, setOpenCapture] = useState<MediaRef | null>(null);
+  /** When the read first went steady-and-readable, so the wait can be told from the capture. */
+  const steadySince = useRef<number | null>(null);
+  const [timing, setTiming] = useState<{ waitedMs: number; captureMs: number } | null>(null);
   const [audioProbe, setAudioProbe] = useState<AudioProbeStarted | null>(null);
   const [audioClip, setAudioClip] = useState<AudioProbeResult | null>(null);
   const [capabilities, setCapabilities] = useState<CameraCapabilities | null>(null);
@@ -422,9 +443,33 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
       // A stray word on a pipe label is a stable read too. Six characters is roughly the shortest
       // thing worth firing the shutter for on a plate, and it keeps the trigger off the noise.
       const worthShooting = event.characterCount >= 6;
-      if (autoRef.current && event.stable && worthShooting && Date.now() - lastAuto.current > 4000) {
+
+      /*
+        ⚑ **Two different waits, timed apart** (owner report, 2026-08-16 evening: *auto-capture
+        takes a while to fire*, alongside *0.008 is still too tight*). Those are not one complaint,
+        and changing the threshold on the strength of the combined feeling would be tuning the
+        wrong half:
+
+        - **`waitedMs`** — steady-and-readable until the shutter fires. This is what the threshold
+          governs, plus the six-frame motion window (1.2 s at the 5 Hz analysis cadence) and the
+          four-second cooldown. If this is the big one, the threshold is the lever.
+        - **`captureMs`** — shutter to result in hand. This roughly doubled when the pair was
+          reordered to put the flash last, so a slower-feeling camera is expected here and says
+          nothing about steadiness at all.
+
+        Measured before anything is changed, because the owner's two sentences have two different
+        fixes and the numbers say which he is feeling.
+      */
+      const ready = event.stable && worthShooting;
+      if (ready && steadySince.current === null) steadySince.current = Date.now();
+      if (!ready) steadySince.current = null;
+
+      if (autoRef.current && ready && Date.now() - lastAuto.current > 4000) {
+        const waited = steadySince.current === null ? 0 : Date.now() - steadySince.current;
         lastAuto.current = Date.now();
-        void shoot();
+        steadySince.current = null;
+        const began = Date.now();
+        void shoot().then(() => setTiming({ waitedMs: waited, captureMs: Date.now() - began }));
       }
     });
     const offStatus = onModeStatus(setStatus);
@@ -717,6 +762,15 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             </p>
           )}
           <p>session · <span className="font-mono text-slate-100">{status.sessionRunning ? "running" : "stopped"}</span></p>
+          {/* The two halves of "it takes a while", apart. `waited` is the threshold's to answer;
+              `capture` is the reordered pair's and says nothing about steadiness. */}
+          {timing && (
+            <p>
+              last auto · waited <span className="font-mono text-slate-100">{(timing.waitedMs / 1000).toFixed(1)}s</span>
+              {" · capture "}
+              <span className="font-mono text-slate-100">{(timing.captureMs / 1000).toFixed(1)}s</span>
+            </p>
+          )}
           {/*
             ⚑ **The shutter-sound probe — a measurement, not a feature** (owner approval
             2026-08-16). Whether the camera's click lands inside a live recording decides the shape
@@ -869,6 +923,41 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         </div>
       )}
 
+      {/*
+        A filed capture, full size.
+
+        ⚑ **One frame, and the panel says so rather than letting the absence pass as completeness.**
+        Only `frames[0]` is ever stored — the other exposures of a bracket, and the unlit half of a
+        torch pair, live in the native temp directory and are never written to the record. So this
+        can show what was filed and nothing else, and stepping through a stack here is not
+        bookkeeping that was skipped, it is **frames that do not exist to step through**. Storing
+        them is a manifest question and a cross-repo contract, not this session's to settle (#163's
+        neighbour).
+      */}
+      {openCapture && (
+        <div className="absolute inset-0 z-40 flex flex-col bg-slate-950/95">
+          <div className="flex items-center justify-between p-3">
+            <span className="text-xs text-slate-400">
+              filed frame · the bracket's other exposures are not stored
+            </span>
+            <button
+              type="button"
+              onClick={() => setOpenCapture(null)}
+              className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200"
+            >
+              close
+            </button>
+          </div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-2">
+            <MediaThumb
+              mediaId={openCapture.mediaId}
+              mime={openCapture.mime}
+              className="max-h-full max-w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
+
       <footer className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-3">
         {/*
           ⚑ Two different strips, and which one appears is decided by whether anything is being
@@ -877,7 +966,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           what Field 4b built: this session's captures, tappable into the 1:1 reviewer — which is
           where a plate gets judged and always has been.
         */}
-        {zoneId && <ContextFilmstrip model={strip} label={zone?.label ?? "zone"} />}
+        {zoneId && <ContextFilmstrip model={strip} label={zone?.label ?? "zone"} onOpen={setOpenCapture} />}
         {!zoneId && shots.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {shots.map((shot) => (

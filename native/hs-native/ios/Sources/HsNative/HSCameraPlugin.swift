@@ -919,6 +919,19 @@ final class CameraController: NSObject {
     /// window measures the transition rather than the scene.
     private static let torchSettleSeconds = 1.5
     private var torchChangedAt: Date?
+    /**
+     How far the light score must fall below where it stood when the torch armed before the torch
+     lets go.
+
+     Large on purpose. The score wanders as the camera is pointed around a room, and a small fall
+     is a different wall rather than a different room — releasing on that is the oscillator this
+     file already removed once. A quarter of the whole range is the size of a light being switched
+     on, and nothing smaller is worth acting on.
+     */
+    private static let torchReleaseDrop = 0.25
+    /// What the score read when the torch last armed. The baseline the drop is measured against —
+    /// nil whenever the torch is off, so a stale one can never govern a later decision.
+    private var lightScoreAtArm: Double?
 
     /**
      How long a companion frame's verdict governs arming.
@@ -1009,7 +1022,31 @@ final class CameraController: NSObject {
             // is the only thing that can turn the torch off in a big dark room — the score cannot,
             // for the reason `torchReleaseThreshold` now records.
             let vetoed = companionVetoUntil.map { Date() < $0 } ?? false
-            let wanted = !vetoed && (torchOn
+
+            /*
+             ⚑ **Somebody turned the light on** (owner report, 2026-08-16 evening: the torch stayed
+             lit after the room light came on, and only went out after the next auto-capture).
+
+             The absolute release threshold cannot see that, for the reason recorded on
+             `torchReleaseThreshold`: with the torch lit in a big room the score stays near the top
+             of its range whatever the room does, so it never falls to 0.15. And the companion
+             frame — the only honest exit built so far — is only produced *by a capture*. So the
+             torch was held by nothing re-reading while it held, which is the original latch wearing
+             a smaller hat.
+
+             A **drop from where the score sat when the torch armed** is visible without touching
+             the actuator, and it is the one thing that distinguishes the room changing from the
+             torch's own contribution: the torch's effect is a fixed offset once it is on, so any
+             large fall after that belongs to the room. That keeps the arm-only discipline intact —
+             nothing here consults a reading taken *because* the torch is lit; it compares two
+             readings taken under the same torch state.
+            */
+            var roomBrightened = false
+            if torchOn, let armedAt = lightScoreAtArm, score <= armedAt - Self.torchReleaseDrop {
+                roomBrightened = true
+            }
+
+            let wanted = !vetoed && !roomBrightened && (torchOn
                 ? score >= Self.torchReleaseThreshold
                 : score >= Self.underLitThreshold && !readingWell)
             if wanted != torchOn { setTorch(wanted) }
@@ -1024,6 +1061,10 @@ final class CameraController: NSObject {
             device.torchMode = on ? .on : .off
             torchOn = on
             torchChangedAt = Date()
+            // Sampled BEFORE the torch's own light has had time to reach the sensor — this call is
+            // the instant it switches, and auto-exposure needs `torchSettleSeconds` to respond. So
+            // this is a reading of the unlit room, which is what the drop must be measured against.
+            lightScoreAtArm = on ? lightScore() : nil
         } catch { torchOn = false }
     }
 
@@ -1741,6 +1782,9 @@ final class CameraController: NSObject {
         var index = 0
         var unmet: [String] = []
         var torchLatched = false
+        /// ⚑ Fixed at the start of the run, for the same reason the exposure is — see `downscaled`.
+        /// The crop axis must mean one thing for the whole traverse.
+        var orientation: CGImagePropertyOrientation = .up
     }
 
     /**
@@ -1766,6 +1810,16 @@ final class CameraController: NSObject {
     /// Above this, the two halves of the frame moved differently — parallax — and a single
     /// translation does not describe the pair, so no claim is made about it either way.
     private static let traverseDisparityTolerance = 0.08
+    /**
+     How far a half's translation may sit from the whole frame's before it is treated as a failed
+     registration rather than a disagreement.
+
+     ⚑ Deliberately loose. A third of a frame is not parallax at any depth a room contains — this
+     exists to reject nonsense, and adjudicating real parallax is `traverseDisparityTolerance`'s
+     job. Set tighter it would start swallowing the very pairs the disparity test exists to judge,
+     which would be this mechanism quietly agreeing with itself.
+     */
+    private static let traverseHalfSanityBound: CGFloat = 0.33
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
@@ -1815,12 +1869,16 @@ final class CameraController: NSObject {
         // part-way through a continuous move would not be one traverse.
         applyRotation(captureRotationAngle, to: photoOutput.connection(with: .video))
         let latched = torchOn
+        // Read on main, where the rotation coordinator writes it, and carried into the run rather
+        // than re-read per frame.
+        let orientation = Self.imageOrientation(forRotationAngle: previewRotationAngle)
 
         visionQueue.async { [weak self] in
             guard let self else { return }
             let run = TraverseRun()
             run.unmet = unmet
             run.torchLatched = latched
+            run.orientation = orientation
             self.traverse = run
             self.isTraversing = true
             DispatchQueue.main.async {
@@ -1884,7 +1942,11 @@ final class CameraController: NSObject {
     /// The accumulator. Runs on `visionQueue`, every other frame, for the whole traverse.
     private func advanceTraverse(with pixelBuffer: CVPixelBuffer) {
         guard let run = traverse, !run.awaitingFrame else { return }
-        guard let working = downscaled(pixelBuffer, crop: nil) else { return }
+        // ⚑ The run's orientation, fixed at `startTraverse` and not re-read per frame. Rotation is
+        // already fixed for the length of a traverse — exposure, white balance and focus all lock
+        // there — and an axis that changed halfway through would make the pairs before the turn
+        // incomparable with the pairs after it, silently.
+        guard let working = downscaled(pixelBuffer, crop: nil, orientation: run.orientation) else { return }
 
         // The first frame is kept unconditionally: there is nothing to have travelled from.
         guard let previous = run.previousBuffer else {
@@ -1987,6 +2049,39 @@ final class CameraController: NSObject {
         let overlap = max(0, 1 - abs(full.x)) * max(0, 1 - abs(full.y))
 
         /*
+         ⚑ **A half that did not register is not a half that disagreed**, and the first cut could
+         not tell the two apart. `translationFraction` returns `nil` only when Vision *errors*; a
+         confident-looking alignment onto the wrong minimum comes back as an ordinary number, so
+         the pair was recorded `measured: true` with a garbage value in it. **The blank-wall false
+         negative, one level down** — and the same shape as the guard immediately below, which is
+         why this one had to exist too.
+
+         The 2026-08-16 evening run shows it plainly: across 144 half-readings the largest is
+         exactly 0.7500, with a cluster at 0.69–0.75, and in **15 of 36 pairs exactly one half sits
+         up there while the other is small — never both.** Parallax offsets both halves. A
+         systematic optical effect scales both halves. **Only a failed registration moves one and
+         leaves the other**, so the signature identifies the cause on its own.
+
+         The test is physical rather than tuned: each half must have moved roughly as the whole
+         frame did. Parallax nudges a half away from the whole; it cannot send it a third of a frame
+         away, at any depth. So the bound is deliberately loose — it is here to catch nonsense, not
+         to adjudicate parallax, and adjudicating parallax is what `disparity` is already for.
+         */
+        let leftVsWhole = hypot(leftShift.x * 0.5 - full.x, leftShift.y - full.y)
+        let rightVsWhole = hypot(rightShift.x * 0.5 - full.x, rightShift.y - full.y)
+        let worstHalf = max(leftVsWhole, rightVsWhole)
+        if worstHalf > Self.traverseHalfSanityBound {
+            record["measured"] = false
+            record["contiguity"] = "unverified"
+            record["reason"] = "unregistered"
+            record["halfVsWhole"] = Double(worstHalf)
+            record["dx"] = Double(full.x)
+            record["dy"] = Double(full.y)
+            return record
+        }
+        record["halfVsWhole"] = Double(worstHalf)
+
+        /*
          ⚑ **The false NEGATIVE, which is the one nobody looks for.**
 
          A featureless pair — the blank painted wall between the furnace and the corner — gives
@@ -2070,8 +2165,12 @@ final class CameraController: NSObject {
         return record
     }
 
+    /// ⚑ `.up`, and that is load-bearing: `a` and `b` are already working buffers, oriented once by
+    /// `advanceTraverse` on the way in. Orienting again here would turn them twice and put the crop
+    /// axis back where this change just took it from.
     private func crops(_ a: CVPixelBuffer, _ b: CVPixelBuffer, _ rect: CGRect) -> (CVPixelBuffer, CVPixelBuffer)? {
-        guard let ca = downscaled(a, crop: rect), let cb = downscaled(b, crop: rect) else { return nil }
+        guard let ca = downscaled(a, crop: rect, orientation: .up),
+              let cb = downscaled(b, crop: rect, orientation: .up) else { return nil }
         return (ca, cb)
     }
 
@@ -2090,10 +2189,26 @@ final class CameraController: NSObject {
         return CGPoint(x: t.tx / width, y: t.ty / height)
     }
 
-    /// A small BGRA copy, optionally of a normalised sub-rectangle. Registration is a geometric
-    /// question; running it at sensor resolution would cost twenty times as much to answer it.
-    private func downscaled(_ buffer: CVPixelBuffer, crop: CGRect?) -> CVPixelBuffer? {
-        var image = CIImage(cvPixelBuffer: buffer)
+    /**
+     A small BGRA copy, optionally of a normalised sub-rectangle. Registration is a geometric
+     question; running it at sensor resolution would cost twenty times as much to answer it.
+
+     ⚑ **`orientation` is not decoration, and its absence was a real defect.** The video data
+     output's connection is never rotated — `applyRotation` is only ever applied to the photo
+     connection and the preview layer — so these buffers arrive in **sensor space**, which does not
+     turn with the iPad. Every crop below was therefore taken in sensor coordinates while being
+     *named* left and right.
+
+     Held in landscape those agree. Held in **portrait** they are ninety degrees apart, and the
+     "left half" and "right half" `measureOverlap` compares are in fact the **top and bottom** of
+     what the concierge sees — so the frame gets split *along* the direction of travel instead of
+     across it. The 2026-08-16 evening run was shot at `rotation · 90°`, which is portrait, and its
+     numbers show exactly that: median |dy| 0.2153 carrying all the travel, median |dx| 0.0247, and
+     a median `disparityX` of 0.2708 on the axis with no signal in it.
+     */
+    private func downscaled(_ buffer: CVPixelBuffer, crop: CGRect?,
+                            orientation: CGImagePropertyOrientation) -> CVPixelBuffer? {
+        var image = CIImage(cvPixelBuffer: buffer).oriented(orientation)
         if let crop {
             let e = image.extent
             image = image.cropped(to: CGRect(x: e.origin.x + crop.origin.x * e.width,

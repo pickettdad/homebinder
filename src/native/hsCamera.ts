@@ -713,16 +713,25 @@ export function shouldOfferRetake(event: Pick<TextBoxesEvent, "characterCount" |
  * Names what the role means to a person, not the role word: *no torch* and *−1 EV* answer the
  * question a reviewer is asking, and "evidence" answers a question about our own bookkeeping.
  */
-export function storedFrameLabel(frame: {
-  frame?: { role: "primary" | "evidence" | "insurance"; torch?: boolean; ev?: number };
-}): string {
+export function storedFrameLabel(
+  frame: { frame?: { role: "primary" | "evidence" | "insurance"; torch?: boolean; ev?: number } },
+  index?: number,
+): string {
   const meta = frame.frame;
-  if (!meta) return "frame";
-  if (typeof meta.ev === "number") {
+  if (typeof meta?.ev === "number") {
     const ev = meta.ev > 0 ? `+${meta.ev} EV` : meta.ev < 0 ? `−${Math.abs(meta.ev)} EV` : "0 EV";
     return meta.torch === false ? `no torch · ${ev}` : ev;
   }
-  if (meta.torch === false) return "no torch";
-  if (meta.role === "primary") return "kept";
-  return "frame";
+  if (meta?.torch === false) return "no torch";
+  /*
+   ⚑ **The ordinal, and only here.** `frameLabel` rejects it — "frame 2" answers a question nobody
+   has about a bracket, where what distinguishes the frames is exposure and torch.
+
+   A traverse is the opposite case: its frames differ by **position along the walk**, which the
+   ordinal is exactly. And the panel names pairs by index — *look at frames 3, 4* — so without it
+   nineteen buttons all read "frame" and the instruction cannot be followed. That is what the owner
+   saw. The ordinal is not a fallback here; it is the answer.
+  */
+  if (typeof index === "number") return `${index + 1}`;
+  return meta?.role === "primary" ? "kept" : "frame";
 }

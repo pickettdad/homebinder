@@ -24,6 +24,7 @@ import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
 import type { MediaRef } from "../engine/v2/fold";
 import type { FrameReadMeta, FrameRoleMeta } from "../engine/schema/events";
+import type { CaptureIntent } from "../engine/v2/events";
 import {
   captureTargetFor,
   containerAfterZoneChange,
@@ -286,6 +287,17 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const [openCapture, setOpenCapture] = useState<MediaRef | null>(null);
   /** Which frame of a filed capture is being looked at. Reset by opening a different one. */
   const [storedIndex, setStoredIndex] = useState(0);
+  const [storedActual, setStoredActual] = useState(false);
+  /**
+   * ⚑ The declared kind the NEXT capture will carry, and it must be visible.
+   *
+   * An action that silently changes what the next shot means is the container failure again —
+   * twenty shots filed as something the concierge did not intend look exactly like twenty filed
+   * correctly. So it is drawn, and it clears itself on the capture it was for.
+   */
+  const [pendingIntent, setPendingIntent] = useState<CaptureIntent | null>(null);
+  const pendingIntentRef = useRef<CaptureIntent | null>(null);
+  pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
   const sessionFrames = useRef<Map<string, CaptureResult>>(new Map());
   /** When characters worth shooting first appeared — the start of the wait the concierge feels,
@@ -404,11 +416,29 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             frame: roleOf(i + 1),
           })),
         );
+        /*
+          ⚑ **The intent was hard-coded `undefined`, so a declared capture kind never reached the
+          record — and one documented rule could not execute at all.**
+
+          `captureTargetFor` carries a run-trace branch with a paragraph explaining why it is a
+          function rather than a ternary: *a trace starts inside a container and ends outside it, so
+          filing it inside asserts the pipe belongs to the furnace.* That branch is tested, the test
+          passes, and **the app never passed an intent** — so in the field every trace filed to
+          whatever container happened to be open, and every room shot filed as an ordinary capture.
+
+          The test passes because it calls the function directly. Nothing called it that way. This
+          is the same defect as the panel pointing at frames nothing kept, one layer down: *a rule
+          being correct is not the same as a rule being reached.*
+        */
+        const declared = pendingIntentRef.current ?? undefined;
         const mediaId = await capturePhotoV2(
-          captureTargetFor(openRef.current, currentZone, undefined), blob, "image/jpeg",
-          undefined, undefined,
+          captureTargetFor(openRef.current, currentZone, declared), blob, "image/jpeg",
+          undefined, declared,
           { read: readOf(0), frame: roleOf(0), siblings },
         );
+        // One act, one capture: the door was for this shot, not for the rest of the room.
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
         /*
           ⚑ **The link back from the filed capture to the frames it came from**, and it exists to
           undo a regression this session caused.
@@ -799,6 +829,14 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             feature was missing. It was not; it is hidden because there is no zone to file into.
             An absence cannot distinguish "nothing is being filed" from "this is broken", so the
             screen names itself instead. */}
+        {/* ⚑ Drawn, because an action that silently changes what the next shot MEANS is the
+            container failure again: a run trace filed as an ordinary object shot looks exactly
+            like one filed correctly, and nothing downstream can tell. */}
+        {pendingIntent && (
+          <span className="rounded-full bg-brass-500 px-3 py-1.5 text-sm font-semibold text-slate-950">
+            next shot · {pendingIntent === "run-trace" ? "run trace" : "room shot"}
+          </span>
+        )}
         {!zone && (
           <span className="rounded-full bg-slate-900/70 px-3 py-1.5 text-sm text-slate-400">
             camera harness · nothing is filed · enter from a zone to test objects
@@ -1145,21 +1183,38 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           <div className="absolute inset-0 z-40 flex flex-col bg-slate-950/95">
             <div className="flex items-center justify-between gap-2 p-3">
               <span className="text-xs text-slate-400">
-                {storedFrameLabel(shownFrame)} · {storedIndex + 1} of {frames.length}
+                {storedFrameLabel(shownFrame, storedIndex)} · {storedIndex + 1} of {frames.length}
               </span>
-              <button
-                type="button"
-                onClick={() => setOpenCapture(null)}
-                className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200"
-              >
-                close
-              </button>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStoredActual((v) => !v)}
+                  className={`rounded-lg px-3 py-2 text-sm ring-1 ${
+                    storedActual
+                      ? "bg-slate-100 text-slate-900 ring-slate-100"
+                      : "bg-slate-900/70 text-slate-300 ring-slate-600"
+                  }`}
+                >
+                  1:1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpenCapture(null)}
+                  className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-slate-200"
+                >
+                  close
+                </button>
+              </div>
             </div>
-            <div className="flex min-h-0 flex-1 items-center justify-center p-2">
+            {/* ⚑ 1:1 is here because judging a plate at 100% is the camera's acceptance test, and
+                a viewer that only ever fits-to-screen cannot perform it — the owner asked for it by
+                noticing it was missing. Fit is the default because most frames are being
+                identified rather than read. */}
+            <div className={`flex min-h-0 flex-1 p-2 ${storedActual ? "overflow-auto" : "items-center justify-center"}`}>
               <MediaThumb
                 mediaId={shownFrame.mediaId}
                 mime={shownFrame.mime}
-                className="max-h-full max-w-full object-contain"
+                className={storedActual ? "max-w-none" : "max-h-full max-w-full object-contain"}
               />
             </div>
             {frames.length > 1 && (
@@ -1175,7 +1230,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                         : "bg-slate-900/70 text-slate-300 ring-slate-600"
                     }`}
                   >
-                    {storedFrameLabel(f)}
+                    {storedFrameLabel(f, index)}
                   </button>
                 ))}
               </div>
@@ -1206,6 +1261,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 setViewing(shot);
               } else {
                 setStoredIndex(0);
+                setStoredActual(false);
                 setOpenCapture(capture);
               }
             }}
@@ -1275,6 +1331,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                     // also require remembering to change lens. Still a default: the control stays
                     // live and the concierge can go back to normal.
                     await applyIntentLens(action.id === "room-shot" ? "room-shot" : "run-trace");
+                    // The door declares what the next capture IS. Without this the kind never
+                    // reached the record and `captureTargetFor`'s run-trace rule never fired.
+                    setPendingIntent(action.id === "room-shot" ? "room-shot" : "run-trace");
                   })();
                   showToast(`${action.hint} — framed wide, one per zone`);
                 }}

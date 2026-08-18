@@ -209,11 +209,28 @@ export interface TraversePair {
    *  disagree. `impossiblyStill`: travelled a full target and the pair claims nothing moved.
    *  `unregistered`: Vision could not align the pair at all. `disparity` is retired — the
    *  half-split no longer decides anything (see `measureOverlap`). */
-  reason?: "unregistered" | "impossiblyStill" | "disparity" | "implausibleShift" | "crossCheck";
+  reason?:
+    | "unregistered"
+    | "impossiblyStill"
+    | "disparity"
+    | "implausibleShift"
+    | "crossCheck"
+    | "flowStill"
+    | "tooLittleTexture";
   /** ⚑ Steps that failed to register behind this pair. Invisible to the accumulator's travel sum,
    *  so a run can under-count by exactly the amount it could not see. The other half of the corner
    *  discriminator — `maxStep` only sees the steps that succeeded. */
   droppedSteps?: number;
+  /** ⚑ How much there is to see in each frame of the pair, measured on ONE frame at a time.
+   *  Every measure that has failed here was a correlation between two frames, and correlation with
+   *  nothing to correlate returns confident nonsense — four times, in three mechanisms. Texture has
+   *  no partner to be fooled about. Blank-first calibration: covered lens 1.8, blurred carry 4.1,
+   *  real frames 10.6-21.0. */
+  textureFrom?: number;
+  textureTo?: number;
+  /** Median flow magnitude as a fraction of frame width, and its 90th percentile. */
+  flowMedian?: number;
+  flowP90?: number;
   /** ⚑ The share of the frame that landed inside its neighbour, measured by optical flow — the
    *  verdict since `flow-v1`. Every earlier mechanism fitted a global 2D transform to the pair and
    *  the frames refute that premise: a 120° lens, a room with depth and a walk partly toward it
@@ -285,6 +302,8 @@ export interface TraverseDiagnosis {
     disparity: number;
     implausibleShift: number;
     crossCheck: number;
+    flowStill: number;
+    tooLittleTexture: number;
   };
   /** Which axis is spending the tolerance — `null` when neither dominates. */
   dominant: "vertical" | "horizontal" | null;
@@ -359,6 +378,8 @@ export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): Traver
       disparity: pairs.filter((p) => p.reason === "disparity").length,
       implausibleShift: pairs.filter((p) => p.reason === "implausibleShift").length,
       crossCheck: pairs.filter((p) => p.reason === "crossCheck").length,
+      flowStill: pairs.filter((p) => p.reason === "flowStill").length,
+      tooLittleTexture: pairs.filter((p) => p.reason === "tooLittleTexture").length,
     },
     dominant,
   };

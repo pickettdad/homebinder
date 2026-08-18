@@ -1917,6 +1917,9 @@ final class CameraController: NSObject {
      inside this, so it is a bound on nonsense and not a knob on the verdict.
      */
     private static let traverseCrossCheckTolerance: CGFloat = 0.05
+    /// Below this there is not enough in a frame for its overlap to mean anything. Measured
+    /// blank-first: covered lens 1.8, blurred carry 4.1-4.3, real frames 10.6-21.0.
+    private static let traverseMinimumTexture = 5.0
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
@@ -1997,7 +2000,7 @@ final class CameraController: NSObject {
                      only comparable against another from the same instrument. Adding this before
                      the second model exists is what keeps every traverse taken so far readable.
                     */
-                    "registration": "flow-v2",
+                    "registration": "flow-v3",
                     "continuesFrom": run.continuesFrom as Any,
                     "targetTravel": Double(Self.traverseTargetTravel),
                     "minimumOverlap": Self.traverseMinimumOverlap,
@@ -2026,7 +2029,7 @@ final class CameraController: NSObject {
                 "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
                 "endedAt": ISO8601DateFormatter().string(from: Date()),
                 // Both travel with the finished run, for the reasons given where they are set.
-                "registration": "flow-v2",
+                "registration": "flow-v3",
                 "continuesFrom": run.continuesFrom as Any,
                 "torchLatched": run.torchLatched,
                 "unmet": run.unmet,
@@ -2430,6 +2433,37 @@ final class CameraController: NSObject {
              already uses, and `traverseMinimumOverlap` is deliberately untouched, because a real
              gap has still never been observed and tuning against its absence is what produced this.
             */
+            /*
+             ⚑ **Coverage means nothing if there was nothing in the frame to cover.**
+
+             The owner carried the iPad between two rooms with the traverse running. It fired twenty
+             frames in five seconds, and those frames are the floor and his shoe, smeared — and
+             flow-v2 called every one of them contiguous at 0.80 to 0.93. It could not tell *I swept
+             this wall* from *I walked past with the camera swinging*, which is the distinction the
+             feature exists to make.
+
+             It also explains what he noticed unprompted: **the faster you go, the more contiguous
+             it gets called.** Faster means more blur, blur means less texture, less texture means
+             less to correlate — and every measurement here has reported most confident where it had
+             least evidence.
+
+             So both frames must contain something before their overlap is allowed to mean anything.
+             ⚑ The floor is deliberately low — it sits above the blur at 4.3 and far below the
+             dimmest real frame at 10.6 — because it is here to reject the unarguable, on four blank
+             and four real samples. The value is recorded on every pair so the distribution can be
+             read rather than guessed at.
+            */
+            if let a = textureScore(previous), let b = textureScore(current) {
+                record["textureFrom"] = a
+                record["textureTo"] = b
+                if min(a, b) < Self.traverseMinimumTexture {
+                    record["measured"] = false
+                    record["contiguity"] = "unverified"
+                    record["reason"] = "tooLittleTexture"
+                    return record
+                }
+            }
+
             let cameraMoved = expectedTravel >= Self.traverseTargetTravel
             let pictureMoved = flow.median >= Double(Self.traverseTargetTravel) * 0.25
             if cameraMoved && !pictureMoved {
@@ -2571,6 +2605,50 @@ final class CameraController: NSObject {
         return (Double(inside) / Double(total),
                 magnitudes[magnitudes.count / 2] / w,
                 magnitudes[min(magnitudes.count - 1, Int(Double(magnitudes.count) * 0.9))] / w)
+    }
+
+    /**
+     ⚑ **How much there is to see in ONE frame — and the point is that it needs no partner.**
+
+     Every measure that has failed in this feature was a correlation between two frames: the blank
+     wall returning near-zero translation as 100% overlap, the half-registration pegging at a rail,
+     flow reading a covered lens as perfect coverage. **Correlation with nothing to correlate
+     returns confident nonsense**, and it has now done so four times in three unrelated mechanisms.
+
+     Texture is a property of a single frame. It has no partner to be fooled about, so *the failure
+     mode that keeps recurring is structurally unavailable to it* — it cannot report high confidence
+     for want of evidence, because want of evidence is exactly what it measures.
+
+     Tested against a blank input FIRST, which is the rule the previous four should have been held
+     to: covered lens **1.83, 1.88** · the owner's blurred carry frames, which flow-v2 called
+     contiguous at 0.80–0.93, **4.11, 4.32** · a genuinely covered mechanical wall **16.44, 20.96**
+     · and a genuinely covered but DIM living room **11.02, 10.62**. The dim room scoring 2.5x the
+     blur is what says this measures texture and not brightness.
+
+     Variance of the Laplacian, sampled: the standard sharpness measure, and cheap.
+     */
+    private func textureScore(_ buffer: CVPixelBuffer) -> Double? {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        guard width > 2, height > 2, let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let stride = CVPixelBufferGetBytesPerRow(buffer)
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+        func luminance(_ x: Int, _ y: Int) -> Double {
+            let p = bytes + y * stride + x * 4
+            return 0.114 * Double(p[0]) + 0.587 * Double(p[1]) + 0.299 * Double(p[2])
+        }
+        var sum = 0.0, sumSquares = 0.0, n = 0.0
+        for y in Swift.stride(from: 1, to: height - 1, by: 2) {
+            for x in Swift.stride(from: 1, to: width - 1, by: 2) {
+                let laplacian = abs(4 * luminance(x, y) - luminance(x - 1, y) - luminance(x + 1, y)
+                                    - luminance(x, y - 1) - luminance(x, y + 1))
+                sum += laplacian; sumSquares += laplacian * laplacian; n += 1
+            }
+        }
+        guard n > 0 else { return nil }
+        let mean = sum / n
+        return (sumSquares / n - mean * mean).squareRoot()
     }
 
     private func crops(_ a: CVPixelBuffer, _ b: CVPixelBuffer, _ rect: CGRect) -> (CVPixelBuffer, CVPixelBuffer)? {

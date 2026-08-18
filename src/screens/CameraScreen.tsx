@@ -1196,8 +1196,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 <span className="font-mono text-slate-100">{diagnosis.medianCrossCheck?.toFixed(4) ?? "—"}</span>
                 {" "}· {diagnosis.measured} judged
                 <br />
-                cannot-say · {diagnosis.reasons.crossCheck} cross-check · {diagnosis.reasons.implausibleShift} implausible ·{" "}
-                {diagnosis.reasons.impossiblyStill} impossibly still · {diagnosis.reasons.unregistered} unregistered
+                cannot-say · {diagnosis.reasons.tooLittleTexture} nothing to see ·{" "}
+                {diagnosis.reasons.flowStill} image still · {diagnosis.reasons.crossCheck} cross-check ·{" "}
+                {diagnosis.reasons.implausibleShift} implausible · {diagnosis.reasons.unregistered} unregistered
                 {eyes.length > 0 && (
                   <>
                     <br />

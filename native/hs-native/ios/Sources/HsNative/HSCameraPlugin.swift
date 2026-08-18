@@ -1997,7 +1997,7 @@ final class CameraController: NSObject {
                      only comparable against another from the same instrument. Adding this before
                      the second model exists is what keeps every traverse taken so far readable.
                     */
-                    "registration": "flow-v1",
+                    "registration": "flow-v2",
                     "continuesFrom": run.continuesFrom as Any,
                     "targetTravel": Double(Self.traverseTargetTravel),
                     "minimumOverlap": Self.traverseMinimumOverlap,
@@ -2026,7 +2026,7 @@ final class CameraController: NSObject {
                 "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
                 "endedAt": ISO8601DateFormatter().string(from: Date()),
                 // Both travel with the finished run, for the reasons given where they are set.
-                "registration": "flow-v1",
+                "registration": "flow-v2",
                 "continuesFrom": run.continuesFrom as Any,
                 "torchLatched": run.torchLatched,
                 "unmet": run.unmet,
@@ -2400,11 +2400,47 @@ final class CameraController: NSObject {
          keep the diagnostic — so if this mechanism ever looks wrong, the evidence for the three it
          replaced is sitting beside it and the runs stay comparable.
         */
-        let covered = flowCoverage(from: previous, to: current)
-        if let covered {
-            record["covered"] = covered
+        if let flow = flowCoverage(from: previous, to: current) {
+            record["covered"] = flow.covered
+            record["flowMedian"] = flow.median
+            record["flowP90"] = flow.p90
+
+            /*
+             ⚑ **Coverage alone is INVERTED, and the owner's deliberate break proved it.**
+
+             He covered the lens mid-run. Those pairs returned coverage of 0.982, 0.990, 0.994,
+             0.996 and **1.000** — the highest in the run — while the honest pairs either side read
+             0.812. The whole irregular run scored 29 of 32 contiguous with a median of 0.948,
+             **beating the real traverse's 0.829.**
+
+             The reason is structural, and it was predicted in writing before this data was opened:
+             optical flow with nothing to track returns vectors near ZERO, every sampled pixel
+             therefore stays inside the frame, and the pair with the least evidence of contact
+             reports the most. That is `#104`'s blank-wall false negative — *the pair that had least
+             evidence of contact reports the most* — arriving for the third time, in the mechanism
+             that replaced the two guards written for it.
+
+             So coverage is trusted only when the picture moved as much as the CAMERA did. The
+             accumulator already measured the camera independently, and a pair exists because it
+             travelled one target's worth. If the flow field says the image barely moved while the
+             accumulator says the camera did, the frames are not evidence of contact — they are
+             evidence of nothing to see.
+
+             ⚑ No new tuned number: this reuses the quarter-of-target ratio `impossiblyStill`
+             already uses, and `traverseMinimumOverlap` is deliberately untouched, because a real
+             gap has still never been observed and tuning against its absence is what produced this.
+            */
+            let cameraMoved = expectedTravel >= Self.traverseTargetTravel
+            let pictureMoved = flow.median >= Double(Self.traverseTargetTravel) * 0.25
+            if cameraMoved && !pictureMoved {
+                record["measured"] = false
+                record["contiguity"] = "unverified"
+                record["reason"] = "flowStill"
+                return record
+            }
+
             record["measured"] = true
-            record["contiguity"] = covered < Self.traverseMinimumOverlap ? "gap" : "contiguous"
+            record["contiguity"] = flow.covered < Self.traverseMinimumOverlap ? "gap" : "contiguous"
             return record
         }
         // Flow could not answer. Fall back to the translation-only chain below, which is already
@@ -2500,7 +2536,8 @@ final class CameraController: NSObject {
      clean ones, so the walk held contact throughout and the 7-of-19 verdict was wrong rather than
      merely cautious.** Measured at 41 ms per pair against roughly one pair per second.
      */
-    private func flowCoverage(from previous: CVPixelBuffer, to current: CVPixelBuffer) -> Double? {
+    private func flowCoverage(from previous: CVPixelBuffer, to current: CVPixelBuffer)
+        -> (covered: Double, median: Double, p90: Double)? {
         let request = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: current)
         request.computationAccuracy = .high
         request.outputPixelFormat = kCVPixelFormatType_TwoComponent32Float
@@ -2515,18 +2552,25 @@ final class CameraController: NSObject {
         let stride = CVPixelBufferGetBytesPerRow(buffer)
 
         var inside = 0, total = 0
+        var magnitudes: [Double] = []
         // Every fourth pixel each way. Coverage is a proportion, and a sixteenth of a 384-wide
         // frame is thousands of samples — enough for a proportion and a fraction of the work.
         for y in Swift.stride(from: 0, to: height, by: 4) {
             let row = base.advanced(by: y * stride).assumingMemoryBound(to: Float.self)
             for x in Swift.stride(from: 0, to: width, by: 4) {
-                let tx = Double(x) + Double(row[x * 2])
-                let ty = Double(y) + Double(row[x * 2 + 1])
+                let dx = Double(row[x * 2]), dy = Double(row[x * 2 + 1])
+                let tx = Double(x) + dx, ty = Double(y) + dy
                 total += 1
+                magnitudes.append((dx * dx + dy * dy).squareRoot())
                 if tx >= 0, tx < Double(width), ty >= 0, ty < Double(height) { inside += 1 }
             }
         }
-        return total > 0 ? Double(inside) / Double(total) : nil
+        guard total > 0 else { return nil }
+        magnitudes.sort()
+        let w = Double(width)
+        return (Double(inside) / Double(total),
+                magnitudes[magnitudes.count / 2] / w,
+                magnitudes[min(magnitudes.count - 1, Int(Double(magnitudes.count) * 0.9))] / w)
     }
 
     private func crops(_ a: CVPixelBuffer, _ b: CVPixelBuffer, _ rect: CGRect) -> (CVPixelBuffer, CVPixelBuffer)? {

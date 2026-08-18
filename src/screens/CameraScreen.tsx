@@ -311,6 +311,8 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
    * correctly. So it is drawn, and it clears itself on the capture it was for.
    */
   const [pendingIntent, setPendingIntent] = useState<CaptureIntent | null>(null);
+  /** How many legs of one walk have been recorded. Resets when a traverse starts unrelated. */
+  const [legNumber, setLegNumber] = useState(1);
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
   pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
@@ -511,6 +513,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         }
       }
       await startTraverse(continuesFrom);
+      setLegNumber((n) => (continuesFrom ? n + 1 : 1));
       setTraversing(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -747,6 +750,35 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     } catch (err) {
       setAudioProbe(null);
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  /**
+   * Every frame of one capture, in a single share.
+   *
+   * ⚑ Built because the owner asked and the reason is not convenience: sending twenty frames one
+   * at a time is *send, save, choose location*, twenty times, and a tedious path is one that gets
+   * skipped or abandoned half way. **The frames are the only thing that has ever settled a
+   * traverse question** — the homography, the scale search and flow-v1's inversion were all
+   * decided on real files and none of them could have been decided on the panel numbers. A
+   * capture's frames are one artifact and they travel as one.
+   */
+  const shareAllFrames = async (capture: MediaRef) => {
+    const refs = [capture, ...(capture.siblings ?? [])];
+    const files: File[] = [];
+    for (const [index, ref] of refs.entries()) {
+      const row = await db.media.get(ref.mediaId);
+      if (!row) continue;
+      // Numbered so the sequence survives the transfer — a traverse's frames differ by position,
+      // and a folder sorted by name has to preserve that.
+      const n = String(index).padStart(3, "0");
+      files.push(new File([row.blob], `hs-${n}-${ref.mediaId}.jpg`, { type: ref.mime }));
+    }
+    if (!files.length) return;
+    if (typeof navigator.canShare === "function" && navigator.canShare({ files })) {
+      await navigator.share({ files, title: `HouseSteady — ${files.length} frames` });
+    } else {
+      showToast("This device will not share that many files at once");
     }
   };
 
@@ -1127,6 +1159,7 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
               <p className="mt-1">
                 {/* The verdict first, the counts after — a diagnostic decides whether there is
                     anything to say before it says what. */}
+                {legNumber > 1 && <span className="text-brass-400">leg {legNumber} · </span>}
                 <span className="font-mono text-slate-100">{traverseVerdict(traverseResult)}</span> ·{" "}
                 {traverseResult.frames.length} frames · {traverseResult.gaps} gap
                 {traverseResult.gaps === 1 ? "" : "s"} · {traverseResult.unverified} unverified
@@ -1204,7 +1237,12 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                   onClick={() => void beginTraverse(traverseResult.startedAt)}
                   className="rounded-lg bg-slate-900/70 px-2 py-1 text-xs text-slate-200 ring-1 ring-slate-600"
                 >
-                  resume — declare a break
+                  {/* ⚑ The leg number is on the button, because the owner pressed it and the frame
+                      count restarted at 1 with nothing saying why. Restarting is correct — each leg
+                      is its own capture and its frames differ by position WITHIN that leg — but a
+                      counter that resets with no explanation reads as work lost. Naming the leg
+                      makes the restart the expected thing rather than a surprise. */}
+                  resume — start leg {legNumber + 1}, declaring a break
                 </button>
               </p>
             )}
@@ -1261,6 +1299,15 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 >
                   send
                 </button>
+                {frames.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => void shareAllFrames(openCapture)}
+                    className="rounded-lg bg-slate-900/70 px-3 py-2 text-sm text-slate-300 ring-1 ring-slate-600"
+                  >
+                    send all {frames.length}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setStoredActual((v) => !v)}

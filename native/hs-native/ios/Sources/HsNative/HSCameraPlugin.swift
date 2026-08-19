@@ -2337,13 +2337,29 @@ final class CameraController: NSObject {
          trustworthy**, and on every run the pairs that survive this gate have their path length
          and their displacement agreeing — 7 of 10, 3 of 3, 19 of 21.
          */
+        /*
+         ⚑ **This no longer decides anything, and the field numbers are why.**
+
+         It was built for the translation-only era to catch a whole-frame registration returning
+         garbage — and it did. But translation-only registration is exactly what flow replaced,
+         *because it is unreliable on this lens*: the homography returned scale 0.637-1.186 on
+         pairs whose true scale is 1.0, and an explicit scale search hit its own rail on a clean
+         lateral step.
+
+         So this gate rejects pairs using the measurement we already established is wrong, and it
+         does so BEFORE flow is ever consulted. On 2026-08-19 it became the main source of
+         "cannot say" on good walks: **8 of 16 on the fast mechanical run and 11 of 19 on the
+         slow one**, both of which have healthy texture throughout — 7.5 to 26.4, nowhere near the
+         blank floor. Those are pairs flow was never allowed to judge.
+
+         ⚑ Keeping a gate we know measures wrongly ahead of a measure we have validated is
+         backwards, and it is also the honest explanation for what the owner noticed twice: the
+         fast/slow difference lives here, not in coverage.
+
+         Recorded, not acted on. If flow ever needs a plausibility partner the number is still here.
+        */
         let plausibleBound = max(expectedTravel, Self.traverseTargetTravel) * Self.traversePlausibleShiftFactor
-        if displacement > plausibleBound {
-            record["measured"] = false
-            record["contiguity"] = "unverified"
-            record["reason"] = "implausibleShift"
-            return record
-        }
+        record["implausibleShift"] = displacement > plausibleBound
 
         /*
          ⚑ **The half-split no longer decides anything. It is recorded and it is not consulted.**
@@ -2407,6 +2423,31 @@ final class CameraController: NSObject {
             record["covered"] = flow.covered
             record["flowMedian"] = flow.median
             record["flowP90"] = flow.p90
+            /*
+             ⚑ **Coherence: proposed, tested blank-first, and NOT adopted — recorded only.**
+
+             The owner's proposal was good and came from watching his own corner: a clean sweep is
+             one cluster, a corner is two real ones, junk is none. Tested against a blank input
+             first, which is the rule, and it fails there:
+
+               covered lens    local +1.000   global 0.995   <- as coherent as a clean sweep
+               blurred carry   local +0.997   global 0.448
+               clean sweep     local +1.000   global 0.996
+               the corner      local +0.998   global 0.938   <- correctly survives
+
+             **Local coherence measures Vision's smoothness prior, not the scene** — the estimator
+             regularises neighbouring vectors, so they agree whatever the input, and everything
+             reads 1.000. Global coherence does catch the blurred carry, but texture already does,
+             and it **fails on the covered lens in the same direction as coverage** rather than the
+             opposite one.
+
+             ⚑ The reason is structural and it is the fifth instance: coherence is derived from the
+             flow field, which is derived from correlating two frames, so it inherits the failure it
+             was proposed to escape. Texture escapes it by needing no partner at all. Cost is real
+             arithmetic on vectors already in hand — 0.2 ms against 150 ms of flow — so it is kept
+             as a recorded number and given no authority.
+            */
+            record["flowConsistency"] = flow.consistency
 
             /*
              ⚑ **Coverage alone is INVERTED, and the owner's deliberate break proved it.**
@@ -2571,7 +2612,7 @@ final class CameraController: NSObject {
      merely cautious.** Measured at 41 ms per pair against roughly one pair per second.
      */
     private func flowCoverage(from previous: CVPixelBuffer, to current: CVPixelBuffer)
-        -> (covered: Double, median: Double, p90: Double)? {
+        -> (covered: Double, median: Double, p90: Double, consistency: Double)? {
         let request = VNGenerateOpticalFlowRequest(targetedCVPixelBuffer: current)
         request.computationAccuracy = .high
         request.outputPixelFormat = kCVPixelFormatType_TwoComponent32Float
@@ -2587,6 +2628,8 @@ final class CameraController: NSObject {
 
         var inside = 0, total = 0
         var magnitudes: [Double] = []
+        // ⚑ Recorded, never gated. See `flowCoverage`'s note on coherence.
+        var sumX = 0.0, sumY = 0.0, sumMagnitude = 0.0
         // Every fourth pixel each way. Coverage is a proportion, and a sixteenth of a 384-wide
         // frame is thousands of samples — enough for a proportion and a fraction of the work.
         for y in Swift.stride(from: 0, to: height, by: 4) {
@@ -2595,7 +2638,9 @@ final class CameraController: NSObject {
                 let dx = Double(row[x * 2]), dy = Double(row[x * 2 + 1])
                 let tx = Double(x) + dx, ty = Double(y) + dy
                 total += 1
-                magnitudes.append((dx * dx + dy * dy).squareRoot())
+                let magnitude = (dx * dx + dy * dy).squareRoot()
+                magnitudes.append(magnitude)
+                sumX += dx; sumY += dy; sumMagnitude += magnitude
                 if tx >= 0, tx < Double(width), ty >= 0, ty < Double(height) { inside += 1 }
             }
         }
@@ -2604,7 +2649,8 @@ final class CameraController: NSObject {
         let w = Double(width)
         return (Double(inside) / Double(total),
                 magnitudes[magnitudes.count / 2] / w,
-                magnitudes[min(magnitudes.count - 1, Int(Double(magnitudes.count) * 0.9))] / w)
+                magnitudes[min(magnitudes.count - 1, Int(Double(magnitudes.count) * 0.9))] / w,
+                sumMagnitude > 0 ? (sumX * sumX + sumY * sumY).squareRoot() / sumMagnitude : 0)
     }
 
     /**

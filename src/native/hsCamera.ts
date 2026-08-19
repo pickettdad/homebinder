@@ -2,7 +2,7 @@
  * The capture camera bridge (F-26).
  *
  * Reached through `window.Capacitor.Plugins` rather than by importing `@capacitor/core`, the same
- * stance as `platform.ts`, `roomPlan.ts` and `hsShell.ts`: the web bundle stays free of the native
+ * stance as `platform.ts` and `hsShell.ts`: the web bundle stays free of the native
  * runtime and the browser simply reports the camera absent.
  *
  * ⚑ `addListener` returns its handle SYNCHRONOUSLY on this proxy — proven on device 2026-08-14,

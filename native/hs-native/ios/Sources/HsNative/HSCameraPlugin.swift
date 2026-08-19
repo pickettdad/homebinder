@@ -1,3 +1,4 @@
+import ARKit
 import AVFoundation
 import Capacitor
 import CoreImage
@@ -46,6 +47,16 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stopTraverse", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise)
     ]
+
+    /**
+     Enumerated once, at load, rather than per camera start.
+     ⚑ These are fixed facts about the hardware — which lenses ARKit's world tracking offers, and
+     whether the device meshes — so asking them repeatedly implies they might change. Read-only:
+     it touches class properties and never starts a session, so it cannot collide with capture.
+     */
+    override public func load() {
+        _ = CameraController.arCapabilitiesLogged
+    }
 
     private var controller: CameraController?
 
@@ -1238,8 +1249,80 @@ final class CameraController: NSObject {
              *is it even possible on this device* without anyone guessing.
              */
             "lenses": Self.availableLensNames(),
+            "arkit": Self.arCapabilities(),
             "unmetAtStart": unmetAtStart
         ]
+    }
+
+    /**
+     ⚑ **What ARKit's world tracking will actually give us — the whole list, not a yes/no.**
+
+     The traverse is ruled wide, and pose requires an `ARSession`, so whether world tracking offers
+     the ultra-wide decides whether pose is reachable without giving up the lens ruling. Apple's
+     only documented ultra-wide example is a **face**-tracking session, which is suggestive and not
+     dispositive — so it is enumerated rather than assumed.
+
+     ⚑ **Every format, with its device, resolution and frame rate**, because a binary answer would
+     hide the third option: something between normal and ultra-wide, or ultra-wide at a reduced
+     frame rate, is a trade nobody has priced. A virtual device — `builtInDualWideCamera`,
+     `builtInTripleCamera` — is also an answer, since those can reach the ultra-wide lens.
+
+     Field of view is reported per rear device from AVFoundation rather than per format, because
+     `ARConfiguration.VideoFormat` does not expose it. Degrees are what makes "between" legible.
+
+     Read-only. It enumerates class properties and never starts a session, so it cannot collide
+     with the running capture.
+     */
+    /// Evaluated once on first touch, which is what makes the load-time log a single line.
+    static let arCapabilitiesLogged: [String: Any] = arCapabilities()
+
+    static func arCapabilities() -> [String: Any] {
+        var formats: [[String: Any]] = []
+        for format in ARWorldTrackingConfiguration.supportedVideoFormats {
+            // The package floor is iOS 15 and high-resolution capture arrived in 16, so the flag
+            // is reported only where it exists rather than raising the floor for a diagnostic.
+            var entry: [String: Any] = [
+                "device": format.captureDeviceType.rawValue,
+                "width": Int(format.imageResolution.width),
+                "height": Int(format.imageResolution.height),
+                "fps": format.framesPerSecond
+            ]
+            if #available(iOS 16.0, *) {
+                entry["hiResCapable"] = format.isRecommendedForHighResolutionFrameCapturing
+            }
+            formats.append(entry)
+        }
+        // The degrees behind each lens name, so "between normal and ultra-wide" is legible.
+        var lenses: [[String: Any]] = []
+        let types: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera,
+            .builtInDualWideCamera, .builtInTripleCamera
+        ]
+        for type in AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video,
+                                                     position: .back).devices {
+            lenses.append([
+                "device": type.deviceType.rawValue,
+                "fieldOfView": Double(type.activeFormat.videoFieldOfView)
+            ])
+        }
+        func describe(_ f: ARConfiguration.VideoFormat?) -> String {
+            guard let f else { return "none" }
+            return "\(Int(f.imageResolution.width))x\(Int(f.imageResolution.height))@\(f.framesPerSecond) \(f.captureDeviceType.rawValue)"
+        }
+        var out: [String: Any] = [
+            "worldTrackingSupported": ARWorldTrackingConfiguration.isSupported,
+            "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+            "formats": formats,
+            "rearLenses": lenses
+        ]
+        if #available(iOS 16.0, *) {
+            out["recommended4K"] = describe(ARWorldTrackingConfiguration.recommendedVideoFormatFor4KResolution)
+            out["recommendedHiRes"] = describe(ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing)
+        }
+        // ⚑ Logged as well as returned: the answer decides a sequencing question, and reading it
+        // off a device log is faster than a screenshot round-trip.
+        NSLog("HS-ARKIT-CAPABILITIES %@", String(describing: out))
+        return out
     }
 
     /// What rear lenses this device actually offers, by Apple's own type names.

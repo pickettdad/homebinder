@@ -2,7 +2,7 @@
  * The Field 4 bridge probe — one method out, one event stream back.
  *
  * Reached through `window.Capacitor.Plugins` rather than by importing `@capacitor/core`, the
- * same stance as `app/platform.ts` and `native/roomPlan.ts`: the web bundle stays free of the
+ * same stance as `app/platform.ts`: the web bundle stays free of the
  * native runtime, and in the browser the plugin is simply absent.
  *
  * `HS_SHELL_JS_NAME` is the contract with `HSShellPlugin.swift`'s `jsName`. Nothing checks that

@@ -118,3 +118,65 @@ of a round each, and four of them shipped without it and were found wrong in a m
 **Keep recording `placeDistance` regardless.** If pose proves expensive or the lens conflict kills
 it, the distribution is the fallback, and it is five different-place samples away from being
 decidable.
+
+---
+
+# ADDENDUM — the enumeration was run on the device, 2026-08-19
+
+Read off `iPad13,4` at plugin load, iPadOS 26.5. Raw output logged as `HS-ARKIT-CAPABILITIES`.
+
+## ⚑ The answer to §2: NO. World tracking is wide-angle only.
+
+**Every one of the twelve supported video formats is `builtInWideAngleCamera`.** Neither
+`builtInUltraWideCamera` nor `builtInDualWideCamera` appears among them.
+
+⚑ **And this was very nearly reported backwards.** A first pass grepped device-type strings out of
+the whole log and found `UltraWide` and `DualWide` present — but those came from the *separate*
+AVFoundation lens list added for field-of-view context, not from `supportedVideoFormats`. Pairing
+each device to its own format entry reverses the conclusion. **Verify against the artifact, not
+against a string that appears near it.**
+
+## The rear lenses, in degrees
+
+| device | field of view |
+|---|---|
+| `builtInWideAngleCamera` | **64.7°** |
+| `builtInUltraWideCamera` | **107.3°** |
+| `builtInDualWideCamera` (virtual) | 111.6° |
+
+## World-tracking formats, all wide-angle
+
+| resolution | fps | hi-res still capable |
+|---|---|---|
+| 3840x2160 | 30 / 25 / 24 | yes |
+| 1920x1440 | 60 | yes |
+| 1920x1440 | 60 / 30 | no |
+| 1920x1080 | 60 / 30 | yes |
+| 1920x1080 | 60 / 30 | no |
+| 1280x720 | 60 / 30 | no |
+
+`recommended4K` = 3840x2160@30 wide. `recommendedHiRes` = 1920x1440@60 wide.
+`worldTrackingSupported` = true. **`meshSupported` = true.**
+
+## What this costs, under the owner's pre-stated ruling
+
+The ruling was given in advance: **take pose, lose the wide.** So the trade is now priced rather
+than argued:
+
+- **Field of view falls from 107.3° to 64.7°, a factor of 1.66.** The same wall needs about
+  two-thirds more frames laterally, and the trigger already fires on travel rather than time, so
+  this needs no change — it simply fires more often. Storage is ruled not a constraint.
+- **Resolution is not a loss.** Today's traverse frames are 3680x2760. Tracking at 1920x1440@60
+  with `captureHighResolutionFrame` for the stills keeps still quality and gives ARKit the frame
+  rate it wants; 4K@30 is the alternative if a still per frame is preferred over tracking headroom.
+- ⚑ **The corner argument strengthens rather than weakens.** A narrower lens sees less of a tight
+  room per frame, but pose measures motion toward a subject directly — which is the thing eight
+  rounds of pixel comparison could not do. The failures are not equal: a missed strip of wall is
+  visible and re-walkable; a false contiguous across a real gap is invisible and files as complete.
+
+## Next, in order
+
+1. **Autofocus collision — measure, do not reason.** Run a locked-focus world-tracking session and
+   read `ARCamera.trackingState`; `limited(.insufficientFeatures)` is ARKit saying so itself.
+2. **The twenty-minute mesh thermal run** against the known 98-minute, 9.2%/hour, `nominal`
+   baseline. Mesh is supported, so this is now a measurement rather than a question.

@@ -340,6 +340,41 @@ const median = (values: number[]): number | null => {
 };
 
 /**
+ * Frames taken with the iPad turned away from the angle their file claims.
+ *
+ * ⚑ **The record and the device disagreed for a fortnight and nothing said so.** A traverse fixes
+ * the capture connection's rotation at `startTraverse` — correctly, because re-rotating mid-leg
+ * would make the pairs either side of a turn incomparable — and every frame is then stamped with
+ * that one angle. On the 2026-08-19 clean-gap walk all seventy frames read `exifOrientation: 6`,
+ * including the fifty taken with the iPad carried at the owner's side.
+ *
+ * The fix is not to reconcile them. It is to stop the record asserting a frozen value as though it
+ * were observed, and to name the frames where the two part company — the same move as
+ * {@link framesNeedingEyes}: a person settles in seconds what the arithmetic should not guess at.
+ *
+ * Compared against the leg's OPENING angle rather than a stored constant, because that is the angle
+ * the connection was actually frozen to. A quarter turn is the threshold because that is the point
+ * at which a stamped orientation puts a different edge of the picture at the top; smaller wobbles
+ * are the concierge's hands and mean nothing.
+ *
+ * Legs recorded before `deviceRotationAngle` shipped carry no angles and report nothing, which is
+ * correct: absent is not the same as agreeing.
+ */
+export function framesTurnedFromStamp(result: Pick<TraverseResult, "frames">): number[] {
+  const opening = result.frames.find((f) => typeof f.deviceRotationAngle === "number");
+  if (!opening) return [];
+  const base = opening.deviceRotationAngle as number;
+  return result.frames
+    .filter((f) => {
+      if (typeof f.deviceRotationAngle !== "number") return false;
+      // Shortest way round the circle: 350° and 10° are twenty degrees apart, not three hundred.
+      const raw = Math.abs(f.deviceRotationAngle - base) % 360;
+      return Math.min(raw, 360 - raw) >= 90;
+    })
+    .map((f) => f.index);
+}
+
+/**
  * The frames a person should look at, because arithmetic cannot settle what they answer.
  *
  * ⚑ **A rejected pair raises two different questions and this mechanism can only answer one.**
@@ -411,8 +446,34 @@ export interface TraverseFrame {
   path: string;
   bytes: number;
   index: number;
+  /** What the FILE claims, stamped once from the connection's rotation at `startTraverse`. */
   exifOrientation: number;
+  /** ⚑ How the iPad was actually held when this frame was requested, which is not the same thing.
+   *  On the 2026-08-19 clean-gap walk all 70 frames read `exifOrientation: 6` while fifty of them
+   *  were taken with the iPad carried at the owner's side. The frozen value stays — re-rotating
+   *  mid-leg would make the pairs either side of a turn incomparable — but the record no longer
+   *  asserts it as an observation. Absent on legs recorded before this shipped. */
+  deviceRotationAngle?: number;
   at: string;
+}
+
+/** ⚑ What the room afforded and what was taken, metered once per leg.
+ *
+ *  Recorded because the one number the shutter costing could not settle from banked frames is
+ *  where noise becomes unacceptable — and a value that is computed but unreachable cannot settle
+ *  it. `underExposed` is the room refusing the floor: the frame is darker than metered, which is
+ *  the trade the 1/30 floor makes deliberately, because a dark frame is recoverable and a smeared
+ *  one is not. Absent on legs recorded before this shipped. */
+export interface TraverseExposure {
+  /** Reciprocal seconds — 15 means 1/15 s. What the auto-exposure had settled on. */
+  meteredShutter: number;
+  meteredISO: number;
+  /** Reciprocal seconds. What the leg was actually locked to. */
+  shutter: number;
+  iso: number;
+  isoCeiling: number;
+  formatMaxISO: number;
+  underExposed: boolean;
 }
 
 export interface TraverseStarted {
@@ -444,6 +505,7 @@ export interface TraverseResult {
   unmet: string[];
   gaps: number;
   unverified: number;
+  exposure?: TraverseExposure;
 }
 
 export interface TraverseProgressEvent {

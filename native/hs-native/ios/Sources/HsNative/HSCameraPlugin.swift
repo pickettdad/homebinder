@@ -1931,6 +1931,12 @@ final class CameraController: NSObject {
         /// ⚑ Fixed at the start of the run, for the same reason the exposure is — see `downscaled`.
         /// The crop axis must mean one thing for the whole traverse.
         var orientation: CGImagePropertyOrientation = .up
+        /// ⚑ The device's LIVE rotation angle when this frame was requested — which is not the
+        /// angle the file will be stamped with. The capture connection's rotation stays fixed for
+        /// the leg (see `startTraverse`), so a leg walked with the iPad turned produces frames
+        /// whose EXIF claims an orientation the device did not have. Recorded rather than
+        /// reconciled: the manifest must not assert a frozen value as though it were observed.
+        var rotationAtRequest: Double = 0
         /// Largest single accumulator step since the last kept frame. The discriminator for the
         /// corner — see `advanceTraverse`. Reset when a frame is requested.
         var maxStep: CGFloat = 0
@@ -2006,6 +2012,35 @@ final class CameraController: NSObject {
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
+    /**
+     ⚑ **The traverse's shutter is metered per leg, not inherited from wherever the concierge
+     happened to be standing.**
+
+     Until 2026-08-19 `startTraverse` locked exposure with `.locked`, which freezes whatever the
+     auto-exposure had settled on. The ruling behind it argued *brightness* — "lock it and let the
+     window blow" — and nobody noticed that **locking exposure also freezes the shutter.** Every
+     traverse frame of every walk came out at 1/15 s: a shutter for someone standing still. The
+     moment the concierge walked, 71% of the frames were smear, and every measure in this file was
+     fitted against that input.
+
+     So: meter the room at the start of the leg, then take the fastest shutter it affords with ISO
+     under the noise ceiling. Still ONE lock per leg — `.custom` freezes both terms exactly as
+     `.locked` did — so frames within a leg still colour-match, which is the property the lock
+     exists for. Legs are separate captures and are allowed to differ.
+
+     The floor matters as much as the ceiling: a dark plant room cannot afford 1/125 at any usable
+     ISO, and a shutter chosen past what the room allows buys a black frame instead of a smeared
+     one. Floored at 1/30 — one full stop better than 1/15 — and under-exposure past that is
+     accepted, because **a dark frame is recoverable and a smeared one is not.**
+    */
+    private static let traverseFastestShutter = CMTime(value: 1, timescale: 125)
+    private static let traverseSlowestShutter = CMTime(value: 1, timescale: 30)
+    /// ⚑ Where noise becomes unacceptable is the one number the costing could not settle from
+    /// banked frames, so it is a named constant with the metered and chosen values recorded beside
+    /// it on every leg — the next walk answers it with data rather than impression.
+    /// Clamped to the active format's own ceiling at use, which is the hard limit.
+    private static let traverseNoiseCeilingISO: Float = 1600
+
     private static let traverseEveryNthFrame = 2
     /// Working width for registration. Overlap is a geometric question, not a detail question.
     private static let traverseWorkingWidth = 384
@@ -2017,6 +2052,59 @@ final class CameraController: NSObject {
     /// those two paths would cost more than that.
     private var isTraversing = false
     private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
+
+    /**
+     What shutter and ISO this room affords, read off the camera at the moment the leg begins.
+
+     ⚑ **Meter, do not hardcode.** The four rooms measured on 2026-08-19 sat at ISO 400/500/640/2000
+     for the same 1/15 s — a factor of five between the brightest and the darkest, in one house. A
+     constant chosen for any one of them is wrong in the other three, and wrong in the direction
+     that produces either smear or a black frame.
+
+     Exposure is a product: `duration × iso` is what the auto-exposure had balanced when it settled,
+     and holding that product constant is what "the same brightness, faster" means. So the fastest
+     shutter this room affords is exactly the one at which ISO reaches the ceiling.
+
+     Everything is recorded — what was metered, what was chosen, and both ceilings — because the one
+     question the costing could not answer from banked frames is where noise becomes unacceptable,
+     and a value that is computed but unreachable cannot answer it. (Rule 43, and this file has
+     paid for it six times.)
+    */
+    static func traverseExposurePlan(for device: AVCaptureDevice)
+        -> (duration: CMTime, iso: Float, record: [String: Any]) {
+        let format = device.activeFormat
+        let meteredDuration = CMTimeGetSeconds(device.exposureDuration)
+        let meteredISO = device.iso
+        // The hard ceiling is the format's; ours is a policy on top of it and can only be lower.
+        let ceiling = min(Self.traverseNoiseCeilingISO, format.maxISO)
+
+        // Fastest first, then clamped both ways. `light` has units of seconds × ISO.
+        let light = meteredDuration * Double(meteredISO)
+        var duration = light / Double(ceiling)
+        duration = min(max(duration, CMTimeGetSeconds(Self.traverseFastestShutter)),
+                       CMTimeGetSeconds(Self.traverseSlowestShutter))
+        duration = min(max(duration, CMTimeGetSeconds(format.minExposureDuration)),
+                       CMTimeGetSeconds(format.maxExposureDuration))
+
+        // ⚑ ISO follows from the duration actually taken, not from the one we wanted. In a room
+        // darker than the floor allows this lands ON the ceiling and the frame is under-exposed —
+        // which is the trade the floor exists to make, stated in one line rather than hidden.
+        var iso = Float(light / duration)
+        iso = min(max(iso, format.minISO), format.maxISO)
+
+        let chosen = CMTime(seconds: duration, preferredTimescale: 1_000_000)
+        return (chosen, iso, [
+            "meteredShutter": meteredDuration > 0 ? 1 / meteredDuration : 0,
+            "meteredISO": Double(meteredISO),
+            "shutter": duration > 0 ? 1 / duration : 0,
+            "iso": Double(iso),
+            "isoCeiling": Double(ceiling),
+            "formatMaxISO": Double(format.maxISO),
+            // True when the room could not afford the floor: the frame is darker than metered, and
+            // the desk should know that rather than infer it from a dim photograph.
+            "underExposed": Double(light / duration) > Double(format.maxISO) + 0.5
+        ])
+    }
 
     func startTraverse(continuesFrom: String? = nil,
                        completion: @escaping (Result<[String: Any], Error>) -> Void) {
@@ -2035,11 +2123,22 @@ final class CameraController: NSObject {
          the white balance lock the frames do not even colour-match, and a concierge looking at
          the result cannot tell that from a lighting change in the room.
          */
+        var exposureRecord: [String: Any] = [:]
         if let device {
             do {
                 try device.lockForConfiguration()
-                if device.isExposureModeSupported(.locked) { device.exposureMode = .locked }
-                else { unmet.append("lockedExposure") }
+                // ⚑ Metered, not inherited — see `traverseFastestShutter`. `.custom` locks both
+                // terms exactly as `.locked` did, so this is one lock per leg either way.
+                let plan = Self.traverseExposurePlan(for: device)
+                exposureRecord = plan.record
+                if device.isExposureModeSupported(.custom) {
+                    device.setExposureModeCustom(duration: plan.duration, iso: plan.iso)
+                } else if device.isExposureModeSupported(.locked) {
+                    device.exposureMode = .locked
+                    unmet.append("meteredExposure")
+                } else {
+                    unmet.append("lockedExposure")
+                }
                 if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
                 else { unmet.append("lockedWhiteBalance") }
                 if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
@@ -2049,8 +2148,16 @@ final class CameraController: NSObject {
                 unmet.append("configuration")
             }
         }
-        // The rotation is fixed for the run, like the exposure. Frames individually re-rotated
-        // part-way through a continuous move would not be one traverse.
+        /* The rotation is fixed for the run. Frames individually re-rotated part-way through a
+           continuous move would not be one traverse — the crop axis must mean one thing from the
+           first pair to the last, or the pairs either side of a turn are silently incomparable.
+
+           ⚑ **But fixed is not the same as true, and the record now says which it is.** Every frame
+           of the 2026-08-19 clean-gap walk carries `exifOrientation: 6` because this line stamped
+           it once, including the fifty frames taken with the iPad at the owner's side. The angle
+           the device was actually at travels with each frame as `deviceRotationAngle` — see
+           `completeTraverseFrame`. Reconciling them here would trade a true record for a broken
+           measurement; recording both costs nothing and lies about nothing. */
         applyRotation(captureRotationAngle, to: photoOutput.connection(with: .video))
         let latched = torchOn
         // Read on main, where the rotation coordinator writes it, and carried into the run rather
@@ -2068,6 +2175,7 @@ final class CameraController: NSObject {
             self.isTraversing = true
             DispatchQueue.main.async {
                 completion(.success([
+                    "exposure": exposureRecord,
                     "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
                     /*
                      ⚑ **Which registration model produced every number in this run.**
@@ -2212,6 +2320,10 @@ final class CameraController: NSObject {
     private func requestTraverseFrame(run: TraverseRun, buffer: CVPixelBuffer) {
         run.awaitingFrame = true
         run.pendingBuffer = buffer
+        // ⚑ The angle the device is at NOW, against the angle the connection was frozen at when
+        // the leg started. Read here rather than in the completion because this is the instant the
+        // shutter is asked for; the same background-queue read the rest of this file already makes.
+        run.rotationAtRequest = Double(captureRotationAngle)
         run.travelAtRequest = hypot(run.travel.x, run.travel.y)
         run.stepAtRequest = run.maxStep
         run.droppedAtRequest = run.droppedSteps
@@ -2246,6 +2358,13 @@ final class CameraController: NSObject {
             "bytes": data.count,
             "index": index,
             "exifOrientation": Self.exifOrientation(of: data),
+            /* ⚑ What the file CLAIMS versus how the iPad was actually held. `exifOrientation` is
+               read off the bytes and is stamped from the connection's rotation, which is frozen for
+               the leg — so on the 2026-08-19 clean-gap walk all 70 frames read 6 while the iPad was
+               carried at the owner's side. Recording both is the fix: the frozen value stays,
+               because re-rotating mid-leg would make the pairs before a turn incomparable with the
+               pairs after it, but the record stops asserting it as an observation. */
+            "deviceRotationAngle": run.rotationAtRequest,
             "at": ISO8601DateFormatter().string(from: Date())
         ])
 

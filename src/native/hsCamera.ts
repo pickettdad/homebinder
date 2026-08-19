@@ -231,6 +231,15 @@ export interface TraversePair {
   /** Median flow magnitude as a fraction of frame width, and its 90th percentile. */
   flowMedian?: number;
   flowP90?: number;
+  /** ⚑ How consistently the flow field points one way, 0..1. Proposed as the partner to texture,
+   *  tested blank-first, and NOT adopted: a covered lens reads 0.995 — as coherent as a clean
+   *  sweep — because coherence is derived from the flow field, which is derived from correlating
+   *  two frames, so it inherits the failure it was proposed to escape. Recorded, never gated. */
+  flowConsistency?: number;
+  /** ⚑ Whether the translation-era plausibility bound would have rejected this pair. It no longer
+   *  decides: it rejects using the measurement flow replaced, before flow is consulted, and on
+   *  2026-08-19 it was the main source of "cannot say" on good walks — 8 of 16 and 11 of 19. */
+  implausibleShift?: boolean;
   /** ⚑ The share of the frame that landed inside its neighbour, measured by optical flow — the
    *  verdict since `flow-v1`. Every earlier mechanism fitted a global 2D transform to the pair and
    *  the frames refute that premise: a 120° lens, a room with depth and a walk partly toward it

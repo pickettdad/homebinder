@@ -11,6 +11,7 @@ import {
   cameraAvailable,
   frameLabel,
   framesNeedingEyes,
+  framesTurnedFromStamp,
   frameStateOf,
   glareSuspected,
   lensPolicyFor,
@@ -18,6 +19,7 @@ import {
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
+  type TraverseFrame,
   type TraversePair,
 } from "../../src/native/hsCamera";
 
@@ -395,5 +397,42 @@ describe("the torch pair", () => {
 
   it("stays silent when they agree, which is the ordinary case", () => {
     expect(glareSuspected({ torchPaired: true, torchPairAgreement: 0.99 })).toBe(false);
+  });
+});
+
+describe("framesTurnedFromStamp", () => {
+  const frame = (index: number, deviceRotationAngle?: number): TraverseFrame => ({
+    path: `/tmp/f${index}.jpg`,
+    bytes: 1,
+    index,
+    // Every frame of a leg carries the SAME stamp — that is the thing under test, not a fixture
+    // detail. The connection's rotation is frozen at `startTraverse` and the file inherits it.
+    exifOrientation: 6,
+    ...(deviceRotationAngle === undefined ? {} : { deviceRotationAngle }),
+    at: "2026-08-19T11:49:45Z",
+  });
+
+  it("names every frame turned a quarter turn or more from the leg's opening angle, and no other", () => {
+    const frames = [frame(0, 90), frame(1, 96), frame(2, 180), frame(3, 90), frame(4, 0)];
+    const named = framesTurnedFromStamp({ frames });
+    // The invariant, stated rather than the inventory: membership is exactly the quarter-turn rule.
+    for (const f of frames) {
+      const raw = Math.abs((f.deviceRotationAngle as number) - 90) % 360;
+      const turned = Math.min(raw, 360 - raw) >= 90;
+      expect(named.includes(f.index)).toBe(turned);
+    }
+  });
+
+  it("measures the shortest way round the circle, so 350 and 10 are twenty degrees apart", () => {
+    expect(framesTurnedFromStamp({ frames: [frame(0, 350), frame(1, 10)] })).toEqual([]);
+  });
+
+  it("reports nothing when no frame carries an angle — absent is not the same as agreeing", () => {
+    expect(framesTurnedFromStamp({ frames: [frame(0), frame(1), frame(2)] })).toEqual([]);
+  });
+
+  it("takes its baseline from the first frame that has one, not from a constant", () => {
+    // A leg begun in landscape must not report every one of its own frames as turned.
+    expect(framesTurnedFromStamp({ frames: [frame(0, 0), frame(1, 0), frame(2, 0)] })).toEqual([]);
   });
 });

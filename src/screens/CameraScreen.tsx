@@ -47,6 +47,7 @@ import {
   startAudioProbe,
   stopAudioProbe,
   framesNeedingEyes,
+  framesTurnedFromStamp,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
@@ -826,6 +827,10 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
 
   const diagnosis = traverseResult ? traverseDiagnosis(traverseResult) : null;
   const eyes = traverseResult ? framesNeedingEyes(traverseResult) : [];
+  /* ⚑ Reached, not merely computed. The whole point of recording the device's live angle is that
+     someone can see where it parted from the stamp — a number that never reaches a reader is rule
+     43 again, and this file has paid for that six times. */
+  const turned = traverseResult ? framesTurnedFromStamp(traverseResult) : [];
   const frameState = frameStateOf(status);
   // Clamped rather than trusted: a stack of three followed by a stack of one would otherwise
   // leave the index pointing past the end and render nothing at all.
@@ -1139,16 +1144,13 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                     </span>
                   </>
                 )}
+                {/* ⚑ The live per-pair verdict was green/amber/rose here, which is a colour
+                    asserting coverage frame by frame while the concierge is still walking. It read
+                    emerald straight through both carries on 2026-08-19. Pinned: the word stays,
+                    uncoloured and grey, because it is still worth watching and no longer worth
+                    believing. */}
                 {traverseProgress.lastPair && (
-                  <span
-                    className={
-                      traverseProgress.lastPair.contiguity === "gap"
-                        ? "text-rose-400"
-                        : traverseProgress.lastPair.contiguity === "unverified"
-                          ? "text-amber-400"
-                          : "text-emerald-400"
-                    }
-                  >
+                  <span className="text-slate-500">
                     {" "}
                     {traverseProgress.lastPair.contiguity}
                   </span>
@@ -1157,12 +1159,39 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             )}
             {traverseResult && !traversing && (
               <p className="mt-1">
-                {/* The verdict first, the counts after — a diagnostic decides whether there is
-                    anything to say before it says what. */}
+                {/*
+                  ⚑ **The traverse is pinned, and the verdict stops headlining at the same moment it
+                  stops being trusted** (owner ruling 2026-08-19). The gap detector is abandoned
+                  after eight measures failed in one family; the traverse still fires, still files
+                  frames and still records overlap, because the desk needs frames rather than a
+                  verdict — a gap is only actionable in the room, while it can still be re-walked.
+
+                  Leaving a demoted verdict in the lead is the retired-metric defect for the THIRD
+                  time: `disparity` printed as though it still gated, the torch word meant two
+                  things, and now this. So the frames lead — they are what the leg actually produced
+                  — and the verdict drops to the grey line beside `disparity`, labelled the same way.
+                */}
                 {legNumber > 1 && <span className="text-brass-400">leg {legNumber} · </span>}
-                <span className="font-mono text-slate-100">{traverseVerdict(traverseResult)}</span> ·{" "}
-                {traverseResult.frames.length} frames · {traverseResult.gaps} gap
-                {traverseResult.gaps === 1 ? "" : "s"} · {traverseResult.unverified} unverified
+                <span className="font-mono text-slate-100">{traverseResult.frames.length}</span>{" "}
+                frames · {traverseResult.unverified} unverified
+                {traverseResult.exposure && (
+                  <>
+                    {" · "}
+                    <span className="font-mono text-slate-100">
+                      1/{Math.round(traverseResult.exposure.shutter)}
+                    </span>
+                    {" @ ISO "}
+                    <span className="font-mono text-slate-100">
+                      {Math.round(traverseResult.exposure.iso)}
+                    </span>
+                    {/* ⚑ Gated on the verdict, not printed always: the room refusing the 1/30 floor
+                        is a real thing to say, and saying "exposure fine" on every other leg is the
+                        alarm-on-the-majority-case failure. */}
+                    {traverseResult.exposure.underExposed && (
+                      <span className="text-amber-400"> · dark, floor held</span>
+                    )}
+                  </>
+                )}
                 {traverseResult.unmet.length > 0 && (
                   <span className="text-amber-400"> · unmet {traverseResult.unmet.join(", ")}</span>
                 )}
@@ -1195,6 +1224,18 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 {/* ⚑ Shown so the field builds the distribution the decision needs. Same-place
                     sits at 0.27-0.70 across three lighting conditions; different-place at
                     0.73-1.28 on five pairs. A margin of 0.027 is not a threshold. */}
+                {traverseResult.exposure && (
+                  <>
+                    {/* ⚑ Metered against taken. The pair is the whole point: it says what the room
+                        offered and what the leg took, so the noise question the shutter costing
+                        could not settle from banked frames is answered by walks rather than by
+                        argument. */}
+                    metered 1/{Math.round(traverseResult.exposure.meteredShutter)} @ ISO{" "}
+                    {Math.round(traverseResult.exposure.meteredISO)} · ceiling{" "}
+                    {Math.round(traverseResult.exposure.isoCeiling)}
+                    <br />
+                  </>
+                )}
                 place ·{" "}
                 <span className="font-mono text-slate-100">
                   {diagnosis.medianPlaceDistance?.toFixed(3) ?? "—"}
@@ -1206,6 +1247,17 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 cannot-say · {diagnosis.reasons.tooLittleTexture} nothing to see ·{" "}
                 {diagnosis.reasons.flowStill} image still · {diagnosis.reasons.crossCheck} cross-check ·{" "}
                 {diagnosis.reasons.implausibleShift} implausible · {diagnosis.reasons.unregistered} unregistered
+                {turned.length > 0 && (
+                  <>
+                    <br />
+                    {/* ⚑ Not an alarm and not a fault: the leg was walked with the iPad turned, the
+                        files claim the angle it started at, and the desk should know which frames
+                        those are rather than discover it by looking at a sideways photograph. */}
+                    <span className="text-slate-400">
+                      turned from stamp · frames {turned.join(", ")}
+                    </span>
+                  </>
+                )}
                 {eyes.length > 0 && (
                   <>
                     <br />
@@ -1216,7 +1268,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 )}
                 <br />
                 <span className="text-slate-600">
-                  disparity {diagnosis.medianDisparity?.toFixed(4) ?? "—"} — recorded, not deciding
+                  coverage {traverseVerdict(traverseResult)} · {traverseResult.gaps} gap
+                  {traverseResult.gaps === 1 ? "" : "s"} · disparity{" "}
+                  {diagnosis.medianDisparity?.toFixed(4) ?? "—"} — recorded, not deciding
                 </span>
               </p>
             )}

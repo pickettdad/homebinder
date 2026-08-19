@@ -307,6 +307,10 @@ export interface TraverseDiagnosis {
   measured: number;
   /** ⚑ The check that decides. Listed first because the panel must lead with what the verdict
    *  turned on — leading with `disparity`, which no longer gates, made a clean run read as broken. */
+  /** ⚑ Median content distance between adjacent frames. Same place, 61 pairs across three
+   *  lighting conditions: 0.27-0.70. Different place, 5 hand-measured pairs: 0.73-1.28. The margin
+   *  at the boundary is 0.027, so it is shown and not acted on. */
+  medianPlaceDistance: number | null;
   medianCrossCheck: number | null;
   medianDisparity: number | null;
   medianDisparityX: number | null;
@@ -381,6 +385,9 @@ export function traverseDiagnosis(result: Pick<TraverseResult, "pairs">): Traver
   return {
     pairs: pairs.length,
     measured: measured.length,
+    medianPlaceDistance: median(
+      measured.map((p) => p.placeDistance).filter((v): v is number => typeof v === "number"),
+    ),
     medianCrossCheck: median(
       measured.map((p) => p.crossCheck).filter((v): v is number => typeof v === "number"),
     ),

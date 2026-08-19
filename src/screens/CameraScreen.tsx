@@ -1192,7 +1192,14 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
             */}
             {traverseResult && !traversing && diagnosis && (
               <p className="mt-1 text-slate-400">
-                cross-check med ·{" "}
+                {/* ⚑ Shown so the field builds the distribution the decision needs. Same-place
+                    sits at 0.27-0.70 across three lighting conditions; different-place at
+                    0.73-1.28 on five pairs. A margin of 0.027 is not a threshold. */}
+                place ·{" "}
+                <span className="font-mono text-slate-100">
+                  {diagnosis.medianPlaceDistance?.toFixed(3) ?? "—"}
+                </span>
+                {" "}· cross-check med ·{" "}
                 <span className="font-mono text-slate-100">{diagnosis.medianCrossCheck?.toFixed(4) ?? "—"}</span>
                 {" "}· {diagnosis.measured} judged
                 <br />

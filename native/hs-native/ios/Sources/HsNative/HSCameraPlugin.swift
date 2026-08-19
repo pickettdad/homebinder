@@ -2450,6 +2450,42 @@ final class CameraController: NSObject {
             record["flowConsistency"] = flow.consistency
 
             /*
+             ⚑ **Is this the same PLACE — recorded, deliberately not gated, and the sample is why.**
+
+             The owner's clean-gap sweep is the case nothing catches: he swept a textured wall,
+             lowered the iPad to his side with the lens open, walked, and raised it at a different
+             textured wall. **Texture passes both ends because both are textured — texture never
+             looks at the pair** — and coverage read 0.78 to 0.996 across the middle, so 23 of 28
+             pairs came back contiguous. The carry frames measured 5.0 to 8.7, above the 5.0 floor.
+
+             A feature print is the first measure here that asks the question the feature is
+             actually for, and it is not a pixel correlation: it is a learned descriptor of content,
+             so it needs no corresponding pixels. Two frames of one wall came back 0.31 to 0.57;
+             two frames of different walls, 0.86 to 1.28. Two prints and a distance cost 5 ms
+             against 150 ms of flow.
+
+             ⚑ **It is not gated because a wider sample overlaps.** A DIM room pair that genuinely
+             shares content — verified by eye, the neon sign and the brick both present — reads
+             **0.873**, higher than two genuinely different mechanical-room frames at **0.726**. Low
+             light makes the descriptor unstable, which is this track's recurring shape a seventh
+             time: less information, less reliable measure. A threshold fitted to eleven hand-picked
+             pairs would be fitted to that overlap.
+
+             ⚑ And blank-first found its other blind spot before any of this: two covered-lens
+             frames read **0.202**, i.e. *the same place*. Texture already guards that, but it means
+             this can never gate alone.
+
+             So it is recorded on every pair. One walk gives a distribution over dozens rather than
+             a threshold over eleven, and then the decision has evidence behind it.
+            */
+            if let a = featurePrint(previous), let b = featurePrint(current) {
+                var distance = Float(0)
+                if (try? a.computeDistance(&distance, to: b)) != nil {
+                    record["placeDistance"] = Double(distance)
+                }
+            }
+
+            /*
              ⚑ **Coverage alone is INVERTED, and the owner's deliberate break proved it.**
 
              He covered the lens mid-run. Those pairs returned coverage of 0.982, 0.990, 0.994,
@@ -2695,6 +2731,15 @@ final class CameraController: NSObject {
         guard n > 0 else { return nil }
         let mean = sum / n
         return (sumSquares / n - mean * mean).squareRoot()
+    }
+
+    /// A learned descriptor of what a frame CONTAINS, as opposed to how its pixels correlate with
+    /// another frame's. See the note at its call site for why it is recorded and not gated.
+    private func featurePrint(_ buffer: CVPixelBuffer) -> VNFeaturePrintObservation? {
+        let request = VNGenerateImageFeaturePrintRequest()
+        guard (try? VNImageRequestHandler(cvPixelBuffer: buffer, options: [:]).perform([request])) != nil
+        else { return nil }
+        return request.results?.first as? VNFeaturePrintObservation
     }
 
     private func crops(_ a: CVPixelBuffer, _ b: CVPixelBuffer, _ rect: CGRect) -> (CVPixelBuffer, CVPixelBuffer)? {

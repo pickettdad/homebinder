@@ -236,6 +236,12 @@ export interface TraversePair {
    *  sweep — because coherence is derived from the flow field, which is derived from correlating
    *  two frames, so it inherits the failure it was proposed to escape. Recorded, never gated. */
   flowConsistency?: number;
+  /** ⚑ How different the two frames' CONTENT is, by a learned descriptor rather than a pixel
+   *  correlation — the first measure here that asks whether this is the same place. Same wall
+   *  0.31-0.57, different walls 0.86-1.28. Recorded and NOT gated: a dim pair that genuinely shares
+   *  content reads 0.873, above two genuinely different frames at 0.726, so the sample overlaps.
+   *  And two covered-lens frames read 0.202 — "the same place" — so it can never gate alone. */
+  placeDistance?: number;
   /** ⚑ Whether the translation-era plausibility bound would have rejected this pair. It no longer
    *  decides: it rejects using the measurement flow replaced, before flow is consulted, and on
    *  2026-08-19 it was the main source of "cannot say" on good walks — 8 of 16 and 11 of 19. */

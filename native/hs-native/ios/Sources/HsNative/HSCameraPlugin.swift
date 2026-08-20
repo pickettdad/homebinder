@@ -45,7 +45,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "capture", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startTraverse", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopTraverse", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "probeAr", returnType: CAPPluginReturnPromise)
     ]
 
     /**
@@ -56,6 +57,19 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
      */
     override public func load() {
         _ = CameraController.arCapabilitiesLogged
+        /* ⚑ A launch-argument probe, so the costing can be taken without a person tapping a
+           button in a room. `devicectl device process launch --console -- --hs-ar-probe` runs it
+           and the answers arrive in the log as HS-AR-PROBE lines. Dev-only by construction: the
+           argument is never passed by a shipped launch, and the same probe sits behind the dev
+           bench for a re-run in a real room. */
+        if CommandLine.arguments.contains("--hs-ar-probe") {
+            let probe = HSArProbe()
+            arProbe = probe
+            probe.run { result in
+                NSLog("HS-AR-PROBE RESULT %@", String(describing: result))
+                self.arProbe = nil
+            }
+        }
     }
 
     private var controller: CameraController?
@@ -220,6 +234,32 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
     }
+
+    /**
+     ⚑ The zone-session costing, measured rather than argued. Dev-bench only, read-only, and it
+     leaves nothing behind: see `HSArProbe`. It takes tens of seconds and holds the camera for the
+     whole of it, so it refuses to run while a capture session is live rather than fighting for the
+     device — the collision would produce a wrong answer that looked like a real one.
+    */
+    @objc func probeAr(_ call: CAPPluginCall) {
+        guard controller == nil else {
+            call.reject("Close the camera first — the probe needs the camera to itself")
+            return
+        }
+        guard HSArProbe.isSupported() else {
+            call.resolve(["supported": false])
+            return
+        }
+        let probe = HSArProbe()
+        arProbe = probe
+        probe.run { [weak self] result in
+            self?.arProbe = nil
+            call.resolve(JSObject(uniqueKeysWithValues: result.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) }))
+        }
+    }
+
+    /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
+    private var arProbe: HSArProbe?
 
     @objc func stop(_ call: CAPPluginCall) {
         guard let controller else {
@@ -1937,6 +1977,13 @@ final class CameraController: NSObject {
         /// whose EXIF claims an orientation the device did not have. Recorded rather than
         /// reconciled: the manifest must not assert a frozen value as though it were observed.
         var rotationAtRequest: Double = 0
+        /* ⚑ Carried on the run so it reaches the STOP payload. It was written only into the START
+           payload when it shipped, and typed on `TraverseResult` — so the first walk that used it
+           came back with `exposure` absent, and the number the whole shutter costing turns on was
+           unreachable by the only thing that carries a walk off the device. **Seventh instance of
+           rule 43, committed by the session that wrote the page naming it.** The bridge is untyped
+           at the boundary, so TypeScript could not catch it; only a walk could. */
+        var exposure: [String: Any] = [:]
         /// Largest single accumulator step since the last kept frame. The discriminator for the
         /// corner — see `advanceTraverse`. Reset when a frame is requested.
         var maxStep: CGFloat = 0
@@ -2168,6 +2215,7 @@ final class CameraController: NSObject {
             guard let self else { return }
             let run = TraverseRun()
             run.unmet = unmet
+            run.exposure = exposureRecord
             run.torchLatched = latched
             run.orientation = orientation
             run.continuesFrom = continuesFrom
@@ -2228,7 +2276,8 @@ final class CameraController: NSObject {
                 // is a different object from one with none, and summing it here means nobody
                 // downstream has to know the verdict vocabulary to ask the question.
                 "gaps": run.pairs.filter { ($0["contiguity"] as? String) == "gap" }.count,
-                "unverified": run.pairs.filter { ($0["contiguity"] as? String) == "unverified" }.count
+                "unverified": run.pairs.filter { ($0["contiguity"] as? String) == "unverified" }.count,
+                "exposure": run.exposure
             ]
             DispatchQueue.main.async {
                 self.restoreContinuousModes()

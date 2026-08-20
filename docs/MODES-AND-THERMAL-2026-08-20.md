@@ -77,6 +77,35 @@ would have been a floor rather than a cost, since ARKit works largely outside th
 number that cannot be trusted is worse than none, because it gets quoted.** This one needs the owner
 walking.
 
+## 4a · The harness exists, and its own blank-input test passed
+
+`HSBench` (plugin) + `src/dev/deviceBench.ts` (the rules) + a card on the dev bench. **Built as a
+general device bench, not a thermal test** — hold a configuration, sample over time, share a JSON —
+because the same shape answers tracking quality against walking speed, relocalisation cost and
+loop-closure drift, and a harness built for one question has to be rebuilt for the second.
+
+⚑ **The sampler was tested against a blank input before it was believed.** Two minutes on charge,
+on the tethered iPad:
+
+    batteryState "full" for every sample, battery 1.0 for every sample — no invented drain
+    frames 0 → 224 → 449 → 674 → 899 → 1124 → 1349 → 1574 → 1799, exactly 15 fps
+    cool-down sample: frames frozen at 1799, cooling true — and correctly NOT read as a stall
+    endedBecause "cap" · verdict "held" · slope 0 %/hr over 0 steps
+
+**`samplerLying` false, `benchStalled` false, verdict `held`.** The slope reporting **0 steps** is the
+part to notice: the rate is meaningless over two minutes and the figure says so itself rather than
+being quoted as 0 %/hour.
+
+⛑ **What this does not prove.** The battery sat at 100% throughout, so the run demonstrates the
+sampler *does not invent drain*; it cannot demonstrate that it *tracks a falling level correctly*.
+That half is what the control run tests, against the 9.2%/hour reference.
+
+**Three refusals, and they come before any verdict about a mode**: a stalled session, a lying
+sampler, and a run stopped by hand are each *this tells you nothing*, and none of them can be
+reported as a mode that stayed cool. The primary measure is **time to the first thermal transition**
+with a 40-minute cap, and which of the two ended the run is recorded — because *held nominal* and
+*ran out of time* are otherwise the same reading and only one of them is a measurement.
+
 ## 5 · Where the research is right, and the one place to be careful
 
 Right, and now confirmed: separate the modes; never leave RoomPlan running; freeze mesh updates once

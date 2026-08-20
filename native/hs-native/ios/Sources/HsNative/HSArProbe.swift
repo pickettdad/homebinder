@@ -120,6 +120,9 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             // ---- Q3: does a ray from the pose land on the surface in front of the lens? ----
             self.probeRaycast()
 
+            // ---- Q6: the three modes, and whether the low-power one is real ----
+            self.probeModes()
+
             // ---- Q5: the collision nobody named — does the shutter we just shipped survive? ----
             self.probeExposureControl()
 
@@ -188,6 +191,86 @@ final class HSArProbe: NSObject, ARSessionDelegate {
         } else {
             result["raycastDistance"] = -1
             step("raycast: NO HIT")
+        }
+    }
+
+    // MARK: - Q6 · the modes, measured rather than quoted
+
+    /**
+     ⚑ **Does the low-power configuration actually exist on this device, and does it keep the thing
+     it is kept for?**
+
+     The proposed shape runs three modes across a visit: RoomPlan at zone entry, a mesh sweep where
+     the room deserves one, and then a stripped-back tracking session whose only job is to hold the
+     coordinate space so one frame per object container can carry a position. The third is the one
+     that runs for hours, so it is the one that decides whether a two-hour visit is survivable.
+
+     Two things are checked and they are not the same. **Does a 30 fps world-tracking format exist**
+     — halving the frame rate halves the sensor and processor work, and a recommendation to use one
+     is worthless if the device does not offer it. And **does turning mesh and plane detection off
+     keep tracking alive** — because if the coordinate space dies with them, the whole staged design
+     collapses into one heavy mode.
+
+     ⚑ **There is deliberately no CPU or power number here.** A first cut measured in-process CPU
+     time and returned a *negative* rate for one mode — impossible, and caused by counting only live
+     threads — and even corrected it would have been a floor rather than a cost, because ARKit does
+     most of its work outside this process on the neural engine and in system daemons. A number that
+     cannot be trusted is worse than no number: it would have been quoted. **Per-mode power needs the
+     owner walking a real room, one mode per run**, and that is said rather than approximated.
+    */
+    private func probeModes() {
+        // Is there a 30 fps world-tracking format at all?
+        let formats = ARWorldTrackingConfiguration.supportedVideoFormats
+        let fpsOptions = Set(formats.map { $0.framesPerSecond }).sorted()
+        result["formatFpsOptions"] = fpsOptions
+        let thirty = formats.first { $0.framesPerSecond == 30 }
+        result["has30fpsFormat"] = thirty != nil
+        step("modes: world-tracking fps options \(fpsOptions), 30 fps format \(thirty == nil ? "ABSENT" : "present")")
+
+        Thread.sleep(forTimeInterval: 8)
+        let (meshAnchorsHeavy, meshFacesHeavy) = meshCount()
+        result["thermalMeshOn"] = Self.thermalName()
+        step("modes: mesh ON — \(meshAnchorsHeavy) anchors \(meshFacesHeavy) faces, thermal \(Self.thermalName())")
+
+        // Now the stripped-back one, exactly as proposed: no mesh, no plane search, 30 fps if offered.
+        let low = ARWorldTrackingConfiguration()
+        low.planeDetection = []
+        low.sceneReconstruction = []
+        low.environmentTexturing = .none
+        if let thirty { low.videoFormat = thirty }
+        // ⚑ NO `.resetTracking` — the entire point is that the coordinate space survives the change.
+        session.run(low)
+        Thread.sleep(forTimeInterval: 8)
+        let (anchorsLow, facesLow) = meshCount()
+        result["thermalLowPower"] = Self.thermalName()
+        let st = session.currentFrame?.camera.trackingState
+        result["trackingInLowPower"] = st.map { Self.describe($0) } ?? "none"
+        // ⚑ The question that matters: did the world survive the downgrade, or did we just reset it?
+        result["meshAnchorsAfterDowngrade"] = anchorsLow
+        result["meshFacesAfterDowngrade"] = facesLow
+        result["lowPowerKeptWorld"] = anchorsLow >= meshAnchorsHeavy && meshAnchorsHeavy > 0
+        step("modes: LOW POWER — tracking \(st.map { Self.describe($0) } ?? "none"), mesh \(anchorsLow)/\(facesLow) (was \(meshAnchorsHeavy)/\(meshFacesHeavy)), thermal \(Self.thermalName())")
+        // ⚑ Found by accident and it matters: the still resolution follows the VIDEO FORMAT, so a
+        // low-power format is not only a frame-rate choice. Recorded here so the next run states it
+        // rather than rediscovering it.
+        if let f = session.configuration?.videoFormat {
+            result["lowPowerFormatWidth"] = Int(f.imageResolution.width)
+            result["lowPowerFormatHeight"] = Int(f.imageResolution.height)
+        }
+
+        // Put the heavy config back so the later probes measure what they think they measure.
+        if let original = session.configuration { session.run(original) }
+        else if let c = session.configuration { session.run(c) }
+        Thread.sleep(forTimeInterval: 2)
+    }
+
+    static func thermalName() -> String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
         }
     }
 

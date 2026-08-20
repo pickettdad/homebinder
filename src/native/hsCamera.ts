@@ -448,6 +448,11 @@ export interface TraverseFrame {
   index: number;
   /** What the FILE claims, stamped once from the connection's rotation at `startTraverse`. */
   exifOrientation: number;
+  /** ⚑ Variance of the Laplacian on this frame — the one instrument in the traverse that is a
+   *  property of a SINGLE frame and so cannot be fooled by having nothing to compare against.
+   *  Recorded per frame so the keep threshold can be chosen from a distribution across walks
+   *  rather than fitted to one. Absent on legs recorded before this shipped. */
+  texture?: number;
   /** ⚑ How the iPad was actually held when this frame was requested, which is not the same thing.
    *  On the 2026-08-19 clean-gap walk all 70 frames read `exifOrientation: 6` while fifty of them
    *  were taken with the iPad carried at the owner's side. The frozen value stays — re-rotating
@@ -506,6 +511,12 @@ export interface TraverseResult {
   gaps: number;
   unverified: number;
   exposure?: TraverseExposure;
+  /** ⚑ Frames captured and deliberately not filed, because the concierge was walking rather than
+   *  sweeping and the frames were noise in the binder's input. Counted rather than silent: a leg
+   *  that drops half of what it took must say so, or `frames.length` reads as everything it saw.
+   *  A hole in `frames[].index` is where one was. */
+  discarded?: number;
+  discardedTexture?: number[];
 }
 
 export interface TraverseProgressEvent {

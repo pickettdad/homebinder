@@ -1174,6 +1174,12 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
                 {legNumber > 1 && <span className="text-brass-400">leg {legNumber} · </span>}
                 <span className="font-mono text-slate-100">{traverseResult.frames.length}</span>{" "}
                 frames · {traverseResult.unverified} unverified
+                {/* ⚑ Said out loud, never inferred from a smaller count. A leg that drops frames
+                    while walking is doing what it was told; a leg that drops them silently is a
+                    leg whose frame count means something different from the one beside it. */}
+                {(traverseResult.discarded ?? 0) > 0 && (
+                  <span className="text-slate-400"> · {traverseResult.discarded} dropped walking</span>
+                )}
                 {traverseResult.exposure && (
                   <>
                     {" · "}

@@ -88,6 +88,20 @@ export function DeviceBenchCard() {
         One mode, held, sampled every 30 s. Runs to a thermal change or {CAP_MINUTES} minutes,
         whichever comes first, then keeps sampling for {COOL_MINUTES} while it cools.
       </p>
+      {/*
+        ⚑ **Screen brightness is recorded and NOT controlled, and it can dominate the result.** The
+        self-test measured this iPad at 0.05 — a screen that dim draws a fraction of what a working
+        one does, so a control run taken at 0.05 and compared against a 98-minute reference taken
+        with the viewfinder open would flatter every mode after it.
+
+        The instruction is on the screen rather than in a document because the person who has to
+        follow it is standing in a plant room, and a comparison ruined by an uncontrolled variable
+        is indistinguishable afterwards from a mode that was genuinely cheap.
+      */}
+      <p className="mt-1 text-sm text-brass-400">
+        Set the screen brightness the same for every run, and leave it there. It is recorded but not
+        controlled, and it can outweigh the difference between the modes.
+      </p>
 
       {!mode && (
         <>

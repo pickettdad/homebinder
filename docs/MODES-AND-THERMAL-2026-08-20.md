@@ -100,6 +100,22 @@ being quoted as 0 %/hour.
 sampler *does not invent drain*; it cannot demonstrate that it *tracks a falling level correctly*.
 That half is what the control run tests, against the 9.2%/hour reference.
 
+⚑ **Two confounds the reference number cannot absorb, and both belong to the control rather than to
+the harness.**
+
+**Screen brightness.** The self-test measured this iPad at **0.05**, and the 98-minute baseline was
+the app with its viewfinder open at whatever brightness the owner was using. A screen at 0.05 draws a
+fraction of a working one, so a control run taken there would come in *under* 9.2%/hour and make
+every mode measured after it look cheap. Brightness is recorded on every run and **is not
+controlled** — so the instruction is on the bench screen itself, where the person who has to follow
+it is standing.
+
+**The control is an approximation and is labelled as one.** It is not `CameraController`; it is the
+same shape — wide-angle at the photo preset with a video output consuming every frame. So a control
+that lands near 9.2%/hour validates the harness *and* the approximation together. ⛑ **One that does
+not cannot distinguish between them**, and the next step in that case is to re-run the control with
+the app's own camera screen open rather than to adjust anything.
+
 **Three refusals, and they come before any verdict about a mode**: a stalled session, a lying
 sampler, and a run stopped by hand are each *this tells you nothing*, and none of them can be
 reported as a mode that stayed cool. The primary measure is **time to the first thermal transition**

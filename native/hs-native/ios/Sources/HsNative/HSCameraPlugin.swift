@@ -1984,6 +1984,10 @@ final class CameraController: NSObject {
            rule 43, committed by the session that wrote the page naming it.** The bridge is untyped
            at the boundary, so TypeScript could not catch it; only a walk could. */
         var exposure: [String: Any] = [:]
+        /// Frames captured and not filed — see `traverseKeepTexture`. Counted rather than silent:
+        /// a run that drops half its frames must say so, or "30 frames" reads as "30 kept".
+        var discarded = 0
+        var discardedTexture: [Double] = []
         /// Largest single accumulator step since the last kept frame. The discriminator for the
         /// corner — see `advanceTraverse`. Reset when a frame is requested.
         var maxStep: CGFloat = 0
@@ -2087,6 +2091,27 @@ final class CameraController: NSObject {
     /// it on every leg — the next walk answers it with data rather than impression.
     /// Clamped to the active format's own ceiling at use, which is the hard limit.
     private static let traverseNoiseCeilingISO: Float = 1600
+
+    /**
+     ⚑ **Below this a frame is not filed at all** (design session ruling 2026-08-19). The traverse
+     keeps capturing while the concierge walks between rooms — the trigger fires on *travel*, and it
+     cannot tell walking from sweeping — and those frames were only ever tolerable because the gap
+     detector needed continuity. The gap detector is dead, so they are pure noise in the binder's
+     input, and the instrument that already works decides: texture, a property of one frame.
+
+     ⚑ **And the honest number: on the 2026-08-20 walk this discards NOTHING.** Sixteen of thirty
+     frames were the concierge walking to the next room, and the owner had slowed down through the
+     doorway exactly as asked — so those frames measured 5.8 to 12.2 against a floor of 5.0. *The
+     slowing that fixed the blur also removed the only evidence the filter had.* The threshold is
+     kept at the gate's floor rather than raised to fit one walk, because a threshold fitted to one
+     walk is how this feature lost a fortnight; per-frame texture is now recorded on every frame so
+     the number can be chosen from a distribution instead.
+
+     **And the real fix is not here.** These frames exist because the traverse does not know the
+     concierge stopped sweeping. A filter on frame quality is a proxy for an intent the app is never
+     told — which is the trigger's problem, not the filter's.
+    */
+    private static let traverseKeepTexture = 5.0
 
     private static let traverseEveryNthFrame = 2
     /// Working width for registration. Overlap is a geometric question, not a detail question.
@@ -2277,7 +2302,9 @@ final class CameraController: NSObject {
                 // downstream has to know the verdict vocabulary to ask the question.
                 "gaps": run.pairs.filter { ($0["contiguity"] as? String) == "gap" }.count,
                 "unverified": run.pairs.filter { ($0["contiguity"] as? String) == "unverified" }.count,
-                "exposure": run.exposure
+                "exposure": run.exposure,
+                "discarded": run.discarded,
+                "discardedTexture": run.discardedTexture
             ]
             DispatchQueue.main.async {
                 self.restoreContinuousModes()
@@ -2398,11 +2425,36 @@ final class CameraController: NSObject {
         guard error == nil, let data else { return }
 
         let index = run.index
+        // ⚑ Incremented for every frame CAPTURED, filed or not, so the pair indices keep meaning
+        // and a hole in `frames[].index` says plainly *a frame was taken here and dropped*.
         run.index += 1
+
+        let texture = run.pendingBuffer.flatMap { textureScore($0) }
+        if let texture, texture < Self.traverseKeepTexture {
+            run.discarded += 1
+            run.discardedTexture.append(texture)
+            // The pair is still measured below — the buffer is in hand either way, and a record
+            // with a hole in it is more use than a record that quietly renumbers itself.
+            if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
+                run.pairs.append(measureOverlap(from: previous, to: current,
+                                                from: index - 1, to: index,
+                                                expectedTravel: run.travelAtRequest,
+                                                maxStep: run.stepAtRequest,
+                                                droppedSteps: run.droppedAtRequest))
+            }
+            run.lastKeptBuffer = run.pendingBuffer
+            onTraverse?(["frames": run.frames.count, "pairs": run.pairs, "discarded": run.discarded])
+            return
+        }
+
         let name = "hs-traverse-\(Int(run.startedAt.timeIntervalSince1970))-\(index).jpg"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
         guard (try? data.write(to: url, options: .atomic)) != nil else { return }
         run.frames.append([
+            /// ⚑ Recorded on the FRAME, not only inside a pair. The discard threshold has to be
+            /// chosen from a distribution across walks, and a value that lives only in a pair
+            /// cannot be read for the frame it belongs to.
+            "texture": texture ?? -1,
             "path": url.path,
             "bytes": data.count,
             "index": index,

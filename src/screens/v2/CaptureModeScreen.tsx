@@ -404,8 +404,13 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
         choosing a door is not classification: it says what the concierge is about to do, not
         what the thing in front of them is. Nothing here asks what anything IS.
 
-        Room shot vs pan needs no expertise, and the labels are the rule: one frame if the
-        room fits, a pano if it does not.
+        Room shot vs traverse needs no expertise, and the labels are the rule: one frame if the
+        room fits, a continuous sweep if it does not.
+
+        ⛑ **The word was *Pan* and *pan* is retired — owner ruling 2026-08-20.** The capture is the
+        **traverse**. ⚑ **The id is untouched**: `intent: "pan"` is what the native traverse already
+        files under, and retirements are about instructions, never ids. Renaming the id would break
+        every capture already exported under it to fix a word on a button.
       */}
       <div className="grid grid-cols-3 gap-2">
         <PhotoInput onPhoto={(file) => setPending({ file, intent: "room-shot" })} className={SECONDARY_DOOR}>
@@ -416,7 +421,7 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
           fromLibrary
           className={SECONDARY_DOOR}
         >
-          ↔ Pan
+          ↔ Traverse
         </PhotoInput>
         {/* §4.1d. Manuals, invoices, permits, the well record — photographed whether or not
             anyone knows what they are, which is §4.1a's rule applied to paper. It files to the
@@ -444,6 +449,39 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
           🎙 Voice
         </BigButton>
       </div>
+
+      {/*
+        ⚑ **Floorplan and mesh are ACTIONS of this zone, and they belong here** — beside room shot
+        and run trace — because this screen is where the concierge already declares which room they
+        are in. The viewfinder is where the camera is, so the door is here and the act happens
+        there; that is the same split `Photograph this room` already uses.
+
+        ⛑ **And there is no *enter the zone* anywhere.** The zone was entered by tapping its chip on
+        this screen. A second entry gesture in the viewfinder asked the concierge to declare
+        something the app already knew, and put a second meaning on a word this product had already
+        spent. Two things sharing one word is what retired *pan* and renamed the Text mode.
+
+        Native only: both are ARKit, and the browser path has no session to start. Absent rather
+        than disabled — a door that cannot open is not a door.
+      */}
+      {cameraAvailable() && (
+        <div className="grid grid-cols-2 gap-2">
+          <BigButton
+            variant="secondary"
+            className={SECONDARY_DOOR}
+            onClick={() => navigate({ name: "camera2", zoneId: zone.zoneId, startAction: "floorplan" })}
+          >
+            📐 Floorplan
+          </BigButton>
+          <BigButton
+            variant="secondary"
+            className={SECONDARY_DOOR}
+            onClick={() => navigate({ name: "camera2", zoneId: zone.zoneId, startAction: "mesh" })}
+          >
+            🧊 Mesh
+          </BigButton>
+        </div>
+      )}
 
       {runs.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-700 p-4 text-center text-sm text-slate-400">

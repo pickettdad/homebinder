@@ -100,7 +100,10 @@ export type Screen =
   | { name: "nativecheck" }
   /** The zone is optional: reached from Home it is the F-26 judging harness with nothing to
    *  file into; reached from capture mode it carries the zone, and captures land there. */
-  | { name: "camera2"; zoneId?: string };
+  /** ⚑ `startAction` opens the viewfinder already doing something. The floorplan and the mesh are
+   *  ACTIONS of the zone — they belong beside room shot and run trace on the zone screen — but the
+   *  camera is in the viewfinder, so the door is on one screen and the act is on the other. */
+  | { name: "camera2"; zoneId?: string; startAction?: "floorplan" | "mesh" };
 
 interface AppStore {
   ready: boolean;

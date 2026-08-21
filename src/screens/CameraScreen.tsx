@@ -400,6 +400,15 @@ export function CameraScreen({
     const off = onZone((e) => {
       if (typeof e.tracking === "string") setZoneTracking(e.tracking);
       if (typeof e.zoneError === "string") setZoneNote(String(e.zoneError));
+      /* ⛑ **A scan looked like an ordinary viewfinder and reported nothing** (field 2026-08-21).
+         RoomPlan tells you what it has found and what to do about it; both were being dropped. */
+      if (typeof e.roomInstruction === "string") setZoneNote(String(e.roomInstruction));
+      if (e.roomProgress && typeof e.roomProgress === "object") {
+        const p = e.roomProgress as Record<string, number>;
+        setZoneNote(
+          `${p.walls ?? 0} walls · ${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`,
+        );
+      }
       // ⚑ Held, not toasted. A message that disappears is a message that cannot be acted on later,
       // and the whole failure of 2026-08-21 was a state nobody could see they were in.
       if (typeof e.zoneFailed === "string") {
@@ -496,9 +505,22 @@ export function CameraScreen({
 
   const finishMesh = useCallback(async () => {
     setMeshing(false);
-    await setZoneModeNative("positioning").catch(() => null);
+    const out = await setZoneModeNative("positioning").catch(() => null);
     setZoneMode("positioning");
-  }, []);
+    /* ⚑ The geometry is the deliverable, so it is filed raw exactly as the floorplan is — the desk
+       decides what to do with it. A count on screen is a receipt, not the record. */
+    const mesh = (out as { mesh?: { anchors: number; faces: number; why?: string } } | null)?.mesh;
+    if (!mesh) return;
+    if (zoneId && mesh.faces > 0) {
+      const blob = new Blob([JSON.stringify(mesh)], { type: "application/json" });
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+    }
+    setZoneNote(
+      mesh.faces > 0
+        ? `mesh · ${mesh.anchors} pieces · ${mesh.faces.toLocaleString()} faces filed`
+        : (mesh.why ?? "nothing was meshed"),
+    );
+  }, [zoneId, capturePhotoV2]);
 
   /**
    * ⚑ Rebuild rather than resume. A failed `ARSession` cannot be revived by `run(config)` — that is
@@ -546,8 +568,16 @@ export function CameraScreen({
   /* Anything covering the live preview is a not-a-capture posture: the reviewer, the stored viewer.
      Kept in a ref because the frame callback closes over its first render. */
   useEffect(() => {
-    reviewingRef.current = openCapture !== null;
-  }, [openCapture]);
+    /* ⛑ **`viewing` was the one that mattered and the first fix missed it.** Tapping a frame shot
+       THIS session opens the full reviewer (`viewing`); only a frame filed earlier opens
+       `openCapture`. So the guard covered the case the owner was not hitting and missed the case he
+       was — auto-capture went on firing behind the reviewer exactly as before.
+
+       ⚑ Both are listed rather than the one that was reported, because the rule is *anything
+       covering the live preview is not a capture posture* and a rule stated as a list of the
+       symptoms seen so far is a rule that breaks on the next surface added. */
+    reviewingRef.current = openCapture !== null || viewing !== null;
+  }, [openCapture, viewing]);
 
   const available = cameraAvailable();
   const lastAuto = useRef(0);

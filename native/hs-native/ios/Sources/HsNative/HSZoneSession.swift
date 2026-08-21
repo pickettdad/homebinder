@@ -60,6 +60,10 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private var roomCapture: RoomCaptureSession?
     private var capturedRoom: CapturedRoom?
     private var roomError: String?
+    /// ⛑ The completion the fixed 2.5-second wait was standing in for. See `stopRoomPlan`.
+    private var roomWaiter: (([String: Any]) -> Void)?
+    /// Live scan feedback — RoomPlan reports both and the first cut ignored both.
+    private var roomProgress: [String: Any] = [:]
 
     private(set) var zoneId: String = ""
     private(set) var mode: Mode?
@@ -207,10 +211,17 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         if mode == .roomplan, next != .roomplan { stopRoomCapture(keepSession: true) }
         // Leaving a scan mode: give the lens and the screen back before anything else happens.
         if next == .positioning {
+            /* ⛑ **Finishing the mesh produced nothing, because nothing filed it.** The anchors
+               accumulated inside the session and were thrown away with it — the concierge walked a
+               room, pressed Finish and got silence. ⚑ The geometry is the deliverable here exactly
+               as the frames are for a traverse, so it comes back on the way out. */
+            let harvested = mode == .mesh ? harvestMesh() : [:]
             hideArPreview?()
             let unmet = enter(.positioning)
             sleepSession()
-            return ["mode": next.rawValue, "unmet": unmet, "paused": true]
+            var out: [String: Any] = ["mode": next.rawValue, "unmet": unmet, "paused": true]
+            if !harvested.isEmpty { out["mesh"] = harvested }
+            return out
         }
         // ⚑ Marked on the way in and again on the way out, so the open question — does enabling
         // reconstruction backfill or only accumulate forward? — is answered by ordinary zones.
@@ -219,6 +230,46 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         let unmet = enter(next)
         if next == .mesh { showArPreview?(session) }
         return ["mode": next.rawValue, "unmet": unmet, "paused": false, "failed": failure ?? ""]
+    }
+
+    /**
+     The mesh as data, not as a session that ended.
+
+     ⚑ **Vertices and faces per anchor, with each anchor's transform**, so the desk can measure
+     against it — clearance in front of the furnace is a ray-cast, ceiling height is straight up, and
+     neither is answerable from a count. ⛑ **And the extent is reported as the extent of what was
+     WALKED**, never as the extent of the room: a mesh hole reads *unknown*, never *nothing there*.
+     */
+    private func harvestMesh() -> [String: Any] {
+        let anchors = (session.currentFrame?.anchors ?? []).compactMap { $0 as? ARMeshAnchor }
+        guard !anchors.isEmpty else { return ["anchors": 0, "faces": 0, "why": "nothing was meshed"] }
+        var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        var faces = 0
+        var pieces: [[String: Any]] = []
+        for a in anchors {
+            faces += a.geometry.faces.count
+            let t = a.transform.columns.3
+            minP = simd_min(minP, SIMD3<Float>(t.x, t.y, t.z))
+            maxP = simd_max(maxP, SIMD3<Float>(t.x, t.y, t.z))
+            pieces.append([
+                "id": a.identifier.uuidString,
+                "vertices": a.geometry.vertices.count,
+                "faces": a.geometry.faces.count,
+                "x": Double(t.x), "y": Double(t.y), "z": Double(t.z),
+                "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(a.transform[c][r]) } }
+            ])
+        }
+        return [
+            "anchors": anchors.count,
+            "faces": faces,
+            "pieces": pieces,
+            // The volume somebody walked, which is the honest name for it.
+            "walkedExtent": [
+                "minX": Double(minP.x), "minY": Double(minP.y), "minZ": Double(minP.z),
+                "maxX": Double(maxP.x), "maxY": Double(maxP.y), "maxZ": Double(maxP.z)
+            ]
+        ]
     }
 
     private func mark(_ what: String) -> [String: Any] {
@@ -411,18 +462,32 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             completion(["captured": false, "why": "RoomPlan not running"])
             return
         }
-        stopRoomCapture(keepSession: true)
-        // The delegate delivers asynchronously; give it a moment, then report whatever arrived.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            guard let self else { return }
-            self.hideArPreview?()
-            self.sleepSession()
-            if let room = self.capturedRoom {
-                completion(Self.describe(room, zoneId: self.zoneId))
-            } else {
-                completion(["captured": false, "why": self.roomError ?? "no room returned"])
-            }
+        /* ⛑ **This waited a fixed 2.5 seconds and reported whatever had arrived by then.** It
+           always reported nothing: `RoomBuilder` post-processes the scan asynchronously and takes
+           longer than that, so every finished floorplan came back `captured: false, why: "no room
+           returned"` — twice in the field on 2026-08-21, with the geometry arriving moments after
+           anybody was still listening.
+
+           ⚑ **A fixed sleep standing in for a completion is a race the happy path loses**, and it
+           fails in the direction that looks like the feature not working rather than like a bug.
+           The waiter below is resolved by the delegate; the timeout is a backstop that says so. */
+        roomWaiter = { [weak self] out in
+            self?.hideArPreview?()
+            self?.sleepSession()
+            completion(out)
         }
+        stopRoomCapture(keepSession: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            guard let self, let waiter = self.roomWaiter else { return }
+            self.roomWaiter = nil
+            waiter(["captured": false, "why": self.roomError ?? "the scan did not finish in 30 s"])
+        }
+    }
+
+    private func deliverRoom(_ out: [String: Any]) {
+        guard let waiter = roomWaiter else { return }
+        roomWaiter = nil
+        DispatchQueue.main.async { waiter(out) }
     }
 
     /**
@@ -550,15 +615,42 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
     func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
         if let error {
             roomError = error.localizedDescription
+            deliverRoom(["captured": false, "why": error.localizedDescription])
             return
         }
         Task { [weak self] in
+            guard let self else { return }
             do {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
-                self?.capturedRoom = room
+                self.capturedRoom = room
+                self.deliverRoom(Self.describe(room, zoneId: self.zoneId))
             } catch {
-                self?.roomError = error.localizedDescription
+                self.roomError = error.localizedDescription
+                self.deliverRoom(["captured": false, "why": error.localizedDescription])
             }
         }
+    }
+
+    /**
+     ⛑ **Live feedback, because a scan that looks like an ordinary viewfinder gives none.**
+
+     RoomPlan reports what it has found and what the person should do about it, and the first cut
+     ignored both — so the concierge saw a normal-looking picture, walked, pressed Finish, and had
+     no way to know whether anything had been happening. ⚑ *Apple's coaching text is the only thing
+     in this app that knows the scan is going badly*, and passing it through costs nothing.
+     */
+    func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+        roomProgress = [
+            "walls": room.walls.count,
+            "doors": room.doors.count,
+            "windows": room.windows.count,
+            "openings": room.openings.count
+        ]
+        onEvent?(["roomProgress": roomProgress])
+    }
+
+    func captureSession(_ session: RoomCaptureSession,
+                        didProvide instruction: RoomCaptureSession.Instruction) {
+        onEvent?(["roomInstruction": "\(instruction)"])
     }
 }

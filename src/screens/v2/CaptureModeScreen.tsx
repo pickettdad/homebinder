@@ -413,9 +413,24 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
         every capture already exported under it to fix a word on a button.
       */}
       <div className="grid grid-cols-3 gap-2">
-        <PhotoInput onPhoto={(file) => setPending({ file, intent: "room-shot" })} className={SECONDARY_DOOR}>
-          🖼 Room shot
-        </PhotoInput>
+        {/* ⚑ **A zone-entry act, and it fires where the camera is.** The room shot happens once, at
+            the start of a zone — so its door belongs here rather than in the row the concierge hits
+            forty times. It opens the viewfinder already framed wide, because it is a sibling pair
+            whose 1× frame carries a measured position and that can only happen where the session
+            is. The door moved; the act did not. */}
+        {cameraAvailable() ? (
+          <BigButton
+            variant="secondary"
+            className={SECONDARY_DOOR}
+            onClick={() => navigate({ name: "camera2", zoneId: zone.zoneId, startAction: "room-shot" })}
+          >
+            🖼 Room shot
+          </BigButton>
+        ) : (
+          <PhotoInput onPhoto={(file) => setPending({ file, intent: "room-shot" })} className={SECONDARY_DOOR}>
+            🖼 Room shot
+          </PhotoInput>
+        )}
         <PhotoInput
           onPhoto={(file) => setPending({ file, intent: "pan" })}
           fromLibrary

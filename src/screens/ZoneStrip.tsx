@@ -26,6 +26,8 @@ export function ZoneStrip({
   onFinishScan,
   onFinishMesh,
   onTogglePause,
+  onRetry,
+  failure,
   note,
 }: {
   open: boolean;
@@ -37,6 +39,10 @@ export function ZoneStrip({
   onFinishScan: () => void;
   onFinishMesh: () => void;
   onTogglePause: () => void;
+  onRetry: () => void;
+  /** ⚑ The session DIED. Distinct from "cannot position right now" — one is a state the concierge
+   *  can walk out of, the other is a corpse that everything after it inherits. */
+  failure: string | null;
   note: string | null;
 }) {
   if (!open) return null;
@@ -49,7 +55,25 @@ export function ZoneStrip({
         is the alarm-on-the-majority-case failure: it would be ignored by the time it mattered, and
         the case that matters is twenty containers filed with no position at all.
       */}
-      {!anchor.canAnchor && (
+      {/*
+        ⛑ **A dead session says so, and offers the way out** (field report 2026-08-21).
+
+        Before this it fell through silently: positioning became a plain viewfinder, every mode
+        entered afterwards inherited the corpse, and only an app restart cleared it. ⚑ **That is a
+        silent fallback to no-position capture — the exact thing the shutter's refusal exists to
+        prevent, one layer above it.** `sensorFailed` is transient often enough that a retry is a
+        real answer, so the retry is offered here rather than requiring a relaunch.
+      */}
+      {failure && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="pointer-events-auto rounded-full bg-rose-900/90 px-4 py-1.5 text-rose-100 ring-1 ring-rose-400"
+        >
+          positioning stopped — tap to restart it
+        </button>
+      )}
+      {!failure && !anchor.canAnchor && (
         <span className="pointer-events-auto rounded-full bg-rose-900/80 px-3 py-1 text-rose-100 ring-1 ring-rose-500">
           no position — {anchor.fix}
         </span>

@@ -73,6 +73,19 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     /// forward* comes out of an ordinary zone rather than a special run — see `meshMarks`.
     private var meshMarks: [[String: Any]] = []
     private var onEvent: (([String: Any]) -> Void)?
+    /* ⚑ The lens has one owner. These hand it over and take it back — see `CameraController
+       .yieldCamera`. Running ARKit on top of a live AVCaptureSession does not degrade: ARKit is
+       refused with `sensorFailed` and the preview freezes. */
+    var needCamera: (() -> Void)?
+    var releaseCamera: (() -> Void)?
+    /// Where to put ARKit's own preview while a scan runs, and how to take it away again.
+    var showArPreview: ((ARSession) -> Void)?
+    var hideArPreview: (() -> Void)?
+
+    /// ⚑ A session can DIE. `sensorFailed` is transient often enough that a retry is a real answer,
+    /// so this is recorded, reported, and cleared by rebuilding rather than by restarting the app.
+    private(set) var failure: String?
+    private var everRan = false
 
     var isRunning: Bool { mode != nil }
 
@@ -92,12 +105,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         session.delegate = self
         mapURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("hs-zone-\(id)-\(Int(startedAt.timeIntervalSince1970)).worldmap")
-        let unmet = enter(.positioning, reset: true)
+        /* ⚑ **Opening a zone does not start ARKit.** The camera belongs to the capture session
+           until something actually needs a pose, and positioning is *awake for the instant a
+           position is taken, paused between containers*. Starting here would take the lens for the
+           whole zone and give back exactly the failure this replaced. */
+        mode = .positioning
+        paused = true
+        failure = nil
         return [
             "zoneId": id,
             "startedAt": ISO8601DateFormatter().string(from: startedAt),
             "mode": Mode.positioning.rawValue,
-            "unmet": unmet,
+            "unmet": [String](),
             "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
             "roomPlanSupported": RoomCaptureSession.isSupported
         ]
@@ -105,7 +124,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
 
     func closeZone() -> [String: Any] {
         stopRoomCapture(keepSession: false)
+        hideArPreview?()
         session.pause()
+        releaseCamera?()
         let out: [String: Any] = [
             "zoneId": zoneId,
             "endedAt": ISO8601DateFormatter().string(from: Date()),
@@ -130,6 +151,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     @discardableResult
     private func enter(_ next: Mode, reset: Bool = false) -> [String] {
         var unmet: [String] = []
+        // ⚑ Take the lens BEFORE running. This is the whole bug of 2026-08-21 in one line.
+        needCamera?()
         let config = ARWorldTrackingConfiguration()
         switch next {
         case .roomplan:
@@ -161,7 +184,13 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 config.videoFormat = hi
             }
         }
-        session.run(config, options: reset ? [.resetTracking, .removeExistingAnchors] : [])
+        /* ⚑ A dead session cannot be revived by `run(config)` — that is what made every mode after
+           a failure inherit the corpse and need an app restart. If it has failed, the delegate has
+           already cleared `everRan`, and the first run after that resets rather than resumes. */
+        let mustReset = reset || !everRan || failure != nil
+        failure = nil
+        session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
+        everRan = true
         mode = next
         modeStartedAt = Date()
         paused = false
@@ -170,12 +199,20 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
 
     func setMode(_ next: Mode) -> [String: Any] {
         if mode == .roomplan, next != .roomplan { stopRoomCapture(keepSession: true) }
+        // Leaving a scan mode: give the lens and the screen back before anything else happens.
+        if next == .positioning {
+            hideArPreview?()
+            let unmet = enter(.positioning)
+            sleepSession()
+            return ["mode": next.rawValue, "unmet": unmet, "paused": true]
+        }
         // ⚑ Marked on the way in and again on the way out, so the open question — does enabling
         // reconstruction backfill or only accumulate forward? — is answered by ordinary zones.
         if next == .mesh { meshMarks.append(mark("mesh-on")) }
         if mode == .mesh, next != .mesh { meshMarks.append(mark("mesh-off")) }
         let unmet = enter(next)
-        return ["mode": next.rawValue, "unmet": unmet, "paused": false]
+        if next == .mesh { showArPreview?(session) }
+        return ["mode": next.rawValue, "unmet": unmet, "paused": false, "failed": failure ?? ""]
     }
 
     private func mark(_ what: String) -> [String: Any] {
@@ -202,6 +239,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         saveWorldMap()
         session.pause()
         paused = true
+        // Give the lens back the instant we stop needing it — the capture session is what the
+        // concierge is looking through.
+        releaseCamera?()
         return ["paused": true, "mode": mode?.rawValue ?? ""]
     }
 
@@ -231,9 +271,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      */
     func position() -> [String: Any] {
         guard mode != nil else { return ["positioned": false, "why": "no zone open"] }
-        guard !paused else { return ["positioned": false, "why": "paused"] }
-        guard let frame = session.currentFrame else {
-            return ["positioned": false, "why": "no frame"]
+        if let failure { return ["positioned": false, "why": failure, "recoverable": true] }
+        /* ⚑ **The burst.** Positioning is awake for the instant a position is taken and asleep
+           between containers, so the pose is fetched by waking the session, reading it, and going
+           back to sleep — never by holding the lens across the zone.
+
+           The first wake in a zone has to establish tracking and takes a second or two; every one
+           after it resumes into the same world, measured at 0 ms with the mesh byte-identical. That
+           asymmetry is why the wait is bounded and reported rather than hidden: a caller that gets
+           `settling` back knows to hold still, and one that gets a pose knows it is real. */
+        if paused { wake() }
+        guard let frame = waitForTrackedFrame(timeout: paused ? 0 : 3.0) else {
+            return ["positioned": false, "why": failure ?? "settling", "recoverable": true]
         }
         let state = HSArProbe.describe(frame.camera.trackingState)
         guard case .normal = frame.camera.trackingState else {
@@ -267,7 +316,40 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "distance": Double(simd_distance(origin, SIMD3<Float>(h.x, h.y, h.z)))
             ]
         }
+        // Straight back to sleep, lens returned. The zone keeps its origin; the camera does not
+        // keep ARKit.
+        if mode == .positioning { sleepSession() }
         return out
+    }
+
+    /// Wake positioning just long enough to read a pose. Never used by the scan modes, which hold
+    /// the lens for their whole bounded job.
+    private func wake() {
+        enter(.positioning)
+    }
+
+    private func sleepSession() {
+        session.pause()
+        paused = true
+        releaseCamera?()
+    }
+
+    /**
+     Wait for a frame ARKit is willing to stand behind, or give up and say so.
+
+     ⚑ **Bounded, and the timeout is a result rather than a failure to report later.** A pose taken
+     under `limited` can be metres out, and `settling` is something a concierge can act on in the
+     room — *hold still and look at something with detail* — which is the whole reason the refusal
+     is worth more than a silent fallback to no position.
+     */
+    private func waitForTrackedFrame(timeout: TimeInterval) -> ARFrame? {
+        let deadline = Date().addingTimeInterval(max(timeout, 3.0))
+        while Date() < deadline {
+            if failure != nil { return nil }
+            if let f = session.currentFrame, case .normal = f.camera.trackingState { return f }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return nil
     }
 
     // MARK: - RoomPlan
@@ -288,6 +370,10 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         capturedRoom = nil
         roomError = nil
         enter(.roomplan)
+        // ⚑ ARKit owns the lens for the length of a scan, so the preview has to be ARKit's too —
+        // otherwise the screen is the frozen corpse of a capture session that no longer has the
+        // camera, which is exactly the black screen seen in the field on 2026-08-21.
+        showArPreview?(session)
         let capture = RoomCaptureSession(arSession: session)
         capture.delegate = self
         roomCapture = capture
@@ -311,7 +397,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         // The delegate delivers asynchronously; give it a moment, then report whatever arrived.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             guard let self else { return }
-            self.enter(.positioning)
+            self.hideArPreview?()
+            self.sleepSession()
             if let room = self.capturedRoom {
                 completion(Self.describe(room, zoneId: self.zoneId))
             } else {
@@ -409,8 +496,30 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
     }
 
+    /**
+     ⛑ **A session that dies must say so, and must be recoverable without an app restart.**
+
+     Before this, a failure fell through silently: positioning became a plain viewfinder, every mode
+     entered afterwards inherited the corpse, and only relaunching cleared it. ⚑ **That is a silent
+     fallback to no-position capture — the exact thing the shutter's refusal exists to prevent,
+     happening one layer above it.**
+
+     So the failure is held, reported, and `everRan` is cleared so the next entry REBUILDS rather
+     than calling `run` on a corpse. And the lens goes back, because a dead AR session holding the
+     camera is the worst of both.
+     */
     func session(_ session: ARSession, didFailWithError error: Error) {
-        onEvent?(["zoneError": error.localizedDescription])
+        failure = error.localizedDescription
+        everRan = false
+        paused = true
+        releaseCamera?()
+        hideArPreview?()
+        onEvent?([
+            "zoneFailed": error.localizedDescription,
+            // `sensorFailed` is transient often enough that a retry is a real answer, and the
+            // caller needs to know which kind of dead this is.
+            "recoverable": (error as NSError).code == ARError.sensorFailed.rawValue
+        ])
     }
 
     func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {

@@ -305,6 +305,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// black screen the field reported. The scan modes get a view fed by the session that actually
     /// owns the camera.
     private var arPreview: UIView?
+    /// Only restored if we were the ones who made it transparent — see `attachArPreview`.
+    private var restoreOpaqueForAr = false
 
     private func attachArPreview(_ arSession: ARSession) {
         DispatchQueue.main.async { [weak self] in
@@ -331,6 +333,21 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             // Nothing is being rendered into the scene; this is a camera feed the concierge walks
             // behind, and statistics or debug overlays would be clutter over a room.
             view.rendersContinuously = true
+            /* ⛑ **Make the host transparent HERE rather than assuming somebody else did** (zone
+               log, 2026-08-21: `arPreviewAttached webOpaque: true` — a preview correctly attached
+               and completely invisible, which is the black screen).
+
+               The capture path makes the web view transparent when it attaches its own preview. A
+               scan can attach before that has happened, or after it has been undone, and then the
+               view is behind an opaque page. ⚑ **A view that exists and cannot be seen is the worst
+               kind of working**, so the thing that needs transparency asks for it itself. */
+            if web.isOpaque {
+                self.restoreOpaqueForAr = true
+                WebLayer.makeTransparent(web)
+            }
+            /* And ABOVE the capture preview, not below it. `index: 0` in the same log means it went
+               to the bottom of the stack, under a layer showing the last frame the capture session
+               saw before it lost the camera. */
             superview.insertSubview(view, belowSubview: web)
             self.arPreview = view
             HSZoneLog.record("arPreviewAttached", [
@@ -349,6 +366,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             HSZoneLog.record("arPreviewDetached", ["had": self?.arPreview != nil])
             self?.arPreview?.removeFromSuperview()
             self?.arPreview = nil
+            if self?.restoreOpaqueForAr == true, let web = self?.webView {
+                WebLayer.restore(web, wasOpaque: true)
+                self?.restoreOpaqueForAr = false
+            }
         }
     }
 

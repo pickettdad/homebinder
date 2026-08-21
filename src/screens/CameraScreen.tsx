@@ -425,7 +425,7 @@ export function CameraScreen({
         setMeshing(false);
       }
     });
-    const opening = (async () => {
+    void (async () => {
       try {
         const out = await openZone(zoneId);
         if (!live) return;
@@ -453,7 +453,20 @@ export function CameraScreen({
          so a bare `closeZone()` here could land AFTER the next `openZone` and null the session that
          had just been created. ⚑ The symptom is the worst kind: it works, then it silently does
          not, and only a relaunch clears it — the same shape as the guard bug, one layer up. */
-      void opening.then(() => closeZone()).catch(() => {});
+      /* ⛑ **The zone session outlives this screen, and closing it here was the bug** (zone log,
+         2026-08-21: eight `openZone` calls, zero reused).
+
+         Removing `startAction` from the deps was not enough, because tapping Floorplan or Mesh on
+         the zone screen NAVIGATES — this component unmounts and a new one mounts. So the cleanup
+         ran, closed the zone, and the next mount built a fresh session with `reset: true`.
+
+         ⚑ **A zone's coordinate space belongs to the zone, not to whichever screen happens to be
+         showing.** The plugin already holds it across screens; `openZone` on a different zone
+         replaces it, and `stop` tidies up. So the cleanup unsubscribes and nothing else.
+
+         And this is what makes the ray-cast work: planes need a few seconds to accumulate, and a
+         session rebuilt on every entry never had them — which is why every position in the log came
+         back `surface: false` even after plane detection was turned back on. */
       setZoneOpen(false);
       setScanning(false);
       setMeshing(false);

@@ -10,6 +10,7 @@
  */
 import { useState } from "react";
 import { useApp } from "../store/sessionStore";
+import { DeviceBenchCard } from "./DeviceBenchCard";
 import { BigButton, formatBytes } from "../ui/bits";
 import {
   DEFAULT_FRAME_BYTES,
@@ -226,6 +227,8 @@ export function DevBenchScreen() {
       >
         Clean up the scratch database
       </BigButton>
+
+      <DeviceBenchCard />
     </div>
   );
 }

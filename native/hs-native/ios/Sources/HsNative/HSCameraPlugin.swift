@@ -46,7 +46,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "startTraverse", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopTraverse", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "probeAr", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "probeAr", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startBench", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopBench", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "closeBenchLoop", returnType: CAPPluginReturnPromise)
     ]
 
     /**
@@ -62,6 +65,22 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
            and the answers arrive in the log as HS-AR-PROBE lines. Dev-only by construction: the
            argument is never passed by a shipped launch, and the same probe sits behind the dev
            bench for a re-run in a real room. */
+        /* ⚑ The blank-input test, applied to the INSTRUMENT rather than the measure. Two minutes on
+           charge: if the sampler reports drain while the device says it is charging, it is lying and
+           every number the three real runs produce is worthless. Thirty seconds of work, and it is
+           the reason anyone should believe an afternoon of walking. */
+        if CommandLine.arguments.contains("--hs-bench-selftest") {
+            let b = HSBench()
+            bench = b
+            _ = b.start(mode: .control, capSeconds: 120, sampleSeconds: 15, coolSeconds: 0,
+                        conditions: ["note": "sampler self-test, on charge"], onSample: { s in
+                NSLog("HS-BENCH-SAMPLE %@", String(describing: s))
+            })
+            DispatchQueue.main.asyncAfter(deadline: .now() + 135) {
+                NSLog("HS-BENCH-SELFTEST %@", String(describing: b.stop()))
+                self.bench = nil
+            }
+        }
         if CommandLine.arguments.contains("--hs-ar-probe") {
             let probe = HSArProbe()
             arProbe = probe
@@ -260,6 +279,67 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
     private var arProbe: HSArProbe?
+
+    private var bench: HSBench?
+
+    /**
+     The device bench — see `HSBench`. Dev-bench only, and it takes the camera to itself for the
+     length of a run, so it refuses while a capture session is live rather than fighting for the
+     device: a collision would produce a wrong number that looked like a real one.
+    */
+    @objc func startBench(_ call: CAPPluginCall) {
+        guard controller == nil else {
+            call.reject("Close the camera first — the bench needs the device to itself")
+            return
+        }
+        guard let mode = HSBench.Mode(rawValue: call.getString("mode") ?? "") else {
+            call.reject("Unknown bench mode")
+            return
+        }
+        if mode != .control, !ARWorldTrackingConfiguration.isSupported {
+            call.reject("World tracking unsupported on this device")
+            return
+        }
+        let made = HSBench()
+        bench = made
+        DispatchQueue.main.async { [weak self] in
+            let started = made.start(
+                mode: mode,
+                capSeconds: call.getDouble("capSeconds") ?? 2400,
+                sampleSeconds: call.getDouble("sampleSeconds") ?? 30,
+                coolSeconds: call.getDouble("coolSeconds") ?? 600,
+                conditions: call.getObject("conditions") ?? [:],
+                onSample: { [weak self] s in
+                    self?.notifyListeners("benchSample", data: JSObject(uniqueKeysWithValues:
+                        s.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) }))
+                })
+            call.resolve(JSObject(uniqueKeysWithValues:
+                started.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) }))
+        }
+    }
+
+    @objc func stopBench(_ call: CAPPluginCall) {
+        guard let bench else {
+            call.reject("No bench running")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            let out = bench.stop()
+            self?.bench = nil
+            call.resolve(JSObject(uniqueKeysWithValues:
+                out.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) }))
+        }
+    }
+
+    @objc func closeBenchLoop(_ call: CAPPluginCall) {
+        guard let bench else {
+            call.reject("No bench running")
+            return
+        }
+        let out = bench.closeLoop()
+        call.resolve(JSObject(uniqueKeysWithValues:
+            out.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) }))
+    }
 
     @objc func stop(_ call: CAPPluginCall) {
         guard let controller else {

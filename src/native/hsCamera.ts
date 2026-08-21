@@ -10,6 +10,8 @@
  * and throws at runtime.
  */
 
+import type { BenchSample } from "../dev/deviceBench";
+
 export const HS_CAMERA_JS_NAME = "HSCamera";
 
 /** A mode declares a GOAL. The camera measures the scene and finds settings that reach it. */
@@ -585,6 +587,17 @@ interface NativeCamera {
   capture(): Promise<CaptureResult>;
   startTraverse(options: { continuesFrom?: string }): Promise<TraverseStarted>;
   stopTraverse(): Promise<TraverseResult>;
+  /** The device bench — see `src/dev/deviceBench.ts`. Dev-bench only; it takes the camera to
+   *  itself for the length of a run and refuses while a capture session is live. */
+  startBench(options: {
+    mode: string;
+    capSeconds?: number;
+    sampleSeconds?: number;
+    coolSeconds?: number;
+    conditions?: Record<string, unknown>;
+  }): Promise<Record<string, unknown>>;
+  stopBench(): Promise<unknown>;
+  closeBenchLoop(): Promise<{ closed: boolean; driftMetres?: number; why?: string }>;
   stop(): Promise<void>;
   addListener(
     event: CameraEvent,
@@ -592,7 +605,7 @@ interface NativeCamera {
   ): ListenerHandle | Promise<ListenerHandle>;
 }
 
-type CameraEvent = "textBoxes" | "modeStatus" | "traverse";
+type CameraEvent = "textBoxes" | "modeStatus" | "traverse" | "benchSample";
 
 interface CapacitorGlobal {
   Plugins?: Record<string, unknown>;
@@ -713,6 +726,17 @@ export const startTraverse = (continuesFrom?: string) =>
   requireCamera().startTraverse(continuesFrom ? { continuesFrom } : {});
 export const stopTraverse = () => requireCamera().stopTraverse();
 
+/** The device bench. See `src/dev/deviceBench.ts` for what the numbers are allowed to claim. */
+export const startBench = (options: {
+  mode: string;
+  capSeconds?: number;
+  sampleSeconds?: number;
+  coolSeconds?: number;
+  conditions?: Record<string, unknown>;
+}) => requireCamera().startBench(options);
+export const stopBench = () => requireCamera().stopBench();
+export const closeBenchLoop = () => requireCamera().closeBenchLoop();
+
 function subscribe<T>(event: CameraEvent, handler: (data: T) => void): () => void {
   const plugin = nativeCamera();
   if (!plugin) return () => {};
@@ -733,6 +757,10 @@ function subscribe<T>(event: CameraEvent, handler: (data: T) => void): () => voi
 export const onTextBoxes = (handler: (event: TextBoxesEvent) => void) => subscribe("textBoxes", handler);
 export const onModeStatus = (handler: (event: ModeStatusEvent) => void) => subscribe("modeStatus", handler);
 export const onTraverse = (handler: (event: TraverseProgressEvent) => void) => subscribe("traverse", handler);
+/** ⚑ Streamed rather than only returned at the end: a forty-minute run that is invisible until it
+ *  finishes cannot be seen to have stalled, and a stalled run is the failure the bench exists to
+ *  make impossible to mistake for a cool one. */
+export const onBenchSample = (handler: (event: BenchSample) => void) => subscribe("benchSample", handler);
 
 /**
  * What a finished traverse amounts to.

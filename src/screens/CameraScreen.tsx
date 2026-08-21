@@ -33,6 +33,8 @@ import {
   tapContainer,
   type OpenContainer,
 } from "../capture/objectContainer";
+import { ZoneStrip } from "./ZoneStrip";
+import type { ZonePlan, ZonePosition } from "../native/zone";
 import {
   adjustCamera,
   cameraAvailable,
@@ -48,6 +50,7 @@ import {
   stopAudioProbe,
   framesNeedingEyes,
   framesTurnedFromStamp,
+  takePosition,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
@@ -339,6 +342,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const [traversing, setTraversing] = useState(false);
   const [traverseProgress, setTraverseProgress] = useState<TraverseProgressEvent | null>(null);
   const [traverseResult, setTraverseResult] = useState<TraverseResult | null>(null);
+  /* ⚑ Held so the plan is visibly a deliverable rather than a side effect. A floorplan that
+     produced nothing and a floorplan nobody ran look identical without this. */
+  const [, setPlan] = useState<ZonePlan | null>(null);
   /**
    * Auto-capture is the feature that turns roughly two hundred taps into thirty-four, so it is on
    * by default in the mode that has it. It is also switchable, because judging one deliberate
@@ -389,6 +395,21 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     setBusy(true);
     try {
       const result = await captureFrames();
+      /*
+        ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
+
+        Asked here rather than afterwards because a pose is a fact about *when the frame was taken*
+        — a second later the concierge has moved. And `takePosition` REFUSES rather than handing
+        back the last pose it happened to hold, so what lands on the capture is either a measured
+        position or the reason there is not one.
+
+        ⛑ The refusal is the half that matters. An absent field says *this build had no positions*;
+        `{positioned:false, why:"paused"}` says *this one could and did not, here is why* — and a
+        container the desk cannot place is otherwise indistinguishable from one nobody meant to.
+      */
+      const position = await takePosition().catch(
+        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+      );
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);
@@ -452,7 +473,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         const mediaId = await capturePhotoV2(
           captureTargetFor(openRef.current, currentZone, declared), blob, "image/jpeg",
           undefined, declared,
-          { read: readOf(0), frame: roleOf(0), siblings },
+          /* ⚑ On the PRIMARY only. Siblings inherit — the container's anchor is one frame, and a
+             pose stamped on all three of a bracket would read as three positions of one object. */
+          { read: readOf(0), frame: roleOf(0), position, siblings },
         );
         // One act, one capture: the door was for this shot, not for the rest of the room.
         pendingIntentRef.current = null;
@@ -887,6 +910,23 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           onNew={() => void newContainer()}
           onTap={(pinId) => setOpen((current) => tapContainer(current, pinId, zoneId))}
         />
+      )}
+
+      {/*
+        ⚑ Beside the container strip, because the two answer one question between them: *which
+        object am I filing this to* and *can this object be placed at all*. A container marked in
+        the frame and a position that silently was not taken is the same silent failure the
+        container marker already exists to prevent, one layer down.
+      */}
+      {zoneId && (
+        <div className="px-3 pb-2">
+          <ZoneStrip
+            zoneId={zoneId}
+            zoneKind={zone?.label}
+            containers={strip.objects.length}
+            onPlan={setPlan}
+          />
+        </div>
       )}
 
       <header className="absolute inset-x-0 top-0 flex items-center justify-between p-3">

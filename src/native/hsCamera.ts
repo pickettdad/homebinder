@@ -11,6 +11,7 @@
  */
 
 import type { BenchSample } from "../dev/deviceBench";
+import type { ZoneMode, ZoneOpened, ZonePlan, ZonePosition } from "./zone";
 
 export const HS_CAMERA_JS_NAME = "HSCamera";
 
@@ -565,8 +566,17 @@ export interface CaptureResult {
     engine: string;
     osVersion: string;
   };
-  /** Absent until RoomPlan lands: the declared no-position state, never a fabricated one. */
-  pose?: { x: number; y: number; z: number };
+  /** ⚑ **The declared no-position state, never a fabricated one — and now it can be filled.**
+   *
+   *  A capture taken inside an open, running zone session carries the measured pose of the frame
+   *  it was taken with. A capture taken while the session is paused, or before a zone was entered,
+   *  or while tracking had not settled, carries the REFUSAL instead — `{positioned: false, why}` —
+   *  rather than nothing at all.
+   *
+   *  ⛑ The difference matters more than it looks: an absent field says *this build could not do
+   *  positions*, and a refusal says *this one could and did not, here is why*. A container the desk
+   *  cannot place is otherwise indistinguishable from one nobody meant to place. */
+  position?: ZonePosition;
 }
 
 interface ListenerHandle {
@@ -598,6 +608,15 @@ interface NativeCamera {
   }): Promise<Record<string, unknown>>;
   stopBench(): Promise<unknown>;
   closeBenchLoop(): Promise<{ closed: boolean; driftMetres?: number; why?: string }>;
+  /** The zone session — see `src/native/zone.ts`. Three bounded modes, one coordinate space. */
+  openZone(options: { zoneId?: string }): Promise<ZoneOpened>;
+  closeZone(): Promise<unknown>;
+  setZoneMode(options: { mode: ZoneMode }): Promise<{ mode: ZoneMode; unmet: string[] }>;
+  pauseZone(): Promise<{ paused: boolean }>;
+  resumeZone(): Promise<{ paused: boolean }>;
+  takePosition(): Promise<ZonePosition>;
+  startRoomPlan(): Promise<{ started: boolean; why?: string }>;
+  stopRoomPlan(): Promise<ZonePlan>;
   stop(): Promise<void>;
   addListener(
     event: CameraEvent,
@@ -605,7 +624,7 @@ interface NativeCamera {
   ): ListenerHandle | Promise<ListenerHandle>;
 }
 
-type CameraEvent = "textBoxes" | "modeStatus" | "traverse" | "benchSample";
+type CameraEvent = "textBoxes" | "modeStatus" | "traverse" | "benchSample" | "zone";
 
 interface CapacitorGlobal {
   Plugins?: Record<string, unknown>;
@@ -737,6 +756,16 @@ export const startBench = (options: {
 export const stopBench = () => requireCamera().stopBench();
 export const closeBenchLoop = () => requireCamera().closeBenchLoop();
 
+/** The zone session. `takePosition` REFUSES rather than guessing — see `src/native/zone.ts`. */
+export const openZone = (zoneId?: string) => requireCamera().openZone(zoneId ? { zoneId } : {});
+export const closeZone = () => requireCamera().closeZone();
+export const setZoneMode = (mode: ZoneMode) => requireCamera().setZoneMode({ mode });
+export const pauseZone = () => requireCamera().pauseZone();
+export const resumeZone = () => requireCamera().resumeZone();
+export const takePosition = () => requireCamera().takePosition();
+export const startRoomPlan = () => requireCamera().startRoomPlan();
+export const stopRoomPlan = () => requireCamera().stopRoomPlan();
+
 function subscribe<T>(event: CameraEvent, handler: (data: T) => void): () => void {
   const plugin = nativeCamera();
   if (!plugin) return () => {};
@@ -761,6 +790,10 @@ export const onTraverse = (handler: (event: TraverseProgressEvent) => void) => s
  *  finishes cannot be seen to have stalled, and a stalled run is the failure the bench exists to
  *  make impossible to mistake for a cool one. */
 export const onBenchSample = (handler: (event: BenchSample) => void) => subscribe("benchSample", handler);
+/** Tracking-state changes, map saves and session errors, as they happen. ⚑ Tracking is streamed
+ *  rather than polled because *can I anchor this container* has to be answerable BEFORE the
+ *  shutter — afterwards it is a fact about a photograph nobody can retake. */
+export const onZone = (handler: (event: Record<string, unknown>) => void) => subscribe("zone", handler);
 
 /**
  * What a finished traverse amounts to.

@@ -98,7 +98,39 @@ export interface CaptureMediaMeta {
    *  written before this shipped, which is exactly what "non-breaking" has to mean. */
   read?: FrameReadMeta;
   frame?: FrameRoleMeta;
+  /**
+   * Where this frame was taken, when a zone session was running and able to say.
+   *
+   * ⚑ **At least one frame per container carries a measured position; everything else inherits it.**
+   * So this is expected to be present on ONE frame of a container and absent on the rest, and that
+   * is completeness rather than a gap — the desk reads the container, not the frame.
+   *
+   * ⛑ **A refusal is recorded as a refusal, not as an absence.** `positioned: false` with a reason
+   * says *the app could take a position here and did not, because the session was paused* — which a
+   * missing field cannot say, and which is the difference between a container the desk cannot place
+   * and a container nobody meant to place. Additive; absent on every capture written before this.
+   */
+  position?: CapturePositionMeta;
 }
+
+export type CapturePositionMeta =
+  | {
+      positioned: true;
+      zoneId: string;
+      /** ⚑ ARKit's own word for how sure it was. It says when it does not know, and dropping that
+       *  would repeat the mistake every traverse measure made and had corrected a round later. */
+      tracking: string;
+      at: string;
+      x: number;
+      y: number;
+      z: number;
+      /** Column-major 4×4, so the desk can ray-cast for itself years later. */
+      transform: number[];
+      /** ⚑ The pose is where the concierge STOOD. This is the surface in front of the lens, when
+       *  geometry existed to hit it. Absent reads *unknown*, never *nothing there*. */
+      surface?: { x: number; y: number; z: number; distance: number };
+    }
+  | { positioned: false; why: string; tracking?: string };
 
 export type SessionEvent =
   | (EventBase & {

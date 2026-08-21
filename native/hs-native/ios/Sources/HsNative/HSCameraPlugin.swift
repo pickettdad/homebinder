@@ -49,7 +49,15 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "probeAr", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startBench", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopBench", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "closeBenchLoop", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "closeBenchLoop", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openZone", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "closeZone", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setZoneMode", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "pauseZone", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise)
     ]
 
     /**
@@ -281,6 +289,105 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var arProbe: HSArProbe?
 
     private var bench: HSBench?
+
+    /// The zone session — see `HSZoneSession`. One per zone, three bounded modes, one origin.
+    private var zoneStore: AnyObject?
+
+    @available(iOS 17.0, *)
+    private var zone: HSZoneSession? {
+        get { zoneStore as? HSZoneSession }
+        set { zoneStore = newValue }
+    }
+
+    private func js(_ d: [String: Any]) -> JSObject {
+        JSObject(uniqueKeysWithValues: d.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) })
+    }
+
+    /* ⚑ One guard, written once. iOS 17 is the floor because `RoomCaptureSession(arSession:)` and
+       `stop(pauseARSession:)` are — without them the floorplan gets its own coordinate space and
+       every position taken afterwards is measured against a different origin. Refusing is honest;
+       shipping two thirds of the architecture is not. */
+    @available(iOS 17.0, *)
+    private func withZone(_ call: CAPPluginCall, _ body: (HSZoneSession) -> [String: Any]) {
+        guard let zone else {
+            call.reject("No zone open")
+            return
+        }
+        call.resolve(js(body(zone)))
+    }
+
+    /// The same guard for the callers that do not need the session itself in scope.
+    private func requireZone(_ call: CAPPluginCall, _ body: (CAPPluginCall) -> Void) {
+        guard #available(iOS 17.0, *) else {
+            call.reject("The zone session needs iOS 17")
+            return
+        }
+        body(call)
+    }
+
+    @objc func openZone(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *) else {
+            call.reject("The zone session needs iOS 17")
+            return
+        }
+        guard controller == nil else {
+            call.reject("Close the camera first — ARKit and the capture session cannot share the lens")
+            return
+        }
+        let id = call.getString("zoneId") ?? UUID().uuidString
+        let made = HSZoneSession()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let out = made.openZone(id) { [weak self] event in
+                self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())
+            }
+            self.zone = made
+            call.resolve(self.js(out))
+        }
+    }
+
+    @objc func closeZone(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let z = zone else {
+            call.resolve()
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            let out = z.closeZone()
+            self?.zoneStore = nil
+            call.resolve(self?.js(out) ?? JSObject())
+        }
+    }
+
+    @objc func setZoneMode(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *) else {
+            call.reject("The zone session needs iOS 17")
+            return
+        }
+        guard let raw = call.getString("mode"), let m = HSZoneSession.Mode(rawValue: raw) else {
+            call.reject("Unknown zone mode")
+            return
+        }
+        if #available(iOS 17.0, *) { withZone(call) { $0.setMode(m) } }
+    }
+
+    @objc func pauseZone(_ call: CAPPluginCall) { requireZone(call) { c in
+        if #available(iOS 17.0, *) { withZone(c) { $0.pause() } } } }
+    @objc func resumeZone(_ call: CAPPluginCall) { requireZone(call) { c in
+        if #available(iOS 17.0, *) { withZone(c) { $0.resume() } } } }
+    @objc func takePosition(_ call: CAPPluginCall) { requireZone(call) { c in
+        if #available(iOS 17.0, *) { withZone(c) { $0.position() } } } }
+    @objc func startRoomPlan(_ call: CAPPluginCall) { requireZone(call) { c in
+        if #available(iOS 17.0, *) { withZone(c) { $0.startRoomPlan() } } } }
+
+    @objc func stopRoomPlan(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let z = zone else {
+            call.reject("No zone open")
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            z.stopRoomPlan { out in call.resolve(self?.js(out) ?? JSObject()) }
+        }
+    }
 
     /**
      The device bench — see `HSBench`. Dev-bench only, and it takes the camera to itself for the

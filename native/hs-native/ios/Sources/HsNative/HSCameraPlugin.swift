@@ -308,8 +308,23 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func attachArPreview(_ arSession: ARSession) {
         DispatchQueue.main.async { [weak self] in
-            guard #available(iOS 17.0, *), let self, let web = self.webView,
-                  let superview = web.superview, self.arPreview == nil else { return }
+            /* ⛑ **Every reason this can silently do nothing is now recorded.** The owner reported
+               black screens during scans; the zone log could not see them, because it recorded what
+               the SESSION did and a black screen is what the SCREEN did. A guard that returns early
+               and says nothing is indistinguishable from a guard that never ran. */
+            guard #available(iOS 17.0, *) else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "needs iOS 17"]); return
+            }
+            guard let self else { return }
+            guard let web = self.webView else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "no web view"]); return
+            }
+            guard let superview = web.superview else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "web view has no superview"]); return
+            }
+            guard self.arPreview == nil else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "one is already attached"]); return
+            }
             let view = ARSCNView(frame: superview.bounds)
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.session = arSession
@@ -318,11 +333,20 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             view.rendersContinuously = true
             superview.insertSubview(view, belowSubview: web)
             self.arPreview = view
+            HSZoneLog.record("arPreviewAttached", [
+                "w": Double(view.bounds.width), "h": Double(view.bounds.height),
+                // ⚑ The two facts that decide whether anything can be SEEN, rather than whether a
+                // view exists: is it under a transparent host, and is it above the stale AV layer.
+                "webOpaque": web.isOpaque,
+                "index": superview.subviews.firstIndex(of: view) ?? -1,
+                "subviews": superview.subviews.count
+            ])
         }
     }
 
     private func detachArPreview() {
         DispatchQueue.main.async { [weak self] in
+            HSZoneLog.record("arPreviewDetached", ["had": self?.arPreview != nil])
             self?.arPreview?.removeFromSuperview()
             self?.arPreview = nil
         }

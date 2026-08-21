@@ -59,6 +59,7 @@ import {
   resumeZone,
   startRoomPlan,
   stopRoomPlan,
+  zoneLog,
   setZoneMode as setZoneModeNative,
   storedFrameLabel,
   traverseDiagnosis,
@@ -1020,6 +1021,30 @@ export function CameraScreen({
    * decided on real files and none of them could have been decided on the panel numbers. A
    * capture's frames are one artifact and they travel as one.
    */
+  /**
+   * The zone session's own record, off the device as a file.
+   *
+   * ⚑ Built after the tether failed twice — the second time silently, after reporting the app
+   * launched, costing the owner a walked kitchen with nothing to show for it. **An instrument that
+   * only works while somebody is watching is not an instrument**, and this is the shape that has
+   * never failed here: the device records, the concierge taps share.
+   */
+  const shareZoneLog = async () => {
+    try {
+      const log = await zoneLog();
+      const file = new File([JSON.stringify(log, null, 1)], `hs-zone-log-${Date.now()}.json`, {
+        type: "application/json",
+      });
+      if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "HouseSteady — zone log" });
+      } else {
+        showToast("This device will not share that file");
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "No zone log");
+    }
+  };
+
   const shareAllFrames = async (capture: MediaRef) => {
     const refs = [capture, ...(capture.siblings ?? [])];
     const files: File[] = [];
@@ -1568,6 +1593,16 @@ export function CameraScreen({
                 </span>
               </p>
             )}
+            {/*
+              ⛑ **Always offered, not gated on a zone being open.** The run worth sending is usually
+              the one that just went wrong, and by then the session has closed — a share button that
+              needs a healthy session shares nothing on the day it is needed.
+            */}
+            <p className="mt-1">
+              <button type="button" onClick={() => void shareZoneLog()} className="underline">
+                send zone log
+              </button>
+            </p>
             {traverseResult && !traversing && traverseResult.pairs.length > 0 && (
               <p className="mt-1">
                 <button type="button" onClick={() => void shareTraverseData()} className="underline">

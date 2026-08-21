@@ -408,12 +408,17 @@ export function CameraScreen({
         setMeshing(false);
       }
     });
-    void (async () => {
+    const opening = (async () => {
       try {
         const out = await openZone(zoneId);
         if (!live) return;
         setZoneOpen(true);
         setZoneMode(out.mode);
+        /* ⛑ **Armed, not running** (field report 2026-08-21). This said `false` and the strip read
+           it as *a session is running, offer Pause* — while natively positioning was asleep, which
+           is its normal state. ⚑ Two different facts had one flag: **is the session awake** (almost
+           never, by design) and **may positions be taken** (usually yes). The strip needs the
+           second, so that is what this now carries. */
         setZonePaused(false);
         if (!out.roomPlanSupported && startAction === "floorplan") {
           setZoneNote("No floorplan on this device");
@@ -440,13 +445,18 @@ export function CameraScreen({
           }
         }
       } catch (e) {
-        if (live) setZoneNote(e instanceof Error ? e.message : "Zone session unavailable");
+        if (live) setZoneFailure(e instanceof Error ? e.message : "Zone session unavailable");
       }
     })();
     return () => {
       live = false;
       off();
-      void closeZone().catch(() => {});
+      /* ⛑ **Await the open before closing** (field report 2026-08-21: positioning gone after backing
+         out and returning). React runs the new effect's body before the old one's cleanup finishes,
+         so a bare `closeZone()` here could land AFTER the next `openZone` and null the session that
+         had just been created. ⚑ The symptom is the worst kind: it works, then it silently does
+         not, and only a relaunch clears it — the same shape as the guard bug, one layer up. */
+      void opening.then(() => closeZone()).catch(() => {});
       setZoneOpen(false);
       setScanning(false);
       setMeshing(false);
@@ -460,6 +470,21 @@ export function CameraScreen({
     setZoneMode("positioning");
     /* ⚑ The plan reported as the numbers somebody can price from, not as a count of surfaces.
        One walk producing a quoting table is the point of the whole capture. */
+    /*
+      ⚑ **The raw plan is filed; the table is only a readout** (owner ruling 2026-08-21).
+
+      The field app's job is images and accurate raw data — the desk decides what to do with it. So
+      every wall, door, window and opening goes into the record verbatim, with its dimensions, its
+      transform and RoomPlan's own confidence, and `zoneMeasures` stays a pure function over that.
+      **Anything derived can be re-derived; a surface nobody stored cannot be.**
+
+      ⛑ Filed as a capture rather than held in React state, which is where it was: the first cut
+      scanned a room, printed a line, and threw the geometry away.
+    */
+    if (plan.captured && zoneId) {
+      const blob = new Blob([JSON.stringify(plan)], { type: "application/json" });
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+    }
     if (plan.captured) {
       const m = zoneMeasures(plan);
       setZoneNote(
@@ -492,6 +517,9 @@ export function CameraScreen({
       setZonePaused(true);
       setZoneNote(null);
     } catch (e) {
+      // ⚑ Clear the "restarting…" line on the way out. It stayed on screen forever when the retry
+      // failed, which reads as *still trying* — the one thing it was not doing.
+      setZoneNote(null);
       setZoneFailure(e instanceof Error ? e.message : "positioning unavailable");
     }
   }, [zoneId]);
@@ -507,10 +535,19 @@ export function CameraScreen({
    * someone looks around is a filmstrip they cannot find the real shot in.
    */
   const [autoCapture, setAutoCapture] = useState(true);
+  /** ⚑ Read inside the frame callback, which closes over its first render — a state value would be
+   *  stale there and auto-capture would keep firing exactly as it did before the fix. */
+  const reviewingRef = useRef(false);
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
   }, [autoCapture]);
+
+  /* Anything covering the live preview is a not-a-capture posture: the reviewer, the stored viewer.
+     Kept in a ref because the frame callback closes over its first render. */
+  useEffect(() => {
+    reviewingRef.current = openCapture !== null;
+  }, [openCapture]);
 
   const available = cameraAvailable();
   const lastAuto = useRef(0);
@@ -831,6 +868,12 @@ export function CameraScreen({
       if (worthHolding && readableSince.current === null) readableSince.current = Date.now();
       if (!worthHolding) readableSince.current = null;
 
+      /* ⛑ **Not while a photograph is open** (field report 2026-08-21). The reviewer sits over the
+         live preview, so the camera goes on seeing a still scene and auto-capture goes on firing —
+         the concierge is looking at one frame while the app quietly takes several more of the back
+         of their hand. ⚑ The frames all look fine, which is the tell: this is the silent-failure
+         shape again, and the fix is that inspecting is not a capture posture. */
+      if (reviewingRef.current) return;
       if (autoRef.current && event.stable && worthShooting && Date.now() - lastAuto.current > 4000) {
         const waited = readableSince.current === null ? 0 : Date.now() - readableSince.current;
         lastAuto.current = Date.now();
@@ -841,7 +884,12 @@ export function CameraScreen({
     });
     const offStatus = onModeStatus(setStatus);
     const offTraverse = onTraverse(setTraverseProgress);
-    startCamera("text")
+    /* ⛑ **Object, not text** (field report 2026-08-21). Opening on Text meant the viewfinder began
+       in the one mode that fires the shutter by itself, so walking into a room started taking
+       photographs of whatever happened to hold still. ⚑ Auto-capture is right for a plate the
+       concierge is deliberately holding on; it is wrong as the state a screen opens in, because the
+       concierge has not chosen anything yet. Object is the mode that waits to be told. */
+    startCamera("object")
       .then((result) => setCapabilities(result.capabilities))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     return () => {

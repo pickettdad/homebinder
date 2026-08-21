@@ -358,10 +358,15 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("The zone session needs iOS 17")
             return
         }
-        guard controller == nil else {
-            call.reject("Close the camera first — ARKit and the capture session cannot share the lens")
-            return
-        }
+        /* ⛑ **This guard was the bug, and it was a leftover.** It dates from when the zone session
+           was a standalone thing that needed the device to itself. Ownership is arbitrated now —
+           `needCamera`/`releaseCamera` — so refusing whenever a capture session exists refuses
+           *always*, because the viewfinder is where zones are opened from.
+
+           ⚑ The symptom it produced is the one worth remembering: it worked the FIRST time and never
+           again until the app was relaunched, because on first mount the zone effect happened to run
+           before the camera had started. **An intermittent that is actually a startup-order race
+           reads as flakiness**, and flakiness is what stops a real cause being looked for. */
         let id = call.getString("zoneId") ?? UUID().uuidString
         let made = HSZoneSession()
         DispatchQueue.main.async { [weak self] in

@@ -86,6 +86,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     /// so this is recorded, reported, and cleared by rebuilding rather than by restarting the app.
     private(set) var failure: String?
     private var everRan = false
+    /* ⚑ Positioning is a duty cycle, so `paused` is about the SESSION and `armed` is about intent.
+       A concierge who pauses positioning is saying *do not take positions*, which is not the same
+       as *the session is asleep* — it is asleep almost all the time by design. Conflating the two
+       is what put "pause positioning" on screen while the session was already sleeping. */
+    private var armed = true
 
     var isRunning: Bool { mode != nil }
 
@@ -111,6 +116,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            whole zone and give back exactly the failure this replaced. */
         mode = .positioning
         paused = true
+        armed = true
         failure = nil
         return [
             "zoneId": id,
@@ -239,16 +245,27 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         saveWorldMap()
         session.pause()
         paused = true
+        armed = false
         // Give the lens back the instant we stop needing it — the capture session is what the
         // concierge is looking through.
         releaseCamera?()
         return ["paused": true, "mode": mode?.rawValue ?? ""]
     }
 
+    /**
+     ⛑ **Resume ARMS positioning; it does not start ARKit.**
+     *
+     * The first cut called `enter(mode)` here, which took the lens and never gave it back — so
+     * resuming froze the viewfinder and the app reported the capture session not running. **That is
+     * the same ownership bug as the original one, wearing a button.**
+     *
+     * Positioning is a burst: `position()` wakes the session, reads a pose and sleeps. So resuming
+     * means *stop refusing* — the next capture will wake it — and nothing more.
+     */
     func resume() -> [String: Any] {
         guard let mode else { return ["paused": true, "why": "no zone open"] }
-        enter(mode)
-        return ["paused": false, "mode": mode.rawValue]
+        armed = true
+        return ["paused": false, "mode": mode.rawValue, "armed": true]
     }
 
     // MARK: - taking a position
@@ -272,6 +289,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     func position() -> [String: Any] {
         guard mode != nil else { return ["positioned": false, "why": "no zone open"] }
         if let failure { return ["positioned": false, "why": failure, "recoverable": true] }
+        guard armed else { return ["positioned": false, "why": "paused"] }
         /* ⚑ **The burst.** Positioning is awake for the instant a position is taken and asleep
            between containers, so the pose is fetched by waking the session, reading it, and going
            back to sleep — never by holding the lens across the zone.

@@ -57,7 +57,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "zoneLog", returnType: CAPPluginReturnPromise)
     ]
 
     /**
@@ -419,6 +420,12 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 17.0, *) { withZone(c) { $0.position() } } } }
     @objc func startRoomPlan(_ call: CAPPluginCall) { requireZone(call) { c in
         if #available(iOS 17.0, *) { withZone(c) { $0.startRoomPlan() } } } }
+
+    /// ⚑ What the zone session did, kept by the app rather than by whoever was watching — see
+    /// `HSZoneLog`. Available whether or not a Mac is plugged in, which is the whole point.
+    @objc func zoneLog(_ call: CAPPluginCall) {
+        call.resolve(js(HSZoneLog.snapshot()))
+    }
 
     @objc func stopRoomPlan(_ call: CAPPluginCall) {
         guard #available(iOS 17.0, *), let z = zone else {

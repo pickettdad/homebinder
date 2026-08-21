@@ -617,6 +617,7 @@ interface NativeCamera {
   takePosition(): Promise<ZonePosition>;
   startRoomPlan(): Promise<{ started: boolean; why?: string }>;
   stopRoomPlan(): Promise<ZonePlan>;
+  zoneLog(): Promise<{ entries: Record<string, unknown>[]; count: number; wrapped: boolean }>;
   stop(): Promise<void>;
   addListener(
     event: CameraEvent,
@@ -765,6 +766,9 @@ export const resumeZone = () => requireCamera().resumeZone();
 export const takePosition = () => requireCamera().takePosition();
 export const startRoomPlan = () => requireCamera().startRoomPlan();
 export const stopRoomPlan = () => requireCamera().stopRoomPlan();
+/** ⚑ The zone session's own record of what it did. Survives an untethered walk, which the console
+ *  did not — twice, the second time costing a walk. */
+export const zoneLog = () => requireCamera().zoneLog();
 
 function subscribe<T>(event: CameraEvent, handler: (data: T) => void): () => void {
   const plugin = nativeCamera();

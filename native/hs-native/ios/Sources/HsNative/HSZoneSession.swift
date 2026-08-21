@@ -122,6 +122,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         paused = true
         armed = true
         failure = nil
+        HSZoneLog.record("openZone", ["zone": id, "mesh": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh), "roomPlan": RoomCaptureSession.isSupported])
         return [
             "zoneId": id,
             "startedAt": ISO8601DateFormatter().string(from: startedAt),
@@ -199,6 +200,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            already cleared `everRan`, and the first run after that resets rather than resumes. */
         let mustReset = reset || !everRan || failure != nil
         failure = nil
+        HSZoneLog.record("enter", ["mode": next.rawValue, "reset": mustReset, "unmet": unmet])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
         everRan = true
         mode = next
@@ -242,6 +244,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      */
     private func harvestMesh() -> [String: Any] {
         let anchors = (session.currentFrame?.anchors ?? []).compactMap { $0 as? ARMeshAnchor }
+        HSZoneLog.record("harvestMesh", ["anchors": anchors.count])
         guard !anchors.isEmpty else { return ["anchors": 0, "faces": 0, "why": "nothing was meshed"] }
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
@@ -388,6 +391,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         // Straight back to sleep, lens returned. The zone keeps its origin; the camera does not
         // keep ARKit.
         if mode == .positioning { sleepSession() }
+        HSZoneLog.record("position", ["ok": true, "tracking": state,
+                                      "surface": out["surface"] != nil])
         return out
     }
 
@@ -447,6 +452,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         capture.delegate = self
         roomCapture = capture
         capture.run(configuration: RoomCaptureSession.Configuration())
+        HSZoneLog.record("roomPlanStarted")
         return ["started": true, "mode": Mode.roomplan.rawValue]
     }
 
@@ -471,6 +477,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            ⚑ **A fixed sleep standing in for a completion is a race the happy path loses**, and it
            fails in the direction that looks like the feature not working rather than like a bug.
            The waiter below is resolved by the delegate; the timeout is a backstop that says so. */
+        HSZoneLog.record("roomPlanStopping")
         roomWaiter = { [weak self] out in
             self?.hideArPreview?()
             self?.sleepSession()
@@ -485,7 +492,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     private func deliverRoom(_ out: [String: Any]) {
-        guard let waiter = roomWaiter else { return }
+        HSZoneLog.record("roomDelivered", ["captured": out["captured"] ?? false, "why": out["why"] ?? "", "walls": (out["walls"] as? [[String: Any]])?.count ?? 0])
+        guard let waiter = roomWaiter else {
+            HSZoneLog.record("roomDeliveredLate", ["note": "nobody was still waiting"])
+            return
+        }
         roomWaiter = nil
         DispatchQueue.main.async { waiter(out) }
     }
@@ -592,6 +603,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      camera is the worst of both.
      */
     func session(_ session: ARSession, didFailWithError error: Error) {
+        HSZoneLog.record("sessionFailed", ["error": error.localizedDescription])
         failure = error.localizedDescription
         everRan = false
         paused = true
@@ -606,6 +618,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        HSZoneLog.record("tracking", ["state": HSArProbe.describe(camera.trackingState)])
         onEvent?(["tracking": HSArProbe.describe(camera.trackingState)])
     }
 }
@@ -646,11 +659,13 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
             "windows": room.windows.count,
             "openings": room.openings.count
         ]
+        HSZoneLog.record("roomProgress", roomProgress)
         onEvent?(["roomProgress": roomProgress])
     }
 
     func captureSession(_ session: RoomCaptureSession,
                         didProvide instruction: RoomCaptureSession.Instruction) {
+        HSZoneLog.record("roomInstruction", ["text": "\(instruction)"])
         onEvent?(["roomInstruction": "\(instruction)"])
     }
 }

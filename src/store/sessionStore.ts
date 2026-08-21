@@ -11,6 +11,7 @@ import type {
   CaptureMediaMeta,
   EventPayload,
   FrameReadMeta,
+  CapturePositionMeta,
   FrameRoleMeta,
   SessionEvent,
 } from "../engine/schema/events";
@@ -99,7 +100,10 @@ export type Screen =
   | { name: "nativecheck" }
   /** The zone is optional: reached from Home it is the F-26 judging harness with nothing to
    *  file into; reached from capture mode it carries the zone, and captures land there. */
-  | { name: "camera2"; zoneId?: string };
+  /** ⚑ `startAction` opens the viewfinder already doing something. The floorplan and the mesh are
+   *  ACTIONS of the zone — they belong beside room shot and run trace on the zone screen — but the
+   *  camera is in the viewfinder, so the door is on one screen and the act is on the other. */
+  | { name: "camera2"; zoneId?: string; startAction?: "floorplan" | "mesh" };
 
 interface AppStore {
   ready: boolean;
@@ -168,6 +172,9 @@ interface AppStore {
     extras?: {
       read?: FrameReadMeta;
       frame?: FrameRoleMeta;
+      /** ⚑ On the primary only. Siblings inherit — a pose on all three of a bracket would read as
+       *  three positions of one object. A REFUSAL is stored as a refusal, never as an absence. */
+      position?: CapturePositionMeta;
       siblings?: { blob: Blob; mime?: string; read?: FrameReadMeta; frame?: FrameRoleMeta }[];
     },
   ): Promise<string>;
@@ -485,7 +492,15 @@ export const useApp = create<AppStore>((set, get) => ({
       // is blob storage; the log is the record, and one home for a fact is the whole point.
       [{
         type: "PhotoAdded",
-        media: { mediaId, sha256, mime, bytes: file.size, read: extras?.read, frame: extras?.frame },
+        media: {
+          mediaId,
+          sha256,
+          mime,
+          bytes: file.size,
+          read: extras?.read,
+          frame: extras?.frame,
+          position: extras?.position,
+        },
         target,
         durationMs,
         intent,

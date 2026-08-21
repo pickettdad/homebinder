@@ -33,6 +33,8 @@ import {
   tapContainer,
   type OpenContainer,
 } from "../capture/objectContainer";
+import { ZoneStrip } from "./ZoneStrip";
+import type { ZoneMode, ZonePlan, ZonePosition } from "../native/zone";
 import {
   adjustCamera,
   cameraAvailable,
@@ -48,6 +50,15 @@ import {
   stopAudioProbe,
   framesNeedingEyes,
   framesTurnedFromStamp,
+  takePosition,
+  openZone,
+  closeZone,
+  onZone,
+  pauseZone,
+  resumeZone,
+  startRoomPlan,
+  stopRoomPlan,
+  setZoneMode as setZoneModeNative,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
@@ -293,7 +304,13 @@ function Level({ roll, square }: { roll: number; square: boolean }) {
   );
 }
 
-export function CameraScreen({ zoneId }: { zoneId?: string }) {
+export function CameraScreen({
+  zoneId,
+  startAction,
+}: {
+  zoneId?: string;
+  startAction?: "floorplan" | "mesh";
+}) {
   const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
   /** The latest status, readable from callbacks that must not re-subscribe when it changes —
@@ -339,6 +356,98 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
   const [traversing, setTraversing] = useState(false);
   const [traverseProgress, setTraverseProgress] = useState<TraverseProgressEvent | null>(null);
   const [traverseResult, setTraverseResult] = useState<TraverseResult | null>(null);
+  /* ⚑ Held so the plan is visibly a deliverable rather than a side effect. A floorplan that
+     produced nothing and a floorplan nobody ran look identical without this. */
+  const [, setPlan] = useState<ZonePlan | null>(null);
+  /* ⚑ The positioning session opens with the viewfinder and closes with it. There is no entry
+     gesture: the zone was entered on the zone screen, and asking again put a second meaning on a
+     word this product had already spent. */
+  const [zoneOpen, setZoneOpen] = useState(false);
+  const [zoneMode, setZoneMode] = useState<ZoneMode>("positioning");
+  const [zonePaused, setZonePaused] = useState(false);
+  const [zoneTracking, setZoneTracking] = useState<string | undefined>(undefined);
+  const [scanning, setScanning] = useState(false);
+  const [meshing, setMeshing] = useState(false);
+  const [zoneNote, setZoneNote] = useState<string | null>(null);
+
+  /**
+   * ⚑ The session's whole lifecycle, and it has no buttons in it.
+   *
+   * Opens when the viewfinder opens inside a zone; closes when it leaves. `startAction` carries the
+   * door the concierge tapped on the zone screen — floorplan or mesh — so the act begins where the
+   * camera is without a second gesture asking them to declare a room they are standing in.
+   *
+   * ⛑ **Tracking is streamed rather than polled**, because *can I anchor this container* has to be
+   * answerable BEFORE the shutter. Afterwards it is a fact about a photograph nobody can retake.
+   */
+  useEffect(() => {
+    if (!zoneId || !cameraAvailable()) return;
+    let live = true;
+    const off = onZone((e) => {
+      if (typeof e.tracking === "string") setZoneTracking(e.tracking);
+      if (typeof e.zoneError === "string") setZoneNote(String(e.zoneError));
+    });
+    void (async () => {
+      try {
+        const out = await openZone(zoneId);
+        if (!live) return;
+        setZoneOpen(true);
+        setZoneMode(out.mode);
+        setZonePaused(false);
+        if (!out.roomPlanSupported && startAction === "floorplan") {
+          setZoneNote("No floorplan on this device");
+          return;
+        }
+        if (startAction === "floorplan") {
+          const started = await startRoomPlan();
+          if (live && started.started) {
+            setScanning(true);
+            setZoneMode("roomplan");
+          }
+        } else if (startAction === "mesh") {
+          const r = await setZoneModeNative("mesh");
+          if (live) {
+            setMeshing(true);
+            setZoneMode("mesh");
+            if (r.unmet.length) setZoneNote(`unmet ${r.unmet.join(", ")}`);
+          }
+        }
+      } catch (e) {
+        if (live) setZoneNote(e instanceof Error ? e.message : "Zone session unavailable");
+      }
+    })();
+    return () => {
+      live = false;
+      off();
+      void closeZone().catch(() => {});
+      setZoneOpen(false);
+      setScanning(false);
+      setMeshing(false);
+    };
+  }, [zoneId, startAction]);
+
+  const finishScan = useCallback(async () => {
+    setScanning(false);
+    const plan = await stopRoomPlan().catch(() => ({ captured: false, why: "failed" }) as ZonePlan);
+    setPlan(plan);
+    setZoneMode("positioning");
+    setZoneNote(
+      plan.captured
+        ? `plan · ${plan.walls?.length ?? 0} walls · ${plan.doors?.length ?? 0} doors · ${plan.windows?.length ?? 0} windows`
+        : (plan.why ?? "no plan"),
+    );
+  }, []);
+
+  const finishMesh = useCallback(async () => {
+    setMeshing(false);
+    await setZoneModeNative("positioning").catch(() => null);
+    setZoneMode("positioning");
+  }, []);
+
+  const togglePause = useCallback(async () => {
+    const out = zonePaused ? await resumeZone() : await pauseZone();
+    setZonePaused(out.paused);
+  }, [zonePaused]);
   /**
    * Auto-capture is the feature that turns roughly two hundred taps into thirty-four, so it is on
    * by default in the mode that has it. It is also switchable, because judging one deliberate
@@ -389,6 +498,21 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
     setBusy(true);
     try {
       const result = await captureFrames();
+      /*
+        ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
+
+        Asked here rather than afterwards because a pose is a fact about *when the frame was taken*
+        — a second later the concierge has moved. And `takePosition` REFUSES rather than handing
+        back the last pose it happened to hold, so what lands on the capture is either a measured
+        position or the reason there is not one.
+
+        ⛑ The refusal is the half that matters. An absent field says *this build had no positions*;
+        `{positioned:false, why:"paused"}` says *this one could and did not, here is why* — and a
+        container the desk cannot place is otherwise indistinguishable from one nobody meant to.
+      */
+      const position = await takePosition().catch(
+        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+      );
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);
@@ -452,7 +576,9 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
         const mediaId = await capturePhotoV2(
           captureTargetFor(openRef.current, currentZone, declared), blob, "image/jpeg",
           undefined, declared,
-          { read: readOf(0), frame: roleOf(0), siblings },
+          /* ⚑ On the PRIMARY only. Siblings inherit — the container's anchor is one frame, and a
+             pose stamped on all three of a bracket would read as three positions of one object. */
+          { read: readOf(0), frame: roleOf(0), position, siblings },
         );
         // One act, one capture: the door was for this shot, not for the rest of the room.
         pendingIntentRef.current = null;
@@ -886,6 +1012,26 @@ export function CameraScreen({ zoneId }: { zoneId?: string }) {
           model={strip}
           onNew={() => void newContainer()}
           onTap={(pinId) => setOpen((current) => tapContainer(current, pinId, zoneId))}
+        />
+      )}
+
+      {/*
+        ⛑ **Moved out of the bottom row, where it sat underneath the mode buttons and could not be
+        tapped.** It belongs at the top with the zone name, because it is about *where you are* —
+        which is what the header already says — and the bottom of a viewfinder is the shutter's.
+      */}
+      {zoneId && (
+        <ZoneStrip
+          open={zoneOpen}
+          mode={zoneMode}
+          paused={zonePaused}
+          tracking={zoneTracking}
+          scanning={scanning}
+          meshing={meshing}
+          note={zoneNote}
+          onFinishScan={() => void finishScan()}
+          onFinishMesh={() => void finishMesh()}
+          onTogglePause={() => void togglePause()}
         />
       )}
 

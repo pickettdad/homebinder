@@ -208,7 +208,9 @@ export function App() {
       {screen.name === "export2" && <ExportV2Screen />}
       {screen.name === "devbench" && <DevBenchScreen />}
       {screen.name === "nativecheck" && <NativeCheckScreen />}
-      {screen.name === "camera2" && <CameraScreen zoneId={screen.zoneId} />}
+      {screen.name === "camera2" && (
+        <CameraScreen zoneId={screen.zoneId} startAction={screen.startAction} />
+      )}
       <GlobalCamera />
       </ErrorBoundary>
       {toast && (

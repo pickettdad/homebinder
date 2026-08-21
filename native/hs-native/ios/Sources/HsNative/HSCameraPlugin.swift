@@ -369,6 +369,24 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
            before the camera had started. **An intermittent that is actually a startup-order race
            reads as flakiness**, and flakiness is what stops a real cause being looked for. */
         let id = call.getString("zoneId") ?? UUID().uuidString
+        /* ⛑ **Re-opening the SAME zone must not rebuild it** (zone log, 2026-08-21). One kitchen
+           produced six `openZone` calls — one per action tapped — and each built a fresh
+           `HSZoneSession` with `reset: true`, so the zone's coordinate space was destroyed and
+           remade every time.
+
+           ⚑ **That silently breaks the load-bearing rule of the whole architecture.** Positions
+           taken after a floorplan were measured against a different origin from the floorplan, so
+           *at least one frame per container carries a position* was true of frames that could not
+           be related to each other. Nothing failed; the numbers were simply in different worlds.
+
+           It also orphaned in-flight work: a RoomPlan result arriving after its session had been
+           replaced landed on nobody — which is `roomDeliveredLate` in the log, with a captured room
+           and one wall in it, thrown away. */
+        if let existing = zone, existing.zoneId == id {
+            HSZoneLog.record("openZoneReused", ["zone": id])
+            call.resolve(js(existing.state()))
+            return
+        }
         let made = HSZoneSession()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }

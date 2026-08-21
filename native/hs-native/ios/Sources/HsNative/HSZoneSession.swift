@@ -98,6 +98,20 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
 
     var isRunning: Bool { mode != nil }
 
+    /// What `openZone` returns, so re-entering a zone already open answers identically without
+    /// rebuilding it.
+    func state() -> [String: Any] {
+        [
+            "zoneId": zoneId,
+            "startedAt": ISO8601DateFormatter().string(from: startedAt),
+            "mode": mode?.rawValue ?? Mode.positioning.rawValue,
+            "unmet": [String](),
+            "reused": true,
+            "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+            "roomPlanSupported": RoomCaptureSession.isSupported
+        ]
+    }
+
     // MARK: - opening and closing a zone
 
     /**
@@ -185,9 +199,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 config.videoFormat = hi
             }
         case .positioning:
-            /* Stripped: no plane search, no reconstruction, no environment texturing. It has exactly
-               one job — hold the origin and hand back a pose when asked. */
-            config.planeDetection = []
+            /* ⛑ **Plane detection stays ON, and stripping it was a bug I introduced** (zone log,
+               2026-08-21: `surface: false` on every position taken).
+
+               The ray-cast needs something to hit. With no plane search and no reconstruction there
+               is no geometry in the session at all, so `raycast` returns an empty array every time
+               and the pose comes back with no surface — ⚑ **which is the difference between *where
+               the concierge stood* and *what they were standing in front of***, and the second is
+               the one a measurement needs.
+
+               Reconstruction stays off: that is the expensive half, and it is the mesh mode's job.
+               Plane detection is the cheap half and it is what makes a pose worth taking. */
+            config.planeDetection = [.horizontal, .vertical]
             config.sceneReconstruction = []
             config.environmentTexturing = .none
             if #available(iOS 16.0, *),

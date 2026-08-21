@@ -384,6 +384,9 @@ export function CameraScreen({
   const [meshing, setMeshing] = useState(false);
   const [zoneNote, setZoneNote] = useState<string | null>(null);
   const [zoneFailure, setZoneFailure] = useState<string | null>(null);
+  const [roomProgress, setRoomProgress] = useState<{
+    walls: number; doors: number; windows: number; openings: number;
+  } | null>(null);
 
   /**
    * ⚑ The session's whole lifecycle, and it has no buttons in it.
@@ -406,9 +409,13 @@ export function CameraScreen({
       if (typeof e.roomInstruction === "string") setZoneNote(String(e.roomInstruction));
       if (e.roomProgress && typeof e.roomProgress === "object") {
         const p = e.roomProgress as Record<string, number>;
-        setZoneNote(
-          `${p.walls ?? 0} walls · ${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`,
-        );
+        setRoomProgress({
+          walls: p.walls ?? 0,
+          doors: p.doors ?? 0,
+          windows: p.windows ?? 0,
+          openings: p.openings ?? 0,
+        });
+        setZoneNote(`${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`);
       }
       // ⚑ Held, not toasted. A message that disappears is a message that cannot be acted on later,
       // and the whole failure of 2026-08-21 was a state nobody could see they were in.
@@ -434,26 +441,6 @@ export function CameraScreen({
           setZoneNote("No floorplan on this device");
           return;
         }
-        if (startAction === "room-shot") {
-          /* ⚑ Framed wide and declared, exactly as the old in-viewfinder door did — the act is
-             unchanged, only the door moved. The lens is a default rather than a lock: the concierge
-             can still go back to 1× if the room fits. */
-          await applyIntentLens("room-shot");
-          setPendingIntent("room-shot");
-        } else if (startAction === "floorplan") {
-          const started = await startRoomPlan();
-          if (live && started.started) {
-            setScanning(true);
-            setZoneMode("roomplan");
-          }
-        } else if (startAction === "mesh") {
-          const r = await setZoneModeNative("mesh");
-          if (live) {
-            setMeshing(true);
-            setZoneMode("mesh");
-            if (r.unmet.length) setZoneNote(`unmet ${r.unmet.join(", ")}`);
-          }
-        }
       } catch (e) {
         if (live) setZoneFailure(e instanceof Error ? e.message : "Zone session unavailable");
       }
@@ -471,10 +458,52 @@ export function CameraScreen({
       setScanning(false);
       setMeshing(false);
     };
-  }, [zoneId, startAction]);
+    /* ⛑ **`startAction` is deliberately NOT a dependency** (zone log, 2026-08-21). It was, and the
+       result was six `openZone` calls for one kitchen — one per action tapped — each rebuilding the
+       session with `reset: true`. ⚑ **The zone's coordinate space was destroyed and remade every
+       time the concierge tapped Floorplan or Mesh**, so a position taken afterwards was measured
+       against a different origin from the plan, and nothing anywhere said so. The session belongs to
+       the zone; the action is something done inside it. */
+  }, [zoneId]);
+
+  /**
+   * The action the concierge tapped on the zone screen, performed in the session that is already
+   * open. ⚑ Separate from the lifecycle above so that choosing an action never restarts a zone.
+   */
+  useEffect(() => {
+    if (!zoneOpen || !startAction) return;
+    let live = true;
+    void (async () => {
+      try {
+        if (startAction === "room-shot") {
+          await applyIntentLens("room-shot");
+          setPendingIntent("room-shot");
+        } else if (startAction === "floorplan") {
+          const started = await startRoomPlan();
+          if (live && started.started) {
+            setScanning(true);
+            setZoneMode("roomplan");
+          } else if (live) setZoneNote(started.why ?? "floorplan refused");
+        } else if (startAction === "mesh") {
+          const r = await setZoneModeNative("mesh");
+          if (live) {
+            setMeshing(true);
+            setZoneMode("mesh");
+            if (r.unmet.length) setZoneNote(`unmet ${r.unmet.join(", ")}`);
+          }
+        }
+      } catch (e) {
+        if (live) setZoneFailure(e instanceof Error ? e.message : "action failed");
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [zoneOpen, startAction]);
 
   const finishScan = useCallback(async () => {
     setScanning(false);
+    setRoomProgress(null);
     const plan = await stopRoomPlan().catch(() => ({ captured: false, why: "failed" }) as ZonePlan);
     setPlan(plan);
     setZoneMode("positioning");
@@ -1185,6 +1214,7 @@ export function CameraScreen({
           meshing={meshing}
           note={zoneNote}
           failure={zoneFailure}
+          progress={roomProgress}
           onRetry={() => void retryZone()}
           onFinishScan={() => void finishScan()}
           onFinishMesh={() => void finishMesh()}

@@ -34,6 +34,7 @@ import {
   type OpenContainer,
 } from "../capture/objectContainer";
 import { ZoneStrip } from "./ZoneStrip";
+import { zoneMeasures } from "../native/zone";
 import type { ZoneMode, ZonePlan, ZonePosition } from "../native/zone";
 import {
   adjustCamera,
@@ -107,9 +108,21 @@ const MODE_BUTTONS: { mode: CameraMode; glyph: string; hint: string }[] = [
  yet trace a run end to end**, so the thing that can do the job today keeps doing it. It goes when
  the traverse can — after scale-aware registration, not before.
 */
-const ACTIONS: { id: string; glyph: string; hint: string; mode: CameraMode }[] = [
-  { id: "room-shot", glyph: "⬛", hint: "Room shot", mode: "object" },
-];
+/**
+ * ⛑ **Empty on purpose, and the room shot is why** (owner ruling 2026-08-21).
+ *
+ * A room shot happens **once, at the start of a zone**. This screen is the one doing the repetitive
+ * work — object after object, plate after plate — and a door that fires once per room sitting in the
+ * row you hit forty times is clutter in the place clutter costs most.
+ *
+ * ⚑ It moved to the zone screen, and it arrives here anyway: that screen opens the viewfinder with
+ * `startAction: "room-shot"`, because the room shot is a sibling pair whose 1× frame carries a
+ * measured position — so it has to fire where the camera and the session already are. **The door
+ * moved; the act did not.**
+ *
+ * Kept as a list rather than deleted: the next action that belongs on this row has somewhere to go.
+ */
+const ACTIONS: { id: string; glyph: string; hint: string; mode: CameraMode }[] = [];
 
 const FRAME_COLOUR: Record<FrameState, string> = {
   object: "ring-slate-300/70",
@@ -309,7 +322,7 @@ export function CameraScreen({
   startAction,
 }: {
   zoneId?: string;
-  startAction?: "floorplan" | "mesh";
+  startAction?: "floorplan" | "mesh" | "room-shot";
 }) {
   const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
@@ -369,6 +382,7 @@ export function CameraScreen({
   const [scanning, setScanning] = useState(false);
   const [meshing, setMeshing] = useState(false);
   const [zoneNote, setZoneNote] = useState<string | null>(null);
+  const [zoneFailure, setZoneFailure] = useState<string | null>(null);
 
   /**
    * ⚑ The session's whole lifecycle, and it has no buttons in it.
@@ -386,19 +400,46 @@ export function CameraScreen({
     const off = onZone((e) => {
       if (typeof e.tracking === "string") setZoneTracking(e.tracking);
       if (typeof e.zoneError === "string") setZoneNote(String(e.zoneError));
+      /* ⛑ **A scan looked like an ordinary viewfinder and reported nothing** (field 2026-08-21).
+         RoomPlan tells you what it has found and what to do about it; both were being dropped. */
+      if (typeof e.roomInstruction === "string") setZoneNote(String(e.roomInstruction));
+      if (e.roomProgress && typeof e.roomProgress === "object") {
+        const p = e.roomProgress as Record<string, number>;
+        setZoneNote(
+          `${p.walls ?? 0} walls · ${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`,
+        );
+      }
+      // ⚑ Held, not toasted. A message that disappears is a message that cannot be acted on later,
+      // and the whole failure of 2026-08-21 was a state nobody could see they were in.
+      if (typeof e.zoneFailed === "string") {
+        setZoneFailure(String(e.zoneFailed));
+        setScanning(false);
+        setMeshing(false);
+      }
     });
-    void (async () => {
+    const opening = (async () => {
       try {
         const out = await openZone(zoneId);
         if (!live) return;
         setZoneOpen(true);
         setZoneMode(out.mode);
+        /* ⛑ **Armed, not running** (field report 2026-08-21). This said `false` and the strip read
+           it as *a session is running, offer Pause* — while natively positioning was asleep, which
+           is its normal state. ⚑ Two different facts had one flag: **is the session awake** (almost
+           never, by design) and **may positions be taken** (usually yes). The strip needs the
+           second, so that is what this now carries. */
         setZonePaused(false);
         if (!out.roomPlanSupported && startAction === "floorplan") {
           setZoneNote("No floorplan on this device");
           return;
         }
-        if (startAction === "floorplan") {
+        if (startAction === "room-shot") {
+          /* ⚑ Framed wide and declared, exactly as the old in-viewfinder door did — the act is
+             unchanged, only the door moved. The lens is a default rather than a lock: the concierge
+             can still go back to 1× if the room fits. */
+          await applyIntentLens("room-shot");
+          setPendingIntent("room-shot");
+        } else if (startAction === "floorplan") {
           const started = await startRoomPlan();
           if (live && started.started) {
             setScanning(true);
@@ -413,13 +454,18 @@ export function CameraScreen({
           }
         }
       } catch (e) {
-        if (live) setZoneNote(e instanceof Error ? e.message : "Zone session unavailable");
+        if (live) setZoneFailure(e instanceof Error ? e.message : "Zone session unavailable");
       }
     })();
     return () => {
       live = false;
       off();
-      void closeZone().catch(() => {});
+      /* ⛑ **Await the open before closing** (field report 2026-08-21: positioning gone after backing
+         out and returning). React runs the new effect's body before the old one's cleanup finishes,
+         so a bare `closeZone()` here could land AFTER the next `openZone` and null the session that
+         had just been created. ⚑ The symptom is the worst kind: it works, then it silently does
+         not, and only a relaunch clears it — the same shape as the guard bug, one layer up. */
+      void opening.then(() => closeZone()).catch(() => {});
       setZoneOpen(false);
       setScanning(false);
       setMeshing(false);
@@ -431,18 +477,74 @@ export function CameraScreen({
     const plan = await stopRoomPlan().catch(() => ({ captured: false, why: "failed" }) as ZonePlan);
     setPlan(plan);
     setZoneMode("positioning");
-    setZoneNote(
-      plan.captured
-        ? `plan · ${plan.walls?.length ?? 0} walls · ${plan.doors?.length ?? 0} doors · ${plan.windows?.length ?? 0} windows`
-        : (plan.why ?? "no plan"),
-    );
+    /* ⚑ The plan reported as the numbers somebody can price from, not as a count of surfaces.
+       One walk producing a quoting table is the point of the whole capture. */
+    /*
+      ⚑ **The raw plan is filed; the table is only a readout** (owner ruling 2026-08-21).
+
+      The field app's job is images and accurate raw data — the desk decides what to do with it. So
+      every wall, door, window and opening goes into the record verbatim, with its dimensions, its
+      transform and RoomPlan's own confidence, and `zoneMeasures` stays a pure function over that.
+      **Anything derived can be re-derived; a surface nobody stored cannot be.**
+
+      ⛑ Filed as a capture rather than held in React state, which is where it was: the first cut
+      scanned a room, printed a line, and threw the geometry away.
+    */
+    if (plan.captured && zoneId) {
+      const blob = new Blob([JSON.stringify(plan)], { type: "application/json" });
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+    }
+    if (plan.captured) {
+      const m = zoneMeasures(plan);
+      setZoneNote(
+        `${m.perimeter?.toFixed(1) ?? "—"} m round · ${m.baseboard?.toFixed(1) ?? "—"} m baseboard · ` +
+          `${m.ceilingHeight?.toFixed(2) ?? "—"} m high · ${m.windows.count} windows · ${m.doors.count} doors`,
+      );
+    } else setZoneNote(plan.why ?? "no plan");
   }, []);
 
   const finishMesh = useCallback(async () => {
     setMeshing(false);
-    await setZoneModeNative("positioning").catch(() => null);
+    const out = await setZoneModeNative("positioning").catch(() => null);
     setZoneMode("positioning");
-  }, []);
+    /* ⚑ The geometry is the deliverable, so it is filed raw exactly as the floorplan is — the desk
+       decides what to do with it. A count on screen is a receipt, not the record. */
+    const mesh = (out as { mesh?: { anchors: number; faces: number; why?: string } } | null)?.mesh;
+    if (!mesh) return;
+    if (zoneId && mesh.faces > 0) {
+      const blob = new Blob([JSON.stringify(mesh)], { type: "application/json" });
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+    }
+    setZoneNote(
+      mesh.faces > 0
+        ? `mesh · ${mesh.anchors} pieces · ${mesh.faces.toLocaleString()} faces filed`
+        : (mesh.why ?? "nothing was meshed"),
+    );
+  }, [zoneId, capturePhotoV2]);
+
+  /**
+   * ⚑ Rebuild rather than resume. A failed `ARSession` cannot be revived by `run(config)` — that is
+   * what made every mode after a failure inherit the corpse — so this closes the zone and opens it
+   * again, which is the one thing that was previously only achievable by relaunching the app.
+   */
+  const retryZone = useCallback(async () => {
+    if (!zoneId) return;
+    setZoneFailure(null);
+    setZoneNote("restarting positioning…");
+    await closeZone().catch(() => {});
+    try {
+      const out = await openZone(zoneId);
+      setZoneOpen(true);
+      setZoneMode(out.mode);
+      setZonePaused(true);
+      setZoneNote(null);
+    } catch (e) {
+      // ⚑ Clear the "restarting…" line on the way out. It stayed on screen forever when the retry
+      // failed, which reads as *still trying* — the one thing it was not doing.
+      setZoneNote(null);
+      setZoneFailure(e instanceof Error ? e.message : "positioning unavailable");
+    }
+  }, [zoneId]);
 
   const togglePause = useCallback(async () => {
     const out = zonePaused ? await resumeZone() : await pauseZone();
@@ -455,10 +557,27 @@ export function CameraScreen({
    * someone looks around is a filmstrip they cannot find the real shot in.
    */
   const [autoCapture, setAutoCapture] = useState(true);
+  /** ⚑ Read inside the frame callback, which closes over its first render — a state value would be
+   *  stale there and auto-capture would keep firing exactly as it did before the fix. */
+  const reviewingRef = useRef(false);
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
   }, [autoCapture]);
+
+  /* Anything covering the live preview is a not-a-capture posture: the reviewer, the stored viewer.
+     Kept in a ref because the frame callback closes over its first render. */
+  useEffect(() => {
+    /* ⛑ **`viewing` was the one that mattered and the first fix missed it.** Tapping a frame shot
+       THIS session opens the full reviewer (`viewing`); only a frame filed earlier opens
+       `openCapture`. So the guard covered the case the owner was not hitting and missed the case he
+       was — auto-capture went on firing behind the reviewer exactly as before.
+
+       ⚑ Both are listed rather than the one that was reported, because the rule is *anything
+       covering the live preview is not a capture posture* and a rule stated as a list of the
+       symptoms seen so far is a rule that breaks on the next surface added. */
+    reviewingRef.current = openCapture !== null || viewing !== null;
+  }, [openCapture, viewing]);
 
   const available = cameraAvailable();
   const lastAuto = useRef(0);
@@ -779,6 +898,12 @@ export function CameraScreen({
       if (worthHolding && readableSince.current === null) readableSince.current = Date.now();
       if (!worthHolding) readableSince.current = null;
 
+      /* ⛑ **Not while a photograph is open** (field report 2026-08-21). The reviewer sits over the
+         live preview, so the camera goes on seeing a still scene and auto-capture goes on firing —
+         the concierge is looking at one frame while the app quietly takes several more of the back
+         of their hand. ⚑ The frames all look fine, which is the tell: this is the silent-failure
+         shape again, and the fix is that inspecting is not a capture posture. */
+      if (reviewingRef.current) return;
       if (autoRef.current && event.stable && worthShooting && Date.now() - lastAuto.current > 4000) {
         const waited = readableSince.current === null ? 0 : Date.now() - readableSince.current;
         lastAuto.current = Date.now();
@@ -789,7 +914,12 @@ export function CameraScreen({
     });
     const offStatus = onModeStatus(setStatus);
     const offTraverse = onTraverse(setTraverseProgress);
-    startCamera("text")
+    /* ⛑ **Object, not text** (field report 2026-08-21). Opening on Text meant the viewfinder began
+       in the one mode that fires the shutter by itself, so walking into a room started taking
+       photographs of whatever happened to hold still. ⚑ Auto-capture is right for a plate the
+       concierge is deliberately holding on; it is wrong as the state a screen opens in, because the
+       concierge has not chosen anything yet. Object is the mode that waits to be told. */
+    startCamera("object")
       .then((result) => setCapabilities(result.capabilities))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     return () => {
@@ -1029,6 +1159,8 @@ export function CameraScreen({
           scanning={scanning}
           meshing={meshing}
           note={zoneNote}
+          failure={zoneFailure}
+          onRetry={() => void retryZone()}
           onFinishScan={() => void finishScan()}
           onFinishMesh={() => void finishMesh()}
           onTogglePause={() => void togglePause()}
@@ -1036,12 +1168,22 @@ export function CameraScreen({
       )}
 
       <header className="absolute inset-x-0 top-0 flex items-center justify-between p-3">
+        {/*
+          ⛑ **Back, not Home** (owner ruling 2026-08-21). Leaving the viewfinder dropped the
+          concierge at the app root, and getting back to the room they were standing in meant
+          resuming the visit and finding the zone again — three taps to undo one.
+
+          ⚑ The viewfinder was reached FROM a zone, so leaving it goes back to that zone. Home stays
+          reachable from there, which is where a step out of the visit belongs. When there is no
+          zone — the camera opened from Home as the plate harness — Home is still the only way back
+          and the label says so rather than promising a screen that does not exist.
+        */}
         <button
           type="button"
-          onClick={() => navigate({ name: "home" })}
+          onClick={() => navigate(zoneId ? { name: "zone2", zoneId } : { name: "home" })}
           className="rounded-lg bg-slate-900/70 px-3 py-2 text-sm text-slate-200 ring-1 ring-slate-600"
         >
-          ← Home
+          {zoneId ? "← Back" : "← Home"}
         </button>
         {/* Where shots are landing, always on screen — the 2026-07-26 field report's core
             complaint was not knowing where a capture went. Absent when there is no zone, which
@@ -1575,6 +1717,13 @@ export function CameraScreen({
         );
       })()}
 
+      {/*
+        ⛑ **A scan is not a photograph-taking mode** (owner ruling 2026-08-21). While the floorplan
+        or the mesh is running the shutter, the modes, the filmstrip and the torch are all doors to
+        an act that cannot happen — ARKit holds the lens — and offering them makes the screen look
+        broken rather than busy. The scan gets its finish action and nothing else.
+      */}
+      {!scanning && !meshing && (
       <footer className="absolute inset-x-0 bottom-0 flex flex-col gap-2 p-3">
         {/*
           ⚑ Two different strips, and which one appears is decided by whether anything is being
@@ -1716,6 +1865,7 @@ export function CameraScreen({
           </div>
         </div>
       </footer>
+      )}
 
       {viewing && shown && (
         <div className="absolute inset-0 z-50 flex flex-col bg-slate-950">

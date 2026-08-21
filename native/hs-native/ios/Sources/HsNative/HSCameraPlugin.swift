@@ -299,6 +299,34 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         set { zoneStore = newValue }
     }
 
+    /// ARKit's own preview, for the length of a scan. ⚑ While ARKit holds the lens the capture
+    /// session has no frames, so its layer is a still image of the last thing it saw — which is the
+    /// black screen the field reported. The scan modes get a view fed by the session that actually
+    /// owns the camera.
+    private var arPreview: UIView?
+
+    private func attachArPreview(_ arSession: ARSession) {
+        DispatchQueue.main.async { [weak self] in
+            guard #available(iOS 17.0, *), let self, let web = self.webView,
+                  let superview = web.superview, self.arPreview == nil else { return }
+            let view = ARSCNView(frame: superview.bounds)
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.session = arSession
+            // Nothing is being rendered into the scene; this is a camera feed the concierge walks
+            // behind, and statistics or debug overlays would be clutter over a room.
+            view.rendersContinuously = true
+            superview.insertSubview(view, belowSubview: web)
+            self.arPreview = view
+        }
+    }
+
+    private func detachArPreview() {
+        DispatchQueue.main.async { [weak self] in
+            self?.arPreview?.removeFromSuperview()
+            self?.arPreview = nil
+        }
+    }
+
     private func js(_ d: [String: Any]) -> JSObject {
         JSObject(uniqueKeysWithValues: d.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) })
     }
@@ -330,14 +358,27 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("The zone session needs iOS 17")
             return
         }
-        guard controller == nil else {
-            call.reject("Close the camera first — ARKit and the capture session cannot share the lens")
-            return
-        }
+        /* ⛑ **This guard was the bug, and it was a leftover.** It dates from when the zone session
+           was a standalone thing that needed the device to itself. Ownership is arbitrated now —
+           `needCamera`/`releaseCamera` — so refusing whenever a capture session exists refuses
+           *always*, because the viewfinder is where zones are opened from.
+
+           ⚑ The symptom it produced is the one worth remembering: it worked the FIRST time and never
+           again until the app was relaunched, because on first mount the zone effect happened to run
+           before the camera had started. **An intermittent that is actually a startup-order race
+           reads as flakiness**, and flakiness is what stops a real cause being looked for. */
         let id = call.getString("zoneId") ?? UUID().uuidString
         let made = HSZoneSession()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            /* ⚑ **One owner of the lens, arbitrated here.** ARKit and the capture session cannot
+               both hold the rear camera: run them together and ARKit is refused with `sensorFailed`
+               while the preview freezes — both seen in the field 2026-08-21. The zone session asks
+               for the camera, uses it, and gives it straight back. */
+            made.needCamera = { [weak self] in self?.controller?.yieldCamera() }
+            made.releaseCamera = { [weak self] in self?.controller?.reclaimCamera() }
+            made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
+            made.hideArPreview = { [weak self] in self?.detachArPreview() }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())
             }
@@ -954,6 +995,33 @@ final class CameraController: NSObject {
         previewView = container
         previewLayer = layer
         startTrackingRotation(previewLayer: layer)
+    }
+
+    /**
+     ⚑ **Hand the lens over, and hand it back. One owner at a time.**
+
+     ARKit and an `AVCaptureSession` cannot both hold the rear camera. Running them together does
+     not degrade — ARKit is refused outright with `sensorFailed`, and the AVFoundation preview
+     *freezes* when ARKit takes the device out from under it. Both were visible in the field on
+     2026-08-21: "Required sensor failed", a frozen viewfinder that unfroze when positioning was
+     paused, and a black screen in the scan modes.
+
+     ⛑ **The preview view and the whole controller stay in place.** Only the capture session stops,
+     so coming back is `startRunning()` rather than a rebuild — which is why the handover is
+     milliseconds and not the nine seconds that would come from tearing the input down.
+     */
+    func yieldCamera() {
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
+        }
+    }
+
+    func reclaimCamera() {
+        sessionQueue.async { [weak self] in
+            guard let self, !self.session.isRunning else { return }
+            self.session.startRunning()
+        }
     }
 
     func stop() {

@@ -146,3 +146,80 @@ export function meshRecommendation(zone: { kind?: string; containers: number }):
   if (zone.containers >= 4) return { recommend: true, because: `${zone.containers} objects in one zone` };
   return { recommend: false, because: "few objects, and nothing here is measured later" };
 }
+
+/**
+ * The quoting table, derived from the plan.
+ *
+ * ⚑ **One walk producing numbers somebody can price from is the point of the whole capture** (owner
+ * ruling 2026-08-21). RoomPlan hands back walls, doors, windows and openings with dimensions; every
+ * measure below falls out of those, and none of them needs anybody to decide in the room what was
+ * worth measuring.
+ *
+ * ⛑ **Baseboard is the one that earns its keep and the one most easily got wrong.** It is the
+ * perimeter *minus the door openings* — a run of trim does not cross a doorway — so a perimeter
+ * quoted as baseboard over-counts by roughly a door width per door, which on a house is a real
+ * number in the wrong direction.
+ *
+ * ⚑ **And what the plan CANNOT give, said here rather than discovered when somebody asks:**
+ * **flooring type** and **registers** are not in RoomPlan's output at all. Its object taxonomy knows
+ * sofas and refrigerators; there is no floor-covering classification and no vent. Those have to come
+ * from a concierge capture or from the mesh, and this function returns them as `null` rather than
+ * omitting them — an absent key reads as *nobody computed it*, and `null` reads as *the plan does
+ * not carry this*.
+ */
+export interface ZoneMeasures {
+  /** Square metres, from the floor polygon the walls describe. */
+  floorArea: number | null;
+  ceilingHeight: number | null;
+  /** Linear metres round the room. */
+  perimeter: number | null;
+  /** ⚑ Perimeter minus door openings — trim does not cross a doorway. */
+  baseboard: number | null;
+  /** Gross wall area, before openings are taken out. */
+  wallAreaGross: number | null;
+  /** …and after, which is the one a painter or a drywaller prices from. */
+  wallAreaNet: number | null;
+  windows: { count: number; totalGlazing: number; sizes: { width: number; height: number }[] };
+  doors: { count: number; sizes: { width: number; height: number }[] };
+  openings: { count: number };
+  /** ⛑ Not in the plan. Null rather than absent — see the note above. */
+  flooringType: null;
+  registers: null;
+}
+
+export function zoneMeasures(plan: ZonePlan): ZoneMeasures {
+  const walls = plan.walls ?? [];
+  const windows = plan.windows ?? [];
+  const doors = plan.doors ?? [];
+  const openings = plan.openings ?? [];
+  const sizes = (list: ZoneSurface[]) => list.map((s) => ({ width: s.width, height: s.height }));
+  const area = (list: ZoneSurface[]) => list.reduce((sum, s) => sum + s.width * s.height, 0);
+
+  // A wall's `width` is its run along the floor, so the perimeter is their sum. Not a convex-hull
+  // job: RoomPlan already gives one surface per wall segment.
+  const perimeter = walls.length ? walls.reduce((sum, w) => sum + w.width, 0) : null;
+  // Tallest wall rather than mean: a sloped or stepped ceiling has more than one height, and the
+  // useful single number for clearance is the greatest.
+  const ceilingHeight = walls.length ? Math.max(...walls.map((w) => w.height)) : null;
+  const wallAreaGross = walls.length ? area(walls) : null;
+  const cutouts = area(windows) + area(doors) + area(openings);
+  const doorWidths = doors.reduce((sum, d) => sum + d.width, 0);
+
+  return {
+    /* ⚑ Floor area is NOT perimeter × something. RoomPlan gives no floor polygon directly, so this
+       is left null rather than approximated — a rectangle assumption is wrong in every L-shaped
+       room, and a wrong area quoted to a flooring supplier is worse than no area. The mesh can
+       answer it properly, which is the honest home for it. */
+    floorArea: null,
+    ceilingHeight,
+    perimeter,
+    baseboard: perimeter === null ? null : Math.max(0, perimeter - doorWidths),
+    wallAreaGross,
+    wallAreaNet: wallAreaGross === null ? null : Math.max(0, wallAreaGross - cutouts),
+    windows: { count: windows.length, totalGlazing: area(windows), sizes: sizes(windows) },
+    doors: { count: doors.length, sizes: sizes(doors) },
+    openings: { count: openings.length },
+    flooringType: null,
+    registers: null,
+  };
+}

@@ -103,7 +103,7 @@ export type Screen =
   /** ⚑ `startAction` opens the viewfinder already doing something. The floorplan and the mesh are
    *  ACTIONS of the zone — they belong beside room shot and run trace on the zone screen — but the
    *  camera is in the viewfinder, so the door is on one screen and the act is on the other. */
-  | { name: "camera2"; zoneId?: string; startAction?: "floorplan" | "mesh" };
+  | { name: "camera2"; zoneId?: string; startAction?: "floorplan" | "mesh" | "room-shot" };
 
 interface AppStore {
   ready: boolean;

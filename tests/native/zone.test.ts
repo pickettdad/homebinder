@@ -11,6 +11,7 @@ import {
   anchorAvailability,
   containerAnchorState,
   meshRecommendation,
+  zoneMeasures,
   type ZonePosition,
 } from "../../src/native/zone";
 
@@ -112,5 +113,70 @@ describe("meshRecommendation", () => {
 describe("ZONE_MODES", () => {
   it("carries the three bounded jobs and nothing that runs across a visit", () => {
     expect([...ZONE_MODES].sort()).toEqual(["mesh", "positioning", "roomplan"]);
+  });
+});
+
+describe("zoneMeasures", () => {
+  const surface = (width: number, height: number) => ({
+    id: "s",
+    width,
+    height,
+    x: 0,
+    y: 0,
+    z: 0,
+    confidence: "high",
+    transform: Array.from({ length: 16 }, () => 0),
+  });
+
+  const plan = {
+    captured: true,
+    walls: [surface(4, 2.4), surface(3, 2.4), surface(4, 2.4), surface(3, 2.4)],
+    doors: [surface(0.8, 2.0)],
+    windows: [surface(1.2, 1.4), surface(1.2, 1.4)],
+    openings: [surface(1.0, 2.1)],
+  };
+
+  it("takes door openings out of the baseboard, because trim does not cross a doorway", () => {
+    const m = zoneMeasures(plan);
+    expect(m.perimeter).toBeCloseTo(14);
+    // ⚑ The invariant: baseboard is strictly less than perimeter whenever a door exists, and is
+    // exactly perimeter when none does. Quoting perimeter as baseboard over-counts by a door.
+    expect(m.baseboard).toBeCloseTo(13.2);
+    expect(zoneMeasures({ ...plan, doors: [] }).baseboard).toBeCloseTo(14);
+  });
+
+  it("nets the openings out of wall area, and never returns a negative", () => {
+    const m = zoneMeasures(plan);
+    expect(m.wallAreaGross).toBeCloseTo(33.6);
+    expect(m.wallAreaNet!).toBeLessThan(m.wallAreaGross!);
+    // A room whose openings exceed its walls is nonsense arithmetic, not a negative quantity.
+    const silly = zoneMeasures({ ...plan, walls: [surface(1, 1)] });
+    expect(silly.wallAreaNet).toBe(0);
+  });
+
+  it("counts and sizes the glazing, because a window count without sizes cannot be priced", () => {
+    const m = zoneMeasures(plan);
+    expect(m.windows.count).toBe(2);
+    expect(m.windows.totalGlazing).toBeCloseTo(3.36);
+    expect(m.windows.sizes).toHaveLength(2);
+  });
+
+  it("reports what the plan CANNOT give as null rather than omitting it", () => {
+    /* ⛑ The distinction the whole type exists for: an absent key reads as *nobody computed this*,
+       and null reads as *the plan does not carry it*. Flooring type and registers are not in
+       RoomPlan's output at all, and floor area is left null rather than approximated — a rectangle
+       assumption is wrong in every L-shaped room. */
+    const m = zoneMeasures(plan);
+    for (const key of ["flooringType", "registers", "floorArea"] as const) {
+      expect(key in m).toBe(true);
+      expect(m[key]).toBeNull();
+    }
+  });
+
+  it("returns nulls rather than zeroes for a plan that captured nothing", () => {
+    const m = zoneMeasures({ captured: false });
+    expect(m.perimeter).toBeNull();
+    expect(m.ceilingHeight).toBeNull();
+    expect(m.windows.count).toBe(0);
   });
 });

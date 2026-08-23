@@ -45,9 +45,15 @@ export function FloorPlanView({
   const width = Math.round((bounds.width / bounds.depth) * height) || height;
   const scale = Math.min((width - pad * 2) / bounds.width, (height - pad * 2) / bounds.depth);
   const px = (x: number) => pad + (x - bounds.minX) * scale;
-  // ⚑ Z grows away from where the scan began; screen y grows downward. Flipping here keeps the
-  // drawing the way up the concierge is standing, which is the whole point of showing it to them.
-  const py = (z: number) => height - pad - (z - bounds.minZ) * scale;
+  /* ⛑ **Not flipped, and flipping it was the mirror** (field 2026-08-23: "backwards from my
+     perspective").
+
+     ARKit is right-handed with +X right, +Y up and +Z toward the viewer. Looking down on that from
+     above — which is what a plan view is — +X runs right and **+Z runs down the page**. Flipping Z
+     to "correct" for screen coordinates growing downward double-corrects, and a mirrored floorplan
+     is the worst kind of wrong: every length is right, the shape is plausible, and it is the plan of
+     a room that does not exist. */
+  const py = (z: number) => pad + (z - bounds.minZ) * scale;
 
   return (
     <div className="space-y-1">

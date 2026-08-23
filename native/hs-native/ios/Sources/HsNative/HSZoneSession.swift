@@ -86,7 +86,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     var showArPreview: ((ARSession) -> Void)?
     /// ⚑ The preview is fed from here because this is where the frames already arrive — see
     /// `attachArPreview`. Throttled: a scan does not need sixty drawn frames a second.
-    var onPreviewFrame: ((CVPixelBuffer) -> Void)?
+    var onPreviewFrame: ((ARFrame) -> Void)?
     private var lastPreviewAt = Date.distantPast
     private var lastPlanAt = Date.distantPast
     var hideArPreview: (() -> Void)?
@@ -620,7 +620,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         // ~20 fps is a live picture to a walking person and a third of the drawing work.
         guard Date().timeIntervalSince(lastPreviewAt) > 0.05 else { return }
         lastPreviewAt = Date()
-        onPreviewFrame?(frame.capturedImage)
+        onPreviewFrame?(frame)
     }
 
     /**
@@ -694,6 +694,19 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
         ]
         HSZoneLog.record("roomProgress", roomProgress)
         onEvent?(["roomProgress": roomProgress])
+
+        /* ⚑ **The geometry, live, and not only the counts.**
+         *
+         * A count going 4 → 5 cannot show a missed wall; an outline with a gap in it can, and the
+         * concierge is still standing in the room where that is three steps to fix. The same
+         * description the finished plan uses is sent while the scan runs, so one drawing serves
+         * both — the live one being the only version that can still change anything.
+         *
+         * ⛑ Throttled to twice a second: `didUpdate` fires far faster than a person can look, and a
+         * full room description at that rate is work spent redrawing a picture nobody read. */
+        guard Date().timeIntervalSince(lastPlanAt) > 0.5 else { return }
+        lastPlanAt = Date()
+        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId)])
     }
 
     func captureSession(_ session: RoomCaptureSession,

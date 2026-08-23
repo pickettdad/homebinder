@@ -373,13 +373,108 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// One frame onto the preview layer. Throttled by the session, not here: the session knows how
-    /// often frames arrive and this only knows how to draw one.
-    private func drawArPreview(_ buffer: CVPixelBuffer) {
+    /**
+     One frame onto the preview layer, **with the meshed surfaces painted onto it**.
+
+     ⚑ **This is the coverage answer for the mesh, and it is a different question from the
+     floorplan's** (owner, 2026-08-23). A floorplan's gaps show in its outline; a mesh's gaps do not
+     show anywhere — the geometry is invisible, so a wall you never pointed at looks exactly like a
+     wall you did. **Painting what has been captured makes the hole the obvious thing on screen**,
+     while the concierge is still standing in front of it.
+
+     Every mesh vertex is projected through the same camera that took the frame, so a dot lands on
+     the surface it belongs to. ⛑ Subsampled hard and capped: this runs at twenty frames a second
+     over tens of thousands of vertices, and the picture needs to be readable rather than complete —
+     **a dense enough dusting shows a gap just as well as every point would, and leaves the room
+     visible underneath it, which matters because the concierge is also navigating by this.**
+     */
+    private func drawArPreview(_ frame: ARFrame) {
         guard arPreview != nil else { return }
-        let ci = CIImage(cvPixelBuffer: buffer).oriented(.right)
-        guard let cg = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
-        DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = cg }
+        let ci = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        guard let base = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
+
+        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+        guard !anchors.isEmpty else {
+            DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = base }
+            return
+        }
+
+        let size = CGSize(width: base.width, height: base.height)
+        guard let ctx = CGContext(data: nil, width: base.width, height: base.height,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        ctx.draw(base, in: CGRect(origin: .zero, size: size))
+
+        /* ⛑ **Contiguous and filled, after two goes at this** (field 2026-08-23, with pictures).
+         *
+         * Dots shimmered and had no structure. Edges were worse in a way the screenshots made
+         * obvious: **I was subsampling by skipping every Nth triangle**, and adjacent triangles are
+         * what make a wireframe a surface — take every fortieth and you get isolated slivers
+         * scattered over a room, which is exactly what came back. ⚑ **No density would have fixed
+         * that; the sampling was destroying the only property that mattered.**
+         *
+         * So: nearest anchors first, every triangle in them, filled, until the budget runs out.
+         * ARKit's mesh anchors are roughly metre-sized blocks, so the nearest few are the surfaces
+         * the concierge is actually pointing at — **the thing they are deciding about is covered
+         * completely, and the far side of the room is left alone rather than sprinkled.**
+         *
+         * Filled rather than stroked because the question is *is this surface captured*, and a
+         * translucent film answers it at a glance where an outline asks to be interpreted.
+         */
+        let cam = frame.camera.transform.columns.3
+        let camPos = SIMD3<Float>(cam.x, cam.y, cam.z)
+        let near = anchors.sorted {
+            let a = $0.transform.columns.3, b = $1.transform.columns.3
+            return simd_distance(camPos, SIMD3<Float>(a.x, a.y, a.z))
+                 < simd_distance(camPos, SIMD3<Float>(b.x, b.y, b.z))
+        }
+        ctx.setFillColor(red: 0.94, green: 0.71, blue: 0.16, alpha: 0.22)
+        var drawn = 0
+        outer: for anchor in near {
+            let geo = anchor.geometry
+            let verts = geo.vertices
+            let faces = geo.faces
+            guard faces.indexCountPerPrimitive == 3 else { continue }
+            func vertex(_ index: Int) -> SIMD3<Float> {
+                verts.buffer.contents()
+                    .advanced(by: verts.offset + verts.stride * index)
+                    .assumingMemoryBound(to: SIMD3<Float>.self).pointee
+            }
+            func indexAt(_ i: Int) -> Int {
+                let p = faces.buffer.contents().advanced(by: i * faces.bytesPerIndex)
+                return faces.bytesPerIndex == 2
+                    ? Int(p.assumingMemoryBound(to: UInt16.self).pointee)
+                    : Int(p.assumingMemoryBound(to: UInt32.self).pointee)
+            }
+            for f in 0..<faces.count {
+                if drawn > 5500 { break outer }
+                var pts: [CGPoint] = []
+                var ok = true
+                for corner in 0..<3 {
+                    let v = vertex(indexAt(f * 3 + corner))
+                    let world = anchor.transform * SIMD4<Float>(v.x, v.y, v.z, 1)
+                    let screen = frame.camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
+                                                           orientation: .portrait,
+                                                           viewportSize: size)
+                    guard screen.x.isFinite, screen.y.isFinite,
+                          screen.x > -size.width, screen.y > -size.height,
+                          screen.x < size.width * 2, screen.y < size.height * 2 else { ok = false; break }
+                    pts.append(screen)
+                }
+                if ok, pts.count == 3 {
+                    ctx.beginPath()
+                    ctx.move(to: pts[0])
+                    ctx.addLine(to: pts[1])
+                    ctx.addLine(to: pts[2])
+                    ctx.closePath()
+                    ctx.fillPath()
+                    drawn += 1
+                }
+            }
+        }
+        guard let painted = ctx.makeImage() else { return }
+        DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = painted }
     }
 
     private let arPreviewContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -502,7 +597,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             made.releaseCamera = { [weak self] in self?.controller?.reclaimCamera() }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
-            made.onPreviewFrame = { [weak self] buffer in self?.drawArPreview(buffer) }
+            made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
             made.hideArPreview = { [weak self] in self?.detachArPreview() }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())

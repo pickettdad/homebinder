@@ -1,0 +1,156 @@
+{
+  "_note": "A hand-written EXAMPLE of the fields Field 6 adds to the manifest. Not an export — a shape to build against, so the binder side does not wait on a walk. See docs/MANIFEST-FIELD6-ADDITIONS.md.",
+  "manifestSchemaVersion": 3,
+  "session": {
+    "sessionId": "01a02616-843f-79df-8ecc-95f3c23a3e5f",
+    "visitKind": "discovery",
+    "exportedAt": "2026-08-23T18:00:00Z",
+    "appVersion": "field-6a"
+  },
+  "files": [
+    {
+      "mediaId": "media-anchor-1",
+      "kind": "photo",
+      "owner": { "kind": "pin", "id": "pin-water-heater" },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/pins/media-anchor-1.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2481920,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+      "capturedAt": "2026-08-23T17:41:02Z",
+      "intent": null,
+      "frame": { "captureId": "2026-08-23T17:41:02Z", "role": "primary", "lens": "normal" },
+      "position": {
+        "positioned": true,
+        "zoneId": "zone-mechanical",
+        "tracking": "normal",
+        "at": "2026-08-23T17:41:02Z",
+        "x": 1.243,
+        "y": -0.518,
+        "z": 3.407,
+        "transform": [
+          0.998, 0.0, -0.062, 0.0,
+          0.004, 0.998, 0.062, 0.0,
+          0.062, -0.062, 0.996, 0.0,
+          1.243, -0.518, 3.407, 1.0
+        ],
+        "surface": { "x": 1.61, "y": -0.44, "z": 3.92, "distance": 0.72 }
+      }
+    },
+    {
+      "mediaId": "media-detail-2",
+      "kind": "photo",
+      "owner": { "kind": "pin", "id": "pin-water-heater" },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/pins/media-detail-2.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2310144,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000002",
+      "capturedAt": "2026-08-23T17:41:19Z",
+      "_note": "No `position`. This is the NORMAL case: one frame per container carries a measured position and the rest inherit it from the container. Absent here is completeness, not a gap."
+    },
+    {
+      "mediaId": "media-refused-3",
+      "kind": "photo",
+      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-refused-3.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2205431,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000003",
+      "capturedAt": "2026-08-23T17:44:55Z",
+      "position": {
+        "positioned": false,
+        "why": "paused",
+        "_note": "A REFUSAL, recorded as one. `the app could take a position here and did not, because the session was paused` is a different fact from `this build had no positions`, and only one of them is worth investigating."
+      }
+    },
+    {
+      "mediaId": "media-plan-4",
+      "kind": "photo",
+      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-plan-4.json",
+      "mime": "application/json",
+      "bytes": 8412,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000004",
+      "capturedAt": "2026-08-23T17:39:40Z",
+      "intent": "floorplan",
+      "_note": "The RoomPlan output, filed verbatim. Content shape below under _payloads.floorplan."
+    },
+    {
+      "mediaId": "media-mesh-5",
+      "kind": "photo",
+      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-mesh-5.json",
+      "mime": "application/json",
+      "bytes": 41233,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000005",
+      "capturedAt": "2026-08-23T17:47:12Z",
+      "intent": "mesh",
+      "_note": "Scene reconstruction output. Content shape below under _payloads.mesh."
+    }
+  ],
+  "_payloads": {
+    "_note": "NOT part of the manifest. The contents of the two JSON media files above, shown here so the shape is visible in one place.",
+    "floorplan": {
+      "captured": true,
+      "zoneId": "zone-mechanical",
+      "walls": [
+        {
+          "id": "5B1F2C90-0000-4000-8000-000000000001",
+          "width": 4.02,
+          "height": 2.44,
+          "x": 0.0, "y": 1.22, "z": -2.1,
+          "confidence": "high",
+          "transform": [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 1.22, -2.1, 1.0
+          ]
+        }
+      ],
+      "doors": [
+        {
+          "id": "5B1F2C90-0000-4000-8000-000000000002",
+          "width": 0.81, "height": 2.03,
+          "x": 1.1, "y": 1.01, "z": -2.1,
+          "confidence": "medium",
+          "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 1.1,1.01,-2.1,1]
+        }
+      ],
+      "windows": [],
+      "openings": [],
+      "roomPlanObjects": [
+        {
+          "id": "5B1F2C90-0000-4000-8000-000000000003",
+          "category": "storage",
+          "width": 0.6, "height": 1.8, "depth": 0.6,
+          "x": -1.4, "y": 0.9, "z": -1.6,
+          "confidence": "low",
+          "_note": "RoomPlan's OWN taxonomy — sofas, refrigerators, storage. It has no water heater, no softener, no pressure tank. Context for the desk, NOT an inventory: reading it as one under-counts exactly the rooms this service exists for."
+        }
+      ]
+    },
+    "mesh": {
+      "anchors": 30,
+      "faces": 178595,
+      "pieces": [
+        {
+          "id": "5B1F2C90-0000-4000-8000-000000000010",
+          "vertices": 574,
+          "faces": 1042,
+          "x": 0.82, "y": 0.4, "z": -1.35,
+          "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0.82,0.4,-1.35,1]
+        }
+      ],
+      "walkedExtent": {
+        "minX": -2.2, "minY": -0.9, "minZ": -3.1,
+        "maxX": 2.4, "maxY": 1.6, "maxZ": 1.2,
+        "_note": "The extent of what was WALKED, never the extent of the room. A mesh hole reads UNKNOWN, never `nothing there`."
+      }
+    }
+  }
+}

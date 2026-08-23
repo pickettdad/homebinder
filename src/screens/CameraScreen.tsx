@@ -540,7 +540,10 @@ export function CameraScreen({
     */
     if (plan.captured && zoneId) {
       const blob = new Blob([JSON.stringify(plan)], { type: "application/json" });
-      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+      /* ⚑ Declared, not left to be guessed from a mime type. Without an intent a room's geometry
+         arrives at the desk as an unlabelled JSON blob among the photographs. */
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json", undefined, "floorplan")
+        .catch(() => {});
     }
     if (plan.captured) {
       const m = zoneMeasures(plan);
@@ -565,7 +568,8 @@ export function CameraScreen({
     if (!mesh) return;
     if (zoneId && mesh.faces > 0) {
       const blob = new Blob([JSON.stringify(mesh)], { type: "application/json" });
-      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json", undefined, "mesh")
+        .catch(() => {});
     }
     setZoneNote(
       mesh.faces > 0

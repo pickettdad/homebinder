@@ -108,7 +108,24 @@ export type VisitKind = "discovery" | "inspection" | "monthly";
  * So `zones[].canvases[]` is empty on a Discovery export by design, and a reader must not
  * take that emptiness as "no orienting frame" — this field is where the frame is named.
  */
-export type CaptureIntent = "room-shot" | "pan" | "run-trace" | "document";
+/**
+ * Which declared capture kind an act was.
+ *
+ * ⚑ **`floorplan` and `mesh` are captures, and calling them anything else loses them.** They are
+ * files with hashes that land in the manifest like any other, and without an intent the desk can
+ * only find them by guessing at a mime type — which is how a room's geometry becomes an unlabelled
+ * JSON blob nobody opens. ⛑ Additive, which the version policy makes the field side's call alone;
+ * a receiver that does not know these words ignores them exactly as it ignores an absent one.
+ *
+ * `pan` is kept because ids are never renamed — the word retired, the id did not.
+ */
+export type CaptureIntent =
+  | "room-shot"
+  | "pan"
+  | "run-trace"
+  | "document"
+  | "floorplan"
+  | "mesh";
 
 /** Where a pin's type comes from: the component library, or freeform (REDESIGN §3). */
 export type PinTypeRef =

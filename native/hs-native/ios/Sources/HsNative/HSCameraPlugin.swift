@@ -424,6 +424,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
          */
         let cam = frame.camera.transform.columns.3
         let camPos = SIMD3<Float>(cam.x, cam.y, cam.z)
+        // World → camera space, so "is this behind me" is one multiply and a sign test.
+        let viewMatrix = simd_inverse(frame.camera.transform)
         let near = anchors.sorted {
             let a = $0.transform.columns.3, b = $1.transform.columns.3
             return simd_distance(camPos, SIMD3<Float>(a.x, a.y, a.z))
@@ -454,6 +456,20 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 for corner in 0..<3 {
                     let v = vertex(indexAt(f * 3 + corner))
                     let world = anchor.transform * SIMD4<Float>(v.x, v.y, v.z, 1)
+                    /* ⛑ **Reject anything BEHIND the lens before projecting it** (field 2026-08-23,
+                       second screenshot: a huge yellow wedge sweeping across the room as the camera
+                       panned).
+
+                       `projectPoint` has no answer for a point behind the camera and returns a
+                       mirrored one anyway. A triangle with one corner behind and two in front then
+                       projects to an enormous screen-space polygon that sweeps as you turn — which
+                       reads exactly as *the texture moves with me instead of staying on the wall*.
+
+                       ⚑ The camera looks down its own −Z, so anything with camera-space z ≥ 0 is
+                       behind it. Rejecting the whole triangle rather than clipping it loses a sliver
+                       at the frame edge and keeps every remaining shape honest. */
+                    let camSpace = viewMatrix * world
+                    guard camSpace.z < -0.05 else { ok = false; break }
                     let screen = frame.camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
                                                            orientation: .portrait,
                                                            viewportSize: size)

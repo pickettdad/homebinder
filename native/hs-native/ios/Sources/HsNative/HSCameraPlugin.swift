@@ -1264,13 +1264,25 @@ final class CameraController: NSObject {
         sessionQueue.sync {
             if session.isRunning { session.stopRunning() }
         }
+        HSZoneLog.record("cameraYielded", ["running": session.isRunning])
     }
 
     func reclaimCamera() {
-        sessionQueue.async { [weak self] in
-            guard let self, !self.session.isRunning else { return }
-            self.session.startRunning()
+        /* ⛑ **Synchronous, for the same reason `yieldCamera` is — and leaving this one async is why
+           switching to Text froze the viewfinder** (field 2026-08-23).
+
+           A capture runs `takePosition`, which wakes ARKit, reads a pose and hands the lens back.
+           The hand-back was `async`, so the next call — `setMode`, arriving milliseconds later —
+           configured a device whose capture session had not finished restarting, and the preview
+           never came up. Backing out to the zone and in again rebuilt everything, which is exactly
+           the shape of a fix that hides a race.
+
+           ⚑ **I made the outbound handover synchronous a day ago and left its twin behind.** A
+           handover has two ends and only one of them was waiting. */
+        sessionQueue.sync {
+            if !session.isRunning { session.startRunning() }
         }
+        HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
     }
 
     func stop() {

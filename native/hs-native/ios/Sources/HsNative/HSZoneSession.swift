@@ -380,8 +380,25 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            after it resumes into the same world, measured at 0 ms with the mesh byte-identical. That
            asymmetry is why the wait is bounded and reported rather than hidden: a caller that gets
            `settling` back knows to hold still, and one that gets a pose knows it is real. */
+        /* ⛑ **The lens goes back on EVERY path out of here, and it did not** (field 2026-08-23:
+           the viewfinder freezing after a second shot, with the strip saying *hold still*).
+
+           The success path ended with `sleepSession()`. The failure path — tracking not settled in
+           time — returned early and skipped it, so ARKit kept the camera and the capture session
+           never restarted. ⚑ **A frozen viewfinder was the app telling the truth about a lens
+           nobody had given back.** The log said it in two lines: `cameraYielded` with no
+           `cameraReclaimed` after it.
+
+           `defer` rather than a call before each `return`, because the reason this happened is that
+           one of four exits was easy to miss, and a fifth exit added later would miss it too. */
+        let wasAsleep = paused
         if paused { wake() }
-        guard let frame = waitForTrackedFrame(timeout: paused ? 0 : 3.0) else {
+        defer { if mode == .positioning { sleepSession() } }
+        /* A cold wake has to establish tracking from nothing, which the log shows going
+           initializing → normal → insufficientFeatures → normal before it settles. Three seconds was
+           inside that, so a perfectly healthy wake reported `settling`. A warm one resumes into the
+           same world and answers almost at once, so the two waits are not the same wait. */
+        guard let frame = waitForTrackedFrame(timeout: wasAsleep ? 8.0 : 3.0) else {
             return ["positioned": false, "why": failure ?? "settling", "recoverable": true]
         }
         let state = HSArProbe.describe(frame.camera.trackingState)
@@ -416,9 +433,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "distance": Double(simd_distance(origin, SIMD3<Float>(h.x, h.y, h.z)))
             ]
         }
-        // Straight back to sleep, lens returned. The zone keeps its origin; the camera does not
-        // keep ARKit.
-        if mode == .positioning { sleepSession() }
+        // The lens goes back in the `defer` above — on this path and on every other.
         HSZoneLog.record("position", ["ok": true, "tracking": state,
                                       "surface": out["surface"] != nil])
         return out
@@ -445,6 +460,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      is worth more than a silent fallback to no position.
      */
     private func waitForTrackedFrame(timeout: TimeInterval) -> ARFrame? {
+        // Honour what the caller asked for; a cold wake and a warm one are not the same wait.
         /* ⛑ **A frame NEWER than the one we went to sleep holding** (field 2026-08-23: four
            consecutive captures across two different containers came back with a byte-identical
            transform).
@@ -459,7 +475,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            the right one. `ARFrame.timestamp` is monotonic, so requiring a newer one is the whole
            fix, and it is the difference between placing six objects and placing one six times. */
         let stale = session.currentFrame?.timestamp ?? 0
-        let deadline = Date().addingTimeInterval(max(timeout, 3.0))
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if failure != nil { return nil }
             if let f = session.currentFrame, f.timestamp > stale,

@@ -616,6 +616,11 @@ export function CameraScreen({
   /** ⚑ Read inside the frame callback, which closes over its first render — a state value would be
    *  stale there and auto-capture would keep firing exactly as it did before the fix. */
   const reviewingRef = useRef(false);
+  /** ⚑ Containers that already carry a measured position. Only the FIRST capture in a container
+   *  pays for one — the rest inherit, which is what the architecture asked for and what stops the
+   *  wake cost being paid per photograph. Reset with the session, never persisted: a container
+   *  anchored on a previous visit is a different visit's fact. */
+  const anchoredContainers = useRef<Set<string>>(new Set());
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
@@ -685,9 +690,31 @@ export function CameraScreen({
         `{positioned:false, why:"paused"}` says *this one could and did not, here is why* — and a
         container the desk cannot place is otherwise indistinguishable from one nobody meant to.
       */
-      const position = await takePosition().catch(
-        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-      );
+      /* ⛑ **Once per container, not once per photograph** (field 2026-08-23: a 2–3 second pause
+         after every shot).
+
+         The cost is structural and the log shows it plainly: every `takePosition` reads
+         `cameraYielded → initializing → normal → position → cameraReclaimed`. ARKit re-establishes
+         tracking on each wake because the capture session takes the lens back in between, and that
+         cycle is the pause. **It is the price of keeping a live AVFoundation viewfinder**, and it is
+         paid on every crossing.
+
+         ⚑ **But the architecture only ever asked for one.** *At least one frame per container
+         carries a position; everything else inherits it.* Anchoring every frame was me doing four
+         times the work the design calls for, and paying the lag four times to store four poses of
+         one object that the desk reads as one. So: anchor a container the first time it is
+         photographed, and leave the rest to inherit.
+
+         Captures outside a container still take one each — a zone concern is its own thing with
+         nothing to inherit from, and they are rare enough that the cost lands where it is earned. */
+      const containerId = open?.pinId ?? null;
+      const needsAnchor = containerId === null || !anchoredContainers.current.has(containerId);
+      const position = needsAnchor
+        ? await takePosition().catch(
+            () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+          )
+        : undefined;
+      if (containerId && position?.positioned) anchoredContainers.current.add(containerId);
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);

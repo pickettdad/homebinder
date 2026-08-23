@@ -84,6 +84,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     var releaseCamera: (() -> Void)?
     /// Where to put ARKit's own preview while a scan runs, and how to take it away again.
     var showArPreview: ((ARSession) -> Void)?
+    /// ⚑ The preview is fed from here because this is where the frames already arrive — see
+    /// `attachArPreview`. Throttled: a scan does not need sixty drawn frames a second.
+    var onPreviewFrame: ((CVPixelBuffer) -> Void)?
+    private var lastPreviewAt = Date.distantPast
+    private var lastPlanAt = Date.distantPast
     var hideArPreview: (() -> Void)?
 
     /// ⚑ A session can DIE. `sensorFailed` is transient often enough that a retry is a real answer,
@@ -611,6 +616,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
+        guard onPreviewFrame != nil, mode == .mesh || mode == .roomplan else { return }
+        // ~20 fps is a live picture to a walking person and a third of the drawing work.
+        guard Date().timeIntervalSince(lastPreviewAt) > 0.05 else { return }
+        lastPreviewAt = Date()
+        onPreviewFrame?(frame.capturedImage)
     }
 
     /**

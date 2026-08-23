@@ -34,7 +34,9 @@ import {
   type OpenContainer,
 } from "../capture/objectContainer";
 import { ZoneStrip } from "./ZoneStrip";
+import { FloorPlanView } from "./FloorPlanView";
 import { zoneMeasures } from "../native/zone";
+import { bothUnits } from "../native/planGeometry";
 import type { ZoneMode, ZonePlan, ZonePosition } from "../native/zone";
 import {
   adjustCamera,
@@ -372,7 +374,7 @@ export function CameraScreen({
   const [traverseResult, setTraverseResult] = useState<TraverseResult | null>(null);
   /* ⚑ Held so the plan is visibly a deliverable rather than a side effect. A floorplan that
      produced nothing and a floorplan nobody ran look identical without this. */
-  const [, setPlan] = useState<ZonePlan | null>(null);
+  const [plan, setPlan] = useState<ZonePlan | null>(null);
   /* ⚑ The positioning session opens with the viewfinder and closes with it. There is no entry
      gesture: the zone was entered on the zone screen, and asking again put a second meaning on a
      word this product had already spent. */
@@ -417,6 +419,9 @@ export function CameraScreen({
         });
         setZoneNote(`${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`);
       }
+      /* ⚑ The plan as it is being drawn. A gap in an outline is a missed wall; a count cannot show
+         one, and this is the only moment it can still be walked. */
+      if (e.roomShape && typeof e.roomShape === "object") setPlan(e.roomShape as ZonePlan);
       // ⚑ Held, not toasted. A message that disappears is a message that cannot be acted on later,
       // and the whole failure of 2026-08-21 was a state nobody could see they were in.
       if (typeof e.zoneFailed === "string") {
@@ -539,9 +544,13 @@ export function CameraScreen({
     }
     if (plan.captured) {
       const m = zoneMeasures(plan);
+      /* ⚑ Feet first, because that is what a quote is written in here, with metres alongside
+         because that is what the sensor measured. */
       setZoneNote(
-        `${m.perimeter?.toFixed(1) ?? "—"} m round · ${m.baseboard?.toFixed(1) ?? "—"} m baseboard · ` +
-          `${m.ceilingHeight?.toFixed(2) ?? "—"} m high · ${m.windows.count} windows · ${m.doors.count} doors`,
+        `${m.perimeter ? bothUnits(m.perimeter) : "—"} round · ` +
+          `${m.baseboard ? bothUnits(m.baseboard) : "—"} baseboard · ` +
+          `${m.ceilingHeight ? bothUnits(m.ceilingHeight) : "—"} high · ` +
+          `${m.windows.count} windows · ${m.doors.count} doors`,
       );
     } else setZoneNote(plan.why ?? "no plan");
   }, []);
@@ -1217,6 +1226,19 @@ export function CameraScreen({
         tapped.** It belongs at the top with the zone name, because it is about *where you are* —
         which is what the header already says — and the bottom of a viewfinder is the shutter's.
       */}
+      {/*
+        ⛑ **The deliverable, on screen, where it can be disagreed with.** A scan that reports *five
+        walls* is unfalsifiable — nobody in the room can tell a correct five from a wrong five. Drawn
+        to scale with the lengths on it, the concierge checks it against the room they are standing
+        in, which is the only moment a wrong answer is cheap to fix.
+      */}
+      {zoneId && plan && (scanning || !traversing) && (
+        <div className="pointer-events-none absolute right-3 top-14 w-40">
+          <div className="pointer-events-auto rounded-lg bg-slate-950/85 p-1 ring-1 ring-slate-700">
+            <FloorPlanView plan={plan} height={140} labels={!scanning} />
+          </div>
+        </div>
+      )}
       {zoneId && (
         <ZoneStrip
           open={zoneOpen}

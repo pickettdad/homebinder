@@ -4,6 +4,7 @@ import Capacitor
 import CoreImage
 import CoreMotion
 import Foundation
+import SceneKit
 import UIKit
 import Vision
 
@@ -327,12 +328,23 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             guard self.arPreview == nil else {
                 HSZoneLog.record("arPreviewSkipped", ["why": "one is already attached"]); return
             }
-            let view = ARSCNView(frame: superview.bounds)
+            /* ⛑ **Drawn from the frames rather than handed to `ARSCNView`, after two rounds of
+               black screens** (field 2026-08-22 and 08-23).
+
+               An `ARSCNView` given somebody else's already-running session renders nothing here —
+               attaching a scene did not change it, and every fact the log could check said the
+               preview was fine: attached, host transparent, correct place in the stack. ⚑ **I was
+               debugging a component's internal contract with no way to see inside it.**
+
+               But the frames are not in doubt: this session's delegate receives every one, which is
+               how tracking states and scan progress reach the log at all. **So the thing that
+               already has the pixels draws them**, and the black screen stops being a question
+               about a view's private expectations and becomes one image assigned to one layer. */
+            let view = UIView(frame: superview.bounds)
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            view.session = arSession
-            // Nothing is being rendered into the scene; this is a camera feed the concierge walks
-            // behind, and statistics or debug overlays would be clutter over a room.
-            view.rendersContinuously = true
+            view.backgroundColor = .black
+            view.layer.contentsGravity = .resizeAspectFill
+            view.layer.masksToBounds = true
             /* ⛑ **Make the host transparent HERE rather than assuming somebody else did** (zone
                log, 2026-08-21: `arPreviewAttached webOpaque: true` — a preview correctly attached
                and completely invisible, which is the black screen).
@@ -361,6 +373,17 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// One frame onto the preview layer. Throttled by the session, not here: the session knows how
+    /// often frames arrive and this only knows how to draw one.
+    private func drawArPreview(_ buffer: CVPixelBuffer) {
+        guard arPreview != nil else { return }
+        let ci = CIImage(cvPixelBuffer: buffer).oriented(.right)
+        guard let cg = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
+        DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = cg }
+    }
+
+    private let arPreviewContext = CIContext(options: [.useSoftwareRenderer: false])
+
     private func detachArPreview() {
         DispatchQueue.main.async { [weak self] in
             HSZoneLog.record("arPreviewDetached", ["had": self?.arPreview != nil])
@@ -373,8 +396,44 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /**
+     ⛑ **This flattened every structured value to a string, and it is the whole of 2026-08-23.**
+
+     The old body was `$0.value as? JSValue ?? String(describing: $0.value)`. A nested `[String: Any]`
+     is not a `JSValue`, so it fell to the `String(describing:)` arm — and the far side received
+     `"[\"walls\": 4, \"doors\": 1]"` where it expected an object. ⚑ **Nothing failed. Every check
+     of the form `typeof x === "object"` simply went false**, so the floorplan reported 0 walls
+     forever, the mesh reported *nothing was meshed* while holding 32 pieces, and the plan's `walls`
+     array — the whole deliverable — crossed as text.
+
+     **The tell was the stringification being a legal answer.** A converter that cannot represent a
+     value should refuse it, not describe it: `String(describing:)` turns a type error into a
+     plausible-looking payload, which is the same shape as every measure in this project that
+     returned a confident number instead of admitting it had nothing.
+
+     So: recursive, and values it genuinely cannot carry are dropped rather than described.
+     */
+    private func jsValue(_ any: Any) -> JSValue? {
+        switch any {
+        case let v as JSObject: return v
+        case let v as String: return v
+        case let v as Bool: return v
+        case let v as Int: return v
+        case let v as Double: return v
+        case let v as Float: return Double(v)
+        case let v as NSNumber: return v.doubleValue
+        case let v as [String: Any]: return js(v)
+        case let v as [Any]: return v.compactMap { jsValue($0) }
+        default: return nil
+        }
+    }
+
     private func js(_ d: [String: Any]) -> JSObject {
-        JSObject(uniqueKeysWithValues: d.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) })
+        var out = JSObject()
+        for (k, v) in d {
+            if let converted = jsValue(v) { out[k] = converted }
+        }
+        return out
     }
 
     /* ⚑ One guard, written once. iOS 17 is the floor because `RoomCaptureSession(arSession:)` and
@@ -442,6 +501,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             made.needCamera = { [weak self] in self?.controller?.yieldCamera() }
             made.releaseCamera = { [weak self] in self?.controller?.reclaimCamera() }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
+            /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
+            made.onPreviewFrame = { [weak self] buffer in self?.drawArPreview(buffer) }
             made.hideArPreview = { [weak self] in self?.detachArPreview() }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())
@@ -1081,9 +1142,16 @@ final class CameraController: NSObject {
      milliseconds and not the nine seconds that would come from tearing the input down.
      */
     func yieldCamera() {
-        sessionQueue.async { [weak self] in
-            guard let self, self.session.isRunning else { return }
-            self.session.stopRunning()
+        /* ⛑ **Synchronous, and asynchronous was the intermittent "Required sensor failed"**
+           (field 2026-08-23).
+
+           This was `sessionQueue.async`, so `enter()` called it and then ran ARKit **immediately**,
+           while the capture session was still stopping on another queue. ARKit asked for a camera
+           that was still held and was refused. ⚑ **A handover that does not wait is not a handover**
+           — and it failed intermittently, which is the worst kind, because whether it worked
+           depended on how busy the session queue happened to be. */
+        sessionQueue.sync {
+            if session.isRunning { session.stopRunning() }
         }
     }
 

@@ -445,10 +445,25 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      is worth more than a silent fallback to no position.
      */
     private func waitForTrackedFrame(timeout: TimeInterval) -> ARFrame? {
+        /* ⛑ **A frame NEWER than the one we went to sleep holding** (field 2026-08-23: four
+           consecutive captures across two different containers came back with a byte-identical
+           transform).
+
+           Positioning sleeps between containers, and `currentFrame` keeps returning the last frame
+           from before the pause — which still reports `.normal`, because it did track, a minute ago.
+           So the wait returned instantly with a **stale pose**, and every object in the zone was
+           filed at the spot where the first one was photographed.
+
+           ⚑ **Nothing about that reads as broken.** `positioned: true`, tracking `normal`, a real
+           transform — the failure is that it is the *wrong room position*, stated as confidently as
+           the right one. `ARFrame.timestamp` is monotonic, so requiring a newer one is the whole
+           fix, and it is the difference between placing six objects and placing one six times. */
+        let stale = session.currentFrame?.timestamp ?? 0
         let deadline = Date().addingTimeInterval(max(timeout, 3.0))
         while Date() < deadline {
             if failure != nil { return nil }
-            if let f = session.currentFrame, case .normal = f.camera.trackingState { return f }
+            if let f = session.currentFrame, f.timestamp > stale,
+               case .normal = f.camera.trackingState { return f }
             Thread.sleep(forTimeInterval: 0.05)
         }
         return nil

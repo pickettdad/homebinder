@@ -72,6 +72,13 @@ destroying the one signal that says how much to trust it.
 
 ⛑ Said here rather than discovered when somebody asks for a number nobody collected.
 
+- ⚑ **Half walls, islands, peninsulas and counter runs.** Observed in the field 2026-08-23: a
+  kitchen's half-wall peninsula — the one the sink is set into, and the thing that closes the room —
+  is **absent from the plan entirely**. RoomPlan models full-height walls; a partition that stops at
+  counter height is not a wall to it and frequently not anything to it. ⛑ **So `walls` is not "every
+  vertical surface", and a plan that looks complete can be missing the feature a kitchen is defined
+  by.** The mesh sees it, because geometry needs no category — which is why fitted rooms now get a
+  mesh recommendation alongside the equipment rooms.
 - **Flooring type** — not in RoomPlan's output at all.
 - **Registers and vents** — likewise.
 - **Floor area** — deliberately **not** derived from the perimeter. A rectangle assumption is wrong in

@@ -95,6 +95,14 @@ describe("meshRecommendation", () => {
     expect(meshRecommendation({ kind: "Laundry", containers: 0 }).recommend).toBe(true);
   });
 
+  it("recommends where the floorplan structurally cannot see the room's own surfaces", () => {
+    /* ⛑ A kitchen's half-wall peninsula is absent from RoomPlan's output entirely — it models
+       full-height walls, and the thing that closes the room stops at counter height. The mesh sees
+       it because geometry needs no category. */
+    expect(meshRecommendation({ kind: "kitchen", containers: 0 }).recommend).toBe(true);
+    expect(meshRecommendation({ kind: "Main Bath", containers: 1 }).recommend).toBe(true);
+  });
+
   it("does not recommend where nothing will be asked of the geometry", () => {
     expect(meshRecommendation({ kind: "Bedroom 2", containers: 1 }).recommend).toBe(false);
   });

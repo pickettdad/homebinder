@@ -141,6 +141,17 @@ export function meshRecommendation(zone: { kind?: string; containers: number }):
     kind.includes(k),
   );
   if (equipmentRoom) return { recommend: true, because: "equipment room — distances get asked about these" };
+  /* ⚑ **Rooms whose fitted surfaces the floorplan cannot see** (field 2026-08-23: a kitchen's
+     half-wall peninsula, the one the sink sits in, absent from the plan entirely).
+
+     RoomPlan models full-height walls. A half wall, an island, a peninsula, a run of counter — the
+     things a kitchen or bathroom is actually made of — are not walls to it and frequently not
+     anything to it. ⛑ **The mesh sees them, because geometry does not need a category**, so these
+     are exactly the rooms where it earns its cost. */
+  const fittedRoom = ["kitchen", "bath", "ensuite", "powder", "pantry"].some((k) => kind.includes(k));
+  if (fittedRoom) {
+    return { recommend: true, because: "fitted surfaces the floorplan cannot see — islands, counters, half walls" };
+  }
   // Density, not identity: a garage with eight containers earns it and a bedroom with one does not,
   // whatever either is called.
   if (zone.containers >= 4) return { recommend: true, because: `${zone.containers} objects in one zone` };

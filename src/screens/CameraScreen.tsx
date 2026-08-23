@@ -960,7 +960,21 @@ export function CameraScreen({
          of their hand. ⚑ The frames all look fine, which is the tell: this is the silent-failure
          shape again, and the fix is that inspecting is not a capture posture. */
       if (reviewingRef.current) return;
-      if (autoRef.current && event.stable && worthShooting && Date.now() - lastAuto.current > 4000) {
+      /* ⛑ **A dwell before it fires** (field 2026-08-23: "fired pretty quick, before I even got into
+         position, and the second one was the better one" — both times).
+
+         `stable` means the camera stopped moving, which is true the instant a hand pauses on the way
+         somewhere. ⚑ **The concierge settling on a plate and the concierge passing one look identical
+         for the first fraction of a second**, and the difference is only that one of them stays. So
+         the trigger waits for the read to have been worth shooting continuously — `readableSince` was
+         already being measured and only reported, never used to decide.
+
+         Two-thirds of a second: short enough that a deliberate hold still feels immediate, long
+         enough that a hand travelling past a label does not trip it. The owner's own observation is
+         the calibration — the *second* shot was the good one, which is the first one firing early. */
+      const dwell = readableSince.current === null ? 0 : Date.now() - readableSince.current;
+      if (autoRef.current && event.stable && worthShooting && dwell >= 700
+          && Date.now() - lastAuto.current > 4000) {
         const waited = readableSince.current === null ? 0 : Date.now() - readableSince.current;
         lastAuto.current = Date.now();
         readableSince.current = null;

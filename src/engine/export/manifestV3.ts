@@ -12,7 +12,12 @@
  * `media/<zone>/_canvas/…`, zone-targeted media with no pin under `media/<zone>/_zone/…`,
  * inbox/unassigned under `media/_misc/_inbox/…`.
  */
-import type { FrameReadMeta, FrameRoleMeta, Source } from "../schema/events";
+import type {
+  CapturePositionMeta,
+  FrameReadMeta,
+  FrameRoleMeta,
+  Source,
+} from "../schema/events";
 import type { CaptureIntent, PinFlag, PinTypeRef, V2SessionEvent, VisitKind } from "../v2/events";
 import type {
   AnchorState,
@@ -82,6 +87,9 @@ export interface MediaFileEntryV3 {
   mime: string;
   bytes: number;
   sha256: string;
+  /** ⚑ Where this frame was taken, or the recorded reason there is none — see `CapturePositionMeta`.
+   *  Expected on ONE frame of a container; the rest inherit it and correctly have none. */
+  position?: CapturePositionMeta;
   /**
    * When this capture was COMMITTED, not when it began — `at` is stamped inside the storage
    * transaction. For a still the difference is negligible. For a video it is the end of
@@ -211,6 +219,12 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
       source: m.source,
       read: m.read,
       frame: m.frame,
+      /* ⚑ **On the frame that carries it, and absent on the frames that inherit it.** One frame per
+         container is positioned and the rest are not, so an absent `position` here is the normal
+         case rather than a gap — the desk reads the container, never the frame. A refusal travels
+         as a refusal, because *the app could take a position here and did not* is a different fact
+         from *this build had no positions*, and only one of them is worth investigating. */
+      position: m.position,
     });
     /*
      ⚑ **Siblings are listed here and nowhere else, which is the whole point of the shape.**

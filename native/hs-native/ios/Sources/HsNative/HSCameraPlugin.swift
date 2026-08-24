@@ -4,6 +4,7 @@ import Capacitor
 import CoreImage
 import CoreMotion
 import Foundation
+import SceneKit
 import UIKit
 import Vision
 
@@ -57,7 +58,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "zoneLog", returnType: CAPPluginReturnPromise)
     ]
 
     /**
@@ -304,31 +306,245 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// black screen the field reported. The scan modes get a view fed by the session that actually
     /// owns the camera.
     private var arPreview: UIView?
+    /// Only restored if we were the ones who made it transparent — see `attachArPreview`.
+    private var restoreOpaqueForAr = false
 
     private func attachArPreview(_ arSession: ARSession) {
         DispatchQueue.main.async { [weak self] in
-            guard #available(iOS 17.0, *), let self, let web = self.webView,
-                  let superview = web.superview, self.arPreview == nil else { return }
-            let view = ARSCNView(frame: superview.bounds)
+            /* ⛑ **Every reason this can silently do nothing is now recorded.** The owner reported
+               black screens during scans; the zone log could not see them, because it recorded what
+               the SESSION did and a black screen is what the SCREEN did. A guard that returns early
+               and says nothing is indistinguishable from a guard that never ran. */
+            guard #available(iOS 17.0, *) else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "needs iOS 17"]); return
+            }
+            guard let self else { return }
+            guard let web = self.webView else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "no web view"]); return
+            }
+            guard let superview = web.superview else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "web view has no superview"]); return
+            }
+            guard self.arPreview == nil else {
+                HSZoneLog.record("arPreviewSkipped", ["why": "one is already attached"]); return
+            }
+            /* ⛑ **Drawn from the frames rather than handed to `ARSCNView`, after two rounds of
+               black screens** (field 2026-08-22 and 08-23).
+
+               An `ARSCNView` given somebody else's already-running session renders nothing here —
+               attaching a scene did not change it, and every fact the log could check said the
+               preview was fine: attached, host transparent, correct place in the stack. ⚑ **I was
+               debugging a component's internal contract with no way to see inside it.**
+
+               But the frames are not in doubt: this session's delegate receives every one, which is
+               how tracking states and scan progress reach the log at all. **So the thing that
+               already has the pixels draws them**, and the black screen stops being a question
+               about a view's private expectations and becomes one image assigned to one layer. */
+            let view = UIView(frame: superview.bounds)
             view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            view.session = arSession
-            // Nothing is being rendered into the scene; this is a camera feed the concierge walks
-            // behind, and statistics or debug overlays would be clutter over a room.
-            view.rendersContinuously = true
+            view.backgroundColor = .black
+            view.layer.contentsGravity = .resizeAspectFill
+            view.layer.masksToBounds = true
+            /* ⛑ **Make the host transparent HERE rather than assuming somebody else did** (zone
+               log, 2026-08-21: `arPreviewAttached webOpaque: true` — a preview correctly attached
+               and completely invisible, which is the black screen).
+
+               The capture path makes the web view transparent when it attaches its own preview. A
+               scan can attach before that has happened, or after it has been undone, and then the
+               view is behind an opaque page. ⚑ **A view that exists and cannot be seen is the worst
+               kind of working**, so the thing that needs transparency asks for it itself. */
+            if web.isOpaque {
+                self.restoreOpaqueForAr = true
+                WebLayer.makeTransparent(web)
+            }
+            /* And ABOVE the capture preview, not below it. `index: 0` in the same log means it went
+               to the bottom of the stack, under a layer showing the last frame the capture session
+               saw before it lost the camera. */
             superview.insertSubview(view, belowSubview: web)
             self.arPreview = view
+            HSZoneLog.record("arPreviewAttached", [
+                "w": Double(view.bounds.width), "h": Double(view.bounds.height),
+                // ⚑ The two facts that decide whether anything can be SEEN, rather than whether a
+                // view exists: is it under a transparent host, and is it above the stale AV layer.
+                "webOpaque": web.isOpaque,
+                "index": superview.subviews.firstIndex(of: view) ?? -1,
+                "subviews": superview.subviews.count
+            ])
         }
     }
 
+    /**
+     One frame onto the preview layer, **with the meshed surfaces painted onto it**.
+
+     ⚑ **This is the coverage answer for the mesh, and it is a different question from the
+     floorplan's** (owner, 2026-08-23). A floorplan's gaps show in its outline; a mesh's gaps do not
+     show anywhere — the geometry is invisible, so a wall you never pointed at looks exactly like a
+     wall you did. **Painting what has been captured makes the hole the obvious thing on screen**,
+     while the concierge is still standing in front of it.
+
+     Every mesh vertex is projected through the same camera that took the frame, so a dot lands on
+     the surface it belongs to. ⛑ Subsampled hard and capped: this runs at twenty frames a second
+     over tens of thousands of vertices, and the picture needs to be readable rather than complete —
+     **a dense enough dusting shows a gap just as well as every point would, and leaves the room
+     visible underneath it, which matters because the concierge is also navigating by this.**
+     */
+    private func drawArPreview(_ frame: ARFrame) {
+        guard arPreview != nil else { return }
+        let ci = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        guard let base = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
+
+        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+        guard !anchors.isEmpty else {
+            DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = base }
+            return
+        }
+
+        let size = CGSize(width: base.width, height: base.height)
+        guard let ctx = CGContext(data: nil, width: base.width, height: base.height,
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        ctx.draw(base, in: CGRect(origin: .zero, size: size))
+
+        /* ⛑ **Contiguous and filled, after two goes at this** (field 2026-08-23, with pictures).
+         *
+         * Dots shimmered and had no structure. Edges were worse in a way the screenshots made
+         * obvious: **I was subsampling by skipping every Nth triangle**, and adjacent triangles are
+         * what make a wireframe a surface — take every fortieth and you get isolated slivers
+         * scattered over a room, which is exactly what came back. ⚑ **No density would have fixed
+         * that; the sampling was destroying the only property that mattered.**
+         *
+         * So: nearest anchors first, every triangle in them, filled, until the budget runs out.
+         * ARKit's mesh anchors are roughly metre-sized blocks, so the nearest few are the surfaces
+         * the concierge is actually pointing at — **the thing they are deciding about is covered
+         * completely, and the far side of the room is left alone rather than sprinkled.**
+         *
+         * Filled rather than stroked because the question is *is this surface captured*, and a
+         * translucent film answers it at a glance where an outline asks to be interpreted.
+         */
+        let cam = frame.camera.transform.columns.3
+        let camPos = SIMD3<Float>(cam.x, cam.y, cam.z)
+        // World → camera space, so "is this behind me" is one multiply and a sign test.
+        let viewMatrix = simd_inverse(frame.camera.transform)
+        let near = anchors.sorted {
+            let a = $0.transform.columns.3, b = $1.transform.columns.3
+            return simd_distance(camPos, SIMD3<Float>(a.x, a.y, a.z))
+                 < simd_distance(camPos, SIMD3<Float>(b.x, b.y, b.z))
+        }
+        ctx.setFillColor(red: 0.94, green: 0.71, blue: 0.16, alpha: 0.22)
+        var drawn = 0
+        outer: for anchor in near {
+            let geo = anchor.geometry
+            let verts = geo.vertices
+            let faces = geo.faces
+            guard faces.indexCountPerPrimitive == 3 else { continue }
+            func vertex(_ index: Int) -> SIMD3<Float> {
+                verts.buffer.contents()
+                    .advanced(by: verts.offset + verts.stride * index)
+                    .assumingMemoryBound(to: SIMD3<Float>.self).pointee
+            }
+            func indexAt(_ i: Int) -> Int {
+                let p = faces.buffer.contents().advanced(by: i * faces.bytesPerIndex)
+                return faces.bytesPerIndex == 2
+                    ? Int(p.assumingMemoryBound(to: UInt16.self).pointee)
+                    : Int(p.assumingMemoryBound(to: UInt32.self).pointee)
+            }
+            for f in 0..<faces.count {
+                if drawn > 5500 { break outer }
+                var pts: [CGPoint] = []
+                var ok = true
+                for corner in 0..<3 {
+                    let v = vertex(indexAt(f * 3 + corner))
+                    let world = anchor.transform * SIMD4<Float>(v.x, v.y, v.z, 1)
+                    /* ⛑ **Reject anything BEHIND the lens before projecting it** (field 2026-08-23,
+                       second screenshot: a huge yellow wedge sweeping across the room as the camera
+                       panned).
+
+                       `projectPoint` has no answer for a point behind the camera and returns a
+                       mirrored one anyway. A triangle with one corner behind and two in front then
+                       projects to an enormous screen-space polygon that sweeps as you turn — which
+                       reads exactly as *the texture moves with me instead of staying on the wall*.
+
+                       ⚑ The camera looks down its own −Z, so anything with camera-space z ≥ 0 is
+                       behind it. Rejecting the whole triangle rather than clipping it loses a sliver
+                       at the frame edge and keeps every remaining shape honest. */
+                    let camSpace = viewMatrix * world
+                    guard camSpace.z < -0.05 else { ok = false; break }
+                    let screen = frame.camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
+                                                           orientation: .portrait,
+                                                           viewportSize: size)
+                    guard screen.x.isFinite, screen.y.isFinite,
+                          screen.x > -size.width, screen.y > -size.height,
+                          screen.x < size.width * 2, screen.y < size.height * 2 else { ok = false; break }
+                    pts.append(screen)
+                }
+                if ok, pts.count == 3 {
+                    ctx.beginPath()
+                    ctx.move(to: pts[0])
+                    ctx.addLine(to: pts[1])
+                    ctx.addLine(to: pts[2])
+                    ctx.closePath()
+                    ctx.fillPath()
+                    drawn += 1
+                }
+            }
+        }
+        guard let painted = ctx.makeImage() else { return }
+        DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = painted }
+    }
+
+    private let arPreviewContext = CIContext(options: [.useSoftwareRenderer: false])
+
     private func detachArPreview() {
         DispatchQueue.main.async { [weak self] in
+            HSZoneLog.record("arPreviewDetached", ["had": self?.arPreview != nil])
             self?.arPreview?.removeFromSuperview()
             self?.arPreview = nil
+            if self?.restoreOpaqueForAr == true, let web = self?.webView {
+                WebLayer.restore(web, wasOpaque: true)
+                self?.restoreOpaqueForAr = false
+            }
+        }
+    }
+
+    /**
+     ⛑ **This flattened every structured value to a string, and it is the whole of 2026-08-23.**
+
+     The old body was `$0.value as? JSValue ?? String(describing: $0.value)`. A nested `[String: Any]`
+     is not a `JSValue`, so it fell to the `String(describing:)` arm — and the far side received
+     `"[\"walls\": 4, \"doors\": 1]"` where it expected an object. ⚑ **Nothing failed. Every check
+     of the form `typeof x === "object"` simply went false**, so the floorplan reported 0 walls
+     forever, the mesh reported *nothing was meshed* while holding 32 pieces, and the plan's `walls`
+     array — the whole deliverable — crossed as text.
+
+     **The tell was the stringification being a legal answer.** A converter that cannot represent a
+     value should refuse it, not describe it: `String(describing:)` turns a type error into a
+     plausible-looking payload, which is the same shape as every measure in this project that
+     returned a confident number instead of admitting it had nothing.
+
+     So: recursive, and values it genuinely cannot carry are dropped rather than described.
+     */
+    private func jsValue(_ any: Any) -> JSValue? {
+        switch any {
+        case let v as JSObject: return v
+        case let v as String: return v
+        case let v as Bool: return v
+        case let v as Int: return v
+        case let v as Double: return v
+        case let v as Float: return Double(v)
+        case let v as NSNumber: return v.doubleValue
+        case let v as [String: Any]: return js(v)
+        case let v as [Any]: return v.compactMap { jsValue($0) }
+        default: return nil
         }
     }
 
     private func js(_ d: [String: Any]) -> JSObject {
-        JSObject(uniqueKeysWithValues: d.map { ($0.key, $0.value as? JSValue ?? String(describing: $0.value)) })
+        var out = JSObject()
+        for (k, v) in d {
+            if let converted = jsValue(v) { out[k] = converted }
+        }
+        return out
     }
 
     /* ⚑ One guard, written once. iOS 17 is the floor because `RoomCaptureSession(arSession:)` and
@@ -368,6 +584,24 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
            before the camera had started. **An intermittent that is actually a startup-order race
            reads as flakiness**, and flakiness is what stops a real cause being looked for. */
         let id = call.getString("zoneId") ?? UUID().uuidString
+        /* ⛑ **Re-opening the SAME zone must not rebuild it** (zone log, 2026-08-21). One kitchen
+           produced six `openZone` calls — one per action tapped — and each built a fresh
+           `HSZoneSession` with `reset: true`, so the zone's coordinate space was destroyed and
+           remade every time.
+
+           ⚑ **That silently breaks the load-bearing rule of the whole architecture.** Positions
+           taken after a floorplan were measured against a different origin from the floorplan, so
+           *at least one frame per container carries a position* was true of frames that could not
+           be related to each other. Nothing failed; the numbers were simply in different worlds.
+
+           It also orphaned in-flight work: a RoomPlan result arriving after its session had been
+           replaced landed on nobody — which is `roomDeliveredLate` in the log, with a captured room
+           and one wall in it, thrown away. */
+        if let existing = zone, existing.zoneId == id {
+            HSZoneLog.record("openZoneReused", ["zone": id])
+            call.resolve(js(existing.state()))
+            return
+        }
         let made = HSZoneSession()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -378,6 +612,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             made.needCamera = { [weak self] in self?.controller?.yieldCamera() }
             made.releaseCamera = { [weak self] in self?.controller?.reclaimCamera() }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
+            /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
+            made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
             made.hideArPreview = { [weak self] in self?.detachArPreview() }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())
@@ -419,6 +655,12 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 17.0, *) { withZone(c) { $0.position() } } } }
     @objc func startRoomPlan(_ call: CAPPluginCall) { requireZone(call) { c in
         if #available(iOS 17.0, *) { withZone(c) { $0.startRoomPlan() } } } }
+
+    /// ⚑ What the zone session did, kept by the app rather than by whoever was watching — see
+    /// `HSZoneLog`. Available whether or not a Mac is plugged in, which is the whole point.
+    @objc func zoneLog(_ call: CAPPluginCall) {
+        call.resolve(js(HSZoneLog.snapshot()))
+    }
 
     @objc func stopRoomPlan(_ call: CAPPluginCall) {
         guard #available(iOS 17.0, *), let z = zone else {
@@ -1011,17 +1253,36 @@ final class CameraController: NSObject {
      milliseconds and not the nine seconds that would come from tearing the input down.
      */
     func yieldCamera() {
-        sessionQueue.async { [weak self] in
-            guard let self, self.session.isRunning else { return }
-            self.session.stopRunning()
+        /* ⛑ **Synchronous, and asynchronous was the intermittent "Required sensor failed"**
+           (field 2026-08-23).
+
+           This was `sessionQueue.async`, so `enter()` called it and then ran ARKit **immediately**,
+           while the capture session was still stopping on another queue. ARKit asked for a camera
+           that was still held and was refused. ⚑ **A handover that does not wait is not a handover**
+           — and it failed intermittently, which is the worst kind, because whether it worked
+           depended on how busy the session queue happened to be. */
+        sessionQueue.sync {
+            if session.isRunning { session.stopRunning() }
         }
+        HSZoneLog.record("cameraYielded", ["running": session.isRunning])
     }
 
     func reclaimCamera() {
-        sessionQueue.async { [weak self] in
-            guard let self, !self.session.isRunning else { return }
-            self.session.startRunning()
+        /* ⛑ **Synchronous, for the same reason `yieldCamera` is — and leaving this one async is why
+           switching to Text froze the viewfinder** (field 2026-08-23).
+
+           A capture runs `takePosition`, which wakes ARKit, reads a pose and hands the lens back.
+           The hand-back was `async`, so the next call — `setMode`, arriving milliseconds later —
+           configured a device whose capture session had not finished restarting, and the preview
+           never came up. Backing out to the zone and in again rebuilt everything, which is exactly
+           the shape of a fix that hides a race.
+
+           ⚑ **I made the outbound handover synchronous a day ago and left its twin behind.** A
+           handover has two ends and only one of them was waiting. */
+        sessionQueue.sync {
+            if !session.isRunning { session.startRunning() }
         }
+        HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
     }
 
     func stop() {

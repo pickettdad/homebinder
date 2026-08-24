@@ -28,6 +28,7 @@ export function ZoneStrip({
   onTogglePause,
   onRetry,
   failure,
+  progress,
   note,
 }: {
   open: boolean;
@@ -43,6 +44,8 @@ export function ZoneStrip({
   /** ⚑ The session DIED. Distinct from "cannot position right now" — one is a state the concierge
    *  can walk out of, the other is a corpse that everything after it inherits. */
   failure: string | null;
+  /** Live from RoomPlan while a scan runs. Absent until it reports. */
+  progress: { walls: number; doors: number; windows: number; openings: number } | null;
   note: string | null;
 }) {
   if (!open) return null;
@@ -78,13 +81,30 @@ export function ZoneStrip({
           no position — {anchor.fix}
         </span>
       )}
+      {/*
+        ⛑ **A five-second scan looked exactly like a finished one** (zone log, 2026-08-21: two walls
+        from a whole kitchen, then one). RoomPlan said `normal` throughout — it was not struggling,
+        it simply had not been shown the room yet — and nothing on screen distinguished *walked
+        enough* from *pressed Finish early*.
+
+        ⚑ So the button says what it has, and refuses to look finished until a room could plausibly
+        be in it. **Four walls is not a rule about rooms** — an L-shaped kitchen has more, an alcove
+        fewer — it is the point below which the answer is certainly incomplete, which is a different
+        and much safer claim. The concierge can still finish whenever they like.
+      */}
       {scanning && (
         <button
           type="button"
           onClick={onFinishScan}
-          className="pointer-events-auto rounded-full bg-brass-500 px-4 py-1.5 font-medium text-slate-950"
+          className={`pointer-events-auto rounded-full px-4 py-1.5 font-medium ${
+            (progress?.walls ?? 0) >= 4
+              ? "bg-brass-500 text-slate-950"
+              : "bg-slate-900/80 text-slate-300 ring-1 ring-slate-500"
+          }`}
         >
-          Finish floorplan
+          {(progress?.walls ?? 0) >= 4
+            ? `Finish floorplan · ${progress?.walls} walls`
+            : `Keep walking · ${progress?.walls ?? 0} walls so far`}
         </button>
       )}
       {meshing && (

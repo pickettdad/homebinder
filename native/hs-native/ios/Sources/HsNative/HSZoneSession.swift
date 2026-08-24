@@ -84,6 +84,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     var releaseCamera: (() -> Void)?
     /// Where to put ARKit's own preview while a scan runs, and how to take it away again.
     var showArPreview: ((ARSession) -> Void)?
+    /// ⚑ The preview is fed from here because this is where the frames already arrive — see
+    /// `attachArPreview`. Throttled: a scan does not need sixty drawn frames a second.
+    var onPreviewFrame: ((ARFrame) -> Void)?
+    private var lastPreviewAt = Date.distantPast
+    private var lastPlanAt = Date.distantPast
     var hideArPreview: (() -> Void)?
 
     /// ⚑ A session can DIE. `sensorFailed` is transient often enough that a retry is a real answer,
@@ -97,6 +102,20 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private var armed = true
 
     var isRunning: Bool { mode != nil }
+
+    /// What `openZone` returns, so re-entering a zone already open answers identically without
+    /// rebuilding it.
+    func state() -> [String: Any] {
+        [
+            "zoneId": zoneId,
+            "startedAt": ISO8601DateFormatter().string(from: startedAt),
+            "mode": mode?.rawValue ?? Mode.positioning.rawValue,
+            "unmet": [String](),
+            "reused": true,
+            "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+            "roomPlanSupported": RoomCaptureSession.isSupported
+        ]
+    }
 
     // MARK: - opening and closing a zone
 
@@ -122,6 +141,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         paused = true
         armed = true
         failure = nil
+        HSZoneLog.record("openZone", ["zone": id, "mesh": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh), "roomPlan": RoomCaptureSession.isSupported])
         return [
             "zoneId": id,
             "startedAt": ISO8601DateFormatter().string(from: startedAt),
@@ -184,9 +204,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 config.videoFormat = hi
             }
         case .positioning:
-            /* Stripped: no plane search, no reconstruction, no environment texturing. It has exactly
-               one job — hold the origin and hand back a pose when asked. */
-            config.planeDetection = []
+            /* ⛑ **Plane detection stays ON, and stripping it was a bug I introduced** (zone log,
+               2026-08-21: `surface: false` on every position taken).
+
+               The ray-cast needs something to hit. With no plane search and no reconstruction there
+               is no geometry in the session at all, so `raycast` returns an empty array every time
+               and the pose comes back with no surface — ⚑ **which is the difference between *where
+               the concierge stood* and *what they were standing in front of***, and the second is
+               the one a measurement needs.
+
+               Reconstruction stays off: that is the expensive half, and it is the mesh mode's job.
+               Plane detection is the cheap half and it is what makes a pose worth taking. */
+            config.planeDetection = [.horizontal, .vertical]
             config.sceneReconstruction = []
             config.environmentTexturing = .none
             if #available(iOS 16.0, *),
@@ -199,6 +228,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            already cleared `everRan`, and the first run after that resets rather than resumes. */
         let mustReset = reset || !everRan || failure != nil
         failure = nil
+        HSZoneLog.record("enter", ["mode": next.rawValue, "reset": mustReset, "unmet": unmet])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
         everRan = true
         mode = next
@@ -242,6 +272,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      */
     private func harvestMesh() -> [String: Any] {
         let anchors = (session.currentFrame?.anchors ?? []).compactMap { $0 as? ARMeshAnchor }
+        HSZoneLog.record("harvestMesh", ["anchors": anchors.count])
         guard !anchors.isEmpty else { return ["anchors": 0, "faces": 0, "why": "nothing was meshed"] }
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
@@ -349,8 +380,25 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            after it resumes into the same world, measured at 0 ms with the mesh byte-identical. That
            asymmetry is why the wait is bounded and reported rather than hidden: a caller that gets
            `settling` back knows to hold still, and one that gets a pose knows it is real. */
+        /* ⛑ **The lens goes back on EVERY path out of here, and it did not** (field 2026-08-23:
+           the viewfinder freezing after a second shot, with the strip saying *hold still*).
+
+           The success path ended with `sleepSession()`. The failure path — tracking not settled in
+           time — returned early and skipped it, so ARKit kept the camera and the capture session
+           never restarted. ⚑ **A frozen viewfinder was the app telling the truth about a lens
+           nobody had given back.** The log said it in two lines: `cameraYielded` with no
+           `cameraReclaimed` after it.
+
+           `defer` rather than a call before each `return`, because the reason this happened is that
+           one of four exits was easy to miss, and a fifth exit added later would miss it too. */
+        let wasAsleep = paused
         if paused { wake() }
-        guard let frame = waitForTrackedFrame(timeout: paused ? 0 : 3.0) else {
+        defer { if mode == .positioning { sleepSession() } }
+        /* A cold wake has to establish tracking from nothing, which the log shows going
+           initializing → normal → insufficientFeatures → normal before it settles. Three seconds was
+           inside that, so a perfectly healthy wake reported `settling`. A warm one resumes into the
+           same world and answers almost at once, so the two waits are not the same wait. */
+        guard let frame = waitForTrackedFrame(timeout: wasAsleep ? 8.0 : 3.0) else {
             return ["positioned": false, "why": failure ?? "settling", "recoverable": true]
         }
         let state = HSArProbe.describe(frame.camera.trackingState)
@@ -385,9 +433,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "distance": Double(simd_distance(origin, SIMD3<Float>(h.x, h.y, h.z)))
             ]
         }
-        // Straight back to sleep, lens returned. The zone keeps its origin; the camera does not
-        // keep ARKit.
-        if mode == .positioning { sleepSession() }
+        // The lens goes back in the `defer` above — on this path and on every other.
+        HSZoneLog.record("position", ["ok": true, "tracking": state,
+                                      "surface": out["surface"] != nil])
         return out
     }
 
@@ -412,10 +460,26 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      is worth more than a silent fallback to no position.
      */
     private func waitForTrackedFrame(timeout: TimeInterval) -> ARFrame? {
-        let deadline = Date().addingTimeInterval(max(timeout, 3.0))
+        // Honour what the caller asked for; a cold wake and a warm one are not the same wait.
+        /* ⛑ **A frame NEWER than the one we went to sleep holding** (field 2026-08-23: four
+           consecutive captures across two different containers came back with a byte-identical
+           transform).
+
+           Positioning sleeps between containers, and `currentFrame` keeps returning the last frame
+           from before the pause — which still reports `.normal`, because it did track, a minute ago.
+           So the wait returned instantly with a **stale pose**, and every object in the zone was
+           filed at the spot where the first one was photographed.
+
+           ⚑ **Nothing about that reads as broken.** `positioned: true`, tracking `normal`, a real
+           transform — the failure is that it is the *wrong room position*, stated as confidently as
+           the right one. `ARFrame.timestamp` is monotonic, so requiring a newer one is the whole
+           fix, and it is the difference between placing six objects and placing one six times. */
+        let stale = session.currentFrame?.timestamp ?? 0
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if failure != nil { return nil }
-            if let f = session.currentFrame, case .normal = f.camera.trackingState { return f }
+            if let f = session.currentFrame, f.timestamp > stale,
+               case .normal = f.camera.trackingState { return f }
             Thread.sleep(forTimeInterval: 0.05)
         }
         return nil
@@ -447,6 +511,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         capture.delegate = self
         roomCapture = capture
         capture.run(configuration: RoomCaptureSession.Configuration())
+        HSZoneLog.record("roomPlanStarted")
         return ["started": true, "mode": Mode.roomplan.rawValue]
     }
 
@@ -471,6 +536,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            ⚑ **A fixed sleep standing in for a completion is a race the happy path loses**, and it
            fails in the direction that looks like the feature not working rather than like a bug.
            The waiter below is resolved by the delegate; the timeout is a backstop that says so. */
+        HSZoneLog.record("roomPlanStopping")
         roomWaiter = { [weak self] out in
             self?.hideArPreview?()
             self?.sleepSession()
@@ -485,7 +551,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     private func deliverRoom(_ out: [String: Any]) {
-        guard let waiter = roomWaiter else { return }
+        HSZoneLog.record("roomDelivered", ["captured": out["captured"] ?? false, "why": out["why"] ?? "", "walls": (out["walls"] as? [[String: Any]])?.count ?? 0])
+        guard let waiter = roomWaiter else {
+            HSZoneLog.record("roomDeliveredLate", ["note": "nobody was still waiting"])
+            return
+        }
         roomWaiter = nil
         DispatchQueue.main.async { waiter(out) }
     }
@@ -577,6 +647,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
+        guard onPreviewFrame != nil, mode == .mesh || mode == .roomplan else { return }
+        // ~20 fps is a live picture to a walking person and a third of the drawing work.
+        guard Date().timeIntervalSince(lastPreviewAt) > 0.05 else { return }
+        lastPreviewAt = Date()
+        onPreviewFrame?(frame)
     }
 
     /**
@@ -592,6 +667,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      camera is the worst of both.
      */
     func session(_ session: ARSession, didFailWithError error: Error) {
+        HSZoneLog.record("sessionFailed", ["error": error.localizedDescription])
         failure = error.localizedDescription
         everRan = false
         paused = true
@@ -606,6 +682,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
+        HSZoneLog.record("tracking", ["state": HSArProbe.describe(camera.trackingState)])
         onEvent?(["tracking": HSArProbe.describe(camera.trackingState)])
     }
 }
@@ -646,11 +723,26 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
             "windows": room.windows.count,
             "openings": room.openings.count
         ]
+        HSZoneLog.record("roomProgress", roomProgress)
         onEvent?(["roomProgress": roomProgress])
+
+        /* ⚑ **The geometry, live, and not only the counts.**
+         *
+         * A count going 4 → 5 cannot show a missed wall; an outline with a gap in it can, and the
+         * concierge is still standing in the room where that is three steps to fix. The same
+         * description the finished plan uses is sent while the scan runs, so one drawing serves
+         * both — the live one being the only version that can still change anything.
+         *
+         * ⛑ Throttled to twice a second: `didUpdate` fires far faster than a person can look, and a
+         * full room description at that rate is work spent redrawing a picture nobody read. */
+        guard Date().timeIntervalSince(lastPlanAt) > 0.5 else { return }
+        lastPlanAt = Date()
+        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId)])
     }
 
     func captureSession(_ session: RoomCaptureSession,
                         didProvide instruction: RoomCaptureSession.Instruction) {
+        HSZoneLog.record("roomInstruction", ["text": "\(instruction)"])
         onEvent?(["roomInstruction": "\(instruction)"])
     }
 }

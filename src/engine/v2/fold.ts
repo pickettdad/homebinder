@@ -11,7 +11,13 @@
  *   visit), discarded media
  *   leaves the ref lists but the event trail remains in the log.
  */
-import type { CaptureMediaMeta, FrameReadMeta, FrameRoleMeta, Source } from "../schema/events";
+import type {
+  CaptureMediaMeta,
+  CapturePositionMeta,
+  FrameReadMeta,
+  FrameRoleMeta,
+  Source,
+} from "../schema/events";
 import type {
   CaptureIntent,
   CaptureTarget,
@@ -42,6 +48,11 @@ export interface MediaRef {
   read?: FrameReadMeta;
   /** What this frame is within its capture, when a capture produced more than one. */
   frame?: FrameRoleMeta;
+  /** ⚑ Where this frame was taken, or the recorded reason there is no position. Expected on ONE
+   *  frame of a container and absent on the rest — that is completeness, not a gap, because the
+   *  others inherit it. A refusal is stored as a refusal: `{positioned:false, why}` says *the app
+   *  could and did not*, which an absent field cannot say. */
+  position?: CapturePositionMeta;
   /** ⚑ The other frames of the same capture. Under the primary rather than beside it, so that
    *  `photos.length` still counts what a person would call photographs — see `PhotoAdded`. */
   siblings?: MediaRef[];

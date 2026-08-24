@@ -34,7 +34,9 @@ import {
   type OpenContainer,
 } from "../capture/objectContainer";
 import { ZoneStrip } from "./ZoneStrip";
+import { FloorPlanView } from "./FloorPlanView";
 import { zoneMeasures } from "../native/zone";
+import { bothUnits } from "../native/planGeometry";
 import type { ZoneMode, ZonePlan, ZonePosition } from "../native/zone";
 import {
   adjustCamera,
@@ -59,6 +61,7 @@ import {
   resumeZone,
   startRoomPlan,
   stopRoomPlan,
+  zoneLog,
   setZoneMode as setZoneModeNative,
   storedFrameLabel,
   traverseDiagnosis,
@@ -371,7 +374,7 @@ export function CameraScreen({
   const [traverseResult, setTraverseResult] = useState<TraverseResult | null>(null);
   /* ⚑ Held so the plan is visibly a deliverable rather than a side effect. A floorplan that
      produced nothing and a floorplan nobody ran look identical without this. */
-  const [, setPlan] = useState<ZonePlan | null>(null);
+  const [plan, setPlan] = useState<ZonePlan | null>(null);
   /* ⚑ The positioning session opens with the viewfinder and closes with it. There is no entry
      gesture: the zone was entered on the zone screen, and asking again put a second meaning on a
      word this product had already spent. */
@@ -383,6 +386,9 @@ export function CameraScreen({
   const [meshing, setMeshing] = useState(false);
   const [zoneNote, setZoneNote] = useState<string | null>(null);
   const [zoneFailure, setZoneFailure] = useState<string | null>(null);
+  const [roomProgress, setRoomProgress] = useState<{
+    walls: number; doors: number; windows: number; openings: number;
+  } | null>(null);
 
   /**
    * ⚑ The session's whole lifecycle, and it has no buttons in it.
@@ -405,10 +411,17 @@ export function CameraScreen({
       if (typeof e.roomInstruction === "string") setZoneNote(String(e.roomInstruction));
       if (e.roomProgress && typeof e.roomProgress === "object") {
         const p = e.roomProgress as Record<string, number>;
-        setZoneNote(
-          `${p.walls ?? 0} walls · ${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`,
-        );
+        setRoomProgress({
+          walls: p.walls ?? 0,
+          doors: p.doors ?? 0,
+          windows: p.windows ?? 0,
+          openings: p.openings ?? 0,
+        });
+        setZoneNote(`${p.doors ?? 0} doors · ${p.windows ?? 0} windows · ${p.openings ?? 0} openings`);
       }
+      /* ⚑ The plan as it is being drawn. A gap in an outline is a missed wall; a count cannot show
+         one, and this is the only moment it can still be walked. */
+      if (e.roomShape && typeof e.roomShape === "object") setPlan(e.roomShape as ZonePlan);
       // ⚑ Held, not toasted. A message that disappears is a message that cannot be acted on later,
       // and the whole failure of 2026-08-21 was a state nobody could see they were in.
       if (typeof e.zoneFailed === "string") {
@@ -417,7 +430,7 @@ export function CameraScreen({
         setMeshing(false);
       }
     });
-    const opening = (async () => {
+    void (async () => {
       try {
         const out = await openZone(zoneId);
         if (!live) return;
@@ -433,26 +446,6 @@ export function CameraScreen({
           setZoneNote("No floorplan on this device");
           return;
         }
-        if (startAction === "room-shot") {
-          /* ⚑ Framed wide and declared, exactly as the old in-viewfinder door did — the act is
-             unchanged, only the door moved. The lens is a default rather than a lock: the concierge
-             can still go back to 1× if the room fits. */
-          await applyIntentLens("room-shot");
-          setPendingIntent("room-shot");
-        } else if (startAction === "floorplan") {
-          const started = await startRoomPlan();
-          if (live && started.started) {
-            setScanning(true);
-            setZoneMode("roomplan");
-          }
-        } else if (startAction === "mesh") {
-          const r = await setZoneModeNative("mesh");
-          if (live) {
-            setMeshing(true);
-            setZoneMode("mesh");
-            if (r.unmet.length) setZoneNote(`unmet ${r.unmet.join(", ")}`);
-          }
-        }
       } catch (e) {
         if (live) setZoneFailure(e instanceof Error ? e.message : "Zone session unavailable");
       }
@@ -465,15 +458,70 @@ export function CameraScreen({
          so a bare `closeZone()` here could land AFTER the next `openZone` and null the session that
          had just been created. ⚑ The symptom is the worst kind: it works, then it silently does
          not, and only a relaunch clears it — the same shape as the guard bug, one layer up. */
-      void opening.then(() => closeZone()).catch(() => {});
+      /* ⛑ **The zone session outlives this screen, and closing it here was the bug** (zone log,
+         2026-08-21: eight `openZone` calls, zero reused).
+
+         Removing `startAction` from the deps was not enough, because tapping Floorplan or Mesh on
+         the zone screen NAVIGATES — this component unmounts and a new one mounts. So the cleanup
+         ran, closed the zone, and the next mount built a fresh session with `reset: true`.
+
+         ⚑ **A zone's coordinate space belongs to the zone, not to whichever screen happens to be
+         showing.** The plugin already holds it across screens; `openZone` on a different zone
+         replaces it, and `stop` tidies up. So the cleanup unsubscribes and nothing else.
+
+         And this is what makes the ray-cast work: planes need a few seconds to accumulate, and a
+         session rebuilt on every entry never had them — which is why every position in the log came
+         back `surface: false` even after plane detection was turned back on. */
       setZoneOpen(false);
       setScanning(false);
       setMeshing(false);
     };
-  }, [zoneId, startAction]);
+    /* ⛑ **`startAction` is deliberately NOT a dependency** (zone log, 2026-08-21). It was, and the
+       result was six `openZone` calls for one kitchen — one per action tapped — each rebuilding the
+       session with `reset: true`. ⚑ **The zone's coordinate space was destroyed and remade every
+       time the concierge tapped Floorplan or Mesh**, so a position taken afterwards was measured
+       against a different origin from the plan, and nothing anywhere said so. The session belongs to
+       the zone; the action is something done inside it. */
+  }, [zoneId]);
+
+  /**
+   * The action the concierge tapped on the zone screen, performed in the session that is already
+   * open. ⚑ Separate from the lifecycle above so that choosing an action never restarts a zone.
+   */
+  useEffect(() => {
+    if (!zoneOpen || !startAction) return;
+    let live = true;
+    void (async () => {
+      try {
+        if (startAction === "room-shot") {
+          await applyIntentLens("room-shot");
+          setPendingIntent("room-shot");
+        } else if (startAction === "floorplan") {
+          const started = await startRoomPlan();
+          if (live && started.started) {
+            setScanning(true);
+            setZoneMode("roomplan");
+          } else if (live) setZoneNote(started.why ?? "floorplan refused");
+        } else if (startAction === "mesh") {
+          const r = await setZoneModeNative("mesh");
+          if (live) {
+            setMeshing(true);
+            setZoneMode("mesh");
+            if (r.unmet.length) setZoneNote(`unmet ${r.unmet.join(", ")}`);
+          }
+        }
+      } catch (e) {
+        if (live) setZoneFailure(e instanceof Error ? e.message : "action failed");
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [zoneOpen, startAction]);
 
   const finishScan = useCallback(async () => {
     setScanning(false);
+    setRoomProgress(null);
     const plan = await stopRoomPlan().catch(() => ({ captured: false, why: "failed" }) as ZonePlan);
     setPlan(plan);
     setZoneMode("positioning");
@@ -492,13 +540,20 @@ export function CameraScreen({
     */
     if (plan.captured && zoneId) {
       const blob = new Blob([JSON.stringify(plan)], { type: "application/json" });
-      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+      /* ⚑ Declared, not left to be guessed from a mime type. Without an intent a room's geometry
+         arrives at the desk as an unlabelled JSON blob among the photographs. */
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json", undefined, "floorplan")
+        .catch(() => {});
     }
     if (plan.captured) {
       const m = zoneMeasures(plan);
+      /* ⚑ Feet first, because that is what a quote is written in here, with metres alongside
+         because that is what the sensor measured. */
       setZoneNote(
-        `${m.perimeter?.toFixed(1) ?? "—"} m round · ${m.baseboard?.toFixed(1) ?? "—"} m baseboard · ` +
-          `${m.ceilingHeight?.toFixed(2) ?? "—"} m high · ${m.windows.count} windows · ${m.doors.count} doors`,
+        `${m.perimeter ? bothUnits(m.perimeter) : "—"} round · ` +
+          `${m.baseboard ? bothUnits(m.baseboard) : "—"} baseboard · ` +
+          `${m.ceilingHeight ? bothUnits(m.ceilingHeight) : "—"} high · ` +
+          `${m.windows.count} windows · ${m.doors.count} doors`,
       );
     } else setZoneNote(plan.why ?? "no plan");
   }, []);
@@ -513,7 +568,8 @@ export function CameraScreen({
     if (!mesh) return;
     if (zoneId && mesh.faces > 0) {
       const blob = new Blob([JSON.stringify(mesh)], { type: "application/json" });
-      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json").catch(() => {});
+      await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json", undefined, "mesh")
+        .catch(() => {});
     }
     setZoneNote(
       mesh.faces > 0
@@ -560,6 +616,11 @@ export function CameraScreen({
   /** ⚑ Read inside the frame callback, which closes over its first render — a state value would be
    *  stale there and auto-capture would keep firing exactly as it did before the fix. */
   const reviewingRef = useRef(false);
+  /** ⚑ Containers that already carry a measured position. Only the FIRST capture in a container
+   *  pays for one — the rest inherit, which is what the architecture asked for and what stops the
+   *  wake cost being paid per photograph. Reset with the session, never persisted: a container
+   *  anchored on a previous visit is a different visit's fact. */
+  const anchoredContainers = useRef<Set<string>>(new Set());
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
@@ -629,9 +690,31 @@ export function CameraScreen({
         `{positioned:false, why:"paused"}` says *this one could and did not, here is why* — and a
         container the desk cannot place is otherwise indistinguishable from one nobody meant to.
       */
-      const position = await takePosition().catch(
-        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-      );
+      /* ⛑ **Once per container, not once per photograph** (field 2026-08-23: a 2–3 second pause
+         after every shot).
+
+         The cost is structural and the log shows it plainly: every `takePosition` reads
+         `cameraYielded → initializing → normal → position → cameraReclaimed`. ARKit re-establishes
+         tracking on each wake because the capture session takes the lens back in between, and that
+         cycle is the pause. **It is the price of keeping a live AVFoundation viewfinder**, and it is
+         paid on every crossing.
+
+         ⚑ **But the architecture only ever asked for one.** *At least one frame per container
+         carries a position; everything else inherits it.* Anchoring every frame was me doing four
+         times the work the design calls for, and paying the lag four times to store four poses of
+         one object that the desk reads as one. So: anchor a container the first time it is
+         photographed, and leave the rest to inherit.
+
+         Captures outside a container still take one each — a zone concern is its own thing with
+         nothing to inherit from, and they are rare enough that the cost lands where it is earned. */
+      const containerId = open?.pinId ?? null;
+      const needsAnchor = containerId === null || !anchoredContainers.current.has(containerId);
+      const position = needsAnchor
+        ? await takePosition().catch(
+            () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+          )
+        : undefined;
+      if (containerId && position?.positioned) anchoredContainers.current.add(containerId);
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);
@@ -904,7 +987,21 @@ export function CameraScreen({
          of their hand. ⚑ The frames all look fine, which is the tell: this is the silent-failure
          shape again, and the fix is that inspecting is not a capture posture. */
       if (reviewingRef.current) return;
-      if (autoRef.current && event.stable && worthShooting && Date.now() - lastAuto.current > 4000) {
+      /* ⛑ **A dwell before it fires** (field 2026-08-23: "fired pretty quick, before I even got into
+         position, and the second one was the better one" — both times).
+
+         `stable` means the camera stopped moving, which is true the instant a hand pauses on the way
+         somewhere. ⚑ **The concierge settling on a plate and the concierge passing one look identical
+         for the first fraction of a second**, and the difference is only that one of them stays. So
+         the trigger waits for the read to have been worth shooting continuously — `readableSince` was
+         already being measured and only reported, never used to decide.
+
+         Two-thirds of a second: short enough that a deliberate hold still feels immediate, long
+         enough that a hand travelling past a label does not trip it. The owner's own observation is
+         the calibration — the *second* shot was the good one, which is the first one firing early. */
+      const dwell = readableSince.current === null ? 0 : Date.now() - readableSince.current;
+      if (autoRef.current && event.stable && worthShooting && dwell >= 700
+          && Date.now() - lastAuto.current > 4000) {
         const waited = readableSince.current === null ? 0 : Date.now() - readableSince.current;
         lastAuto.current = Date.now();
         readableSince.current = null;
@@ -1020,6 +1117,30 @@ export function CameraScreen({
    * decided on real files and none of them could have been decided on the panel numbers. A
    * capture's frames are one artifact and they travel as one.
    */
+  /**
+   * The zone session's own record, off the device as a file.
+   *
+   * ⚑ Built after the tether failed twice — the second time silently, after reporting the app
+   * launched, costing the owner a walked kitchen with nothing to show for it. **An instrument that
+   * only works while somebody is watching is not an instrument**, and this is the shape that has
+   * never failed here: the device records, the concierge taps share.
+   */
+  const shareZoneLog = async () => {
+    try {
+      const log = await zoneLog();
+      const file = new File([JSON.stringify(log, null, 1)], `hs-zone-log-${Date.now()}.json`, {
+        type: "application/json",
+      });
+      if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "HouseSteady — zone log" });
+      } else {
+        showToast("This device will not share that file");
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "No zone log");
+    }
+  };
+
   const shareAllFrames = async (capture: MediaRef) => {
     const refs = [capture, ...(capture.siblings ?? [])];
     const files: File[] = [];
@@ -1150,6 +1271,19 @@ export function CameraScreen({
         tapped.** It belongs at the top with the zone name, because it is about *where you are* —
         which is what the header already says — and the bottom of a viewfinder is the shutter's.
       */}
+      {/*
+        ⛑ **The deliverable, on screen, where it can be disagreed with.** A scan that reports *five
+        walls* is unfalsifiable — nobody in the room can tell a correct five from a wrong five. Drawn
+        to scale with the lengths on it, the concierge checks it against the room they are standing
+        in, which is the only moment a wrong answer is cheap to fix.
+      */}
+      {zoneId && plan && (scanning || !traversing) && (
+        <div className="pointer-events-none absolute right-3 top-14 w-40">
+          <div className="pointer-events-auto rounded-lg bg-slate-950/85 p-1 ring-1 ring-slate-700">
+            <FloorPlanView plan={plan} height={140} labels={!scanning} />
+          </div>
+        </div>
+      )}
       {zoneId && (
         <ZoneStrip
           open={zoneOpen}
@@ -1160,6 +1294,7 @@ export function CameraScreen({
           meshing={meshing}
           note={zoneNote}
           failure={zoneFailure}
+          progress={roomProgress}
           onRetry={() => void retryZone()}
           onFinishScan={() => void finishScan()}
           onFinishMesh={() => void finishMesh()}
@@ -1568,6 +1703,16 @@ export function CameraScreen({
                 </span>
               </p>
             )}
+            {/*
+              ⛑ **Always offered, not gated on a zone being open.** The run worth sending is usually
+              the one that just went wrong, and by then the session has closed — a share button that
+              needs a healthy session shares nothing on the day it is needed.
+            */}
+            <p className="mt-1">
+              <button type="button" onClick={() => void shareZoneLog()} className="underline">
+                send zone log
+              </button>
+            </p>
             {traverseResult && !traversing && traverseResult.pairs.length > 0 && (
               <p className="mt-1">
                 <button type="button" onClick={() => void shareTraverseData()} className="underline">

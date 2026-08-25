@@ -95,12 +95,12 @@ describe("meshRecommendation", () => {
     expect(meshRecommendation({ kind: "Laundry", containers: 0 }).recommend).toBe(true);
   });
 
-  it("recommends where the floorplan structurally cannot see the room's own surfaces", () => {
-    /* ⛑ A kitchen's half-wall peninsula is absent from RoomPlan's output entirely — it models
-       full-height walls, and the thing that closes the room stops at counter height. The mesh sees
-       it because geometry needs no category. */
-    expect(meshRecommendation({ kind: "kitchen", containers: 0 }).recommend).toBe(true);
-    expect(meshRecommendation({ kind: "Main Bath", containers: 1 }).recommend).toBe(true);
+  it("does NOT recommend on room type — a fitted room earns a mesh by what is missing, not by name", () => {
+    /* ⛑ Withdrawn by owner ruling 2026-08-23. A kitchen's missing peninsula is a reason to mesh
+       ONE FEATURE for twenty seconds, not a whole room for two minutes — and the trigger for that
+       is the concierge comparing the drawn plan to the room, which needs no rule here. */
+    expect(meshRecommendation({ kind: "kitchen", containers: 1 }).recommend).toBe(false);
+    expect(meshRecommendation({ kind: "Main Bath", containers: 1 }).recommend).toBe(false);
   });
 
   it("does not recommend where nothing will be asked of the geometry", () => {

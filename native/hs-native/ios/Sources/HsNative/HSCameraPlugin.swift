@@ -91,6 +91,11 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        if CommandLine.arguments.contains("--hs-lens-probe"), #available(iOS 16.0, *) {
+            let probe = HSLensProbe()
+            lensProbe = probe
+            probe.run { _ in self.lensProbe = nil }
+        }
         if CommandLine.arguments.contains("--hs-ar-probe") {
             let probe = HSArProbe()
             arProbe = probe
@@ -291,6 +296,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var arProbe: HSArProbe?
 
     private var bench: HSBench?
+    private var lensProbe: AnyObject?
 
     /// The zone session — see `HSZoneSession`. One per zone, three bounded modes, one origin.
     private var zoneStore: AnyObject?

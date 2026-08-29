@@ -21,6 +21,14 @@
  * **Nobody may mistake this for a capture record** — a fixture that looks like real evidence is
  * how a fabricated reading ends up quoted as a measurement.
  *
+ * ## ⛑ UNUSED BY OWNER RULING, 2026-08-28
+ *
+ * **Redaction is off and the real export ships unredacted.** The owner's ruling: *serials and
+ * equipment photographs carry no risk worth tooling against, and the redactor was solving a problem
+ * nobody has.* **Nothing in the export path calls this**, and nothing should without a new ruling.
+ *
+ * Kept in the tree deliberately — it costs nothing here and house two may want it.
+ *
  * Usage:  node scripts/redact-export.mjs <input-dir> <output-dir>
  * Dev-only. Shells out to `unzip`/`zip`, which is why it is a script and not app code.
  */

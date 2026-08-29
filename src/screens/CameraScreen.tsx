@@ -616,6 +616,11 @@ export function CameraScreen({
   /** ⚑ Read inside the frame callback, which closes over its first render — a state value would be
    *  stale there and auto-capture would keep firing exactly as it did before the fix. */
   const reviewingRef = useRef(false);
+  /** ⚑ Containers that already carry at least one measured position. A SAMPLING record, not a
+   *  choice: the desk still ranks every position it receives, and a Text frame is always sampled
+   *  whatever this holds. Session-scoped and never persisted — a container positioned on a previous
+   *  visit is a different visit's fact. */
+  const positionedContainers = useRef<Set<string>>(new Set());
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
@@ -685,27 +690,46 @@ export function CameraScreen({
         `{positioned:false, why:"paused"}` says *this one could and did not, here is why* — and a
         container the desk cannot place is otherwise indistinguishable from one nobody meant to.
       */
-      /* ⛑ **Position everything; the desk ranks** (owner ruling 2026-08-23, and this is a deletion).
-       *
-       * This screen briefly anchored a container on its first capture and let the rest inherit —
-       * which put an *anchor concept* in the field, and choosing which frame represents an object is
-       * a judgement. ⚑ **The owner's objection is what killed it: the first shot of a fridge is the
-       * whole-object shot from six feet back, so "first" reliably picks the worst available anchor.**
-       *
-       * The field has no business ranking. Every positioned frame already carries
-       * `surface.distance` — the ray-cast hit in front of the lens — so *closest wins* is a rule the
-       * desk applies to what it was sent. **The field's job is to try every time and to be honest
-       * when it cannot.**
-       *
-       * ⛑ **The cost is real and is not hidden:** a position wakes ARKit, which re-establishes
-       * tracking because the capture session took the lens back, and that is 2–3 seconds. It is paid
-       * per capture again. **Removing it is decision one — stop handing the lens back and forth —
-       * and this is the evidence that decision needs rather than an argument against the ruling.**
-       */
-      const position = await takePosition().catch(
-        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-      );
+      /*
+        ⚑ **Sampled, not chosen — and the distinction is the whole of this** (owner ruling
+        2026-08-23, restored 2026-08-28).
 
+        The field still does not pick which frame represents an object. That judgement stays at the
+        desk, which ranks by `surface.distance` — closest wins — over whatever it is sent. What
+        changes here is only **how often a position is sampled**, and that is a walkability decision
+        rather than a semantic one.
+
+        ⛑ **Positioning every frame cost 2–3 seconds per photograph**, because a position wakes ARKit
+        and it re-establishes tracking after the capture session takes the lens back. A real
+        multi-room walk under that is miserable, and this walk has to actually happen.
+
+        **First frame in a container, plus every Text frame.** ⚑ *The nameplate shot is therefore
+        always among the candidates* — which is the frame the desk most wants, because the concierge
+        stands 0.3–1 m from a plate and six feet back from a fridge. The owner's own objection to
+        "first wins" is answered by including Text rather than by the field choosing between them.
+
+        Captures outside a container still take one each: a zone concern has nothing to inherit from.
+
+        ⚑ **This is a sampling rate and it goes away entirely under decision one.** If ARKit holds the
+        lens for a zone there is no wake, no pause, and every frame can carry a position — which is
+        what the ruling asked for and what the handover currently prices out.
+      */
+      /* ⛑ **Through the refs, because `shoot` closes over its first render** — its deps are
+         `[capturePhotoV2]`, and the file already reads `openRef.current` two dozen lines below for
+         exactly this reason. Written as `open?.pinId` this would have been permanently null, so
+         every frame would have sampled a position and the change would have done nothing at all
+         while reading as though it had. ⚑ *A stale closure is the same shape as a stale ARFrame:
+         a value that is confidently the wrong one.* */
+      const containerId = openRef.current?.pinId ?? null;
+      const isPlate = statusRef.current?.mode === "text";
+      const needsPosition =
+        containerId === null || isPlate || !positionedContainers.current.has(containerId);
+      const position = needsPosition
+        ? await takePosition().catch(
+            () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+          )
+        : undefined;
+      if (containerId && position?.positioned) positionedContainers.current.add(containerId);
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);

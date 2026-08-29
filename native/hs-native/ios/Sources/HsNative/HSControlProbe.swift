@@ -1,6 +1,7 @@
 import ARKit
 import AVFoundation
 import Foundation
+import UIKit
 
 /**
  Item 2 of the running list, both probes, in one session because they need the same one.
@@ -85,6 +86,11 @@ final class HSControlProbe: NSObject {
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        out["osVersion"] = UIDevice.current.systemVersion
+        out["model"] = UIDevice.current.model
+        // ⛑ Stamped, because the first write-up of this probe quoted an OS version copied from
+        // another document rather than measured here — and the device turned out to have updated.
+        say("device: \(UIDevice.current.model) iPadOS \(UIDevice.current.systemVersion)")
         say("session started; settling")
 
         DispatchQueue.global().async { [weak self] in

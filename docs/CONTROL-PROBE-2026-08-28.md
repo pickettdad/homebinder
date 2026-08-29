@@ -1,6 +1,19 @@
 # Item 2's two probes — measured on device
 
-**2026-08-28 · `iPad13,4`, iPadOS 26.5 · `HSControlProbe`, tethered, three runs.**
+**2026-08-28 · `iPad13,4` · `HSControlProbe`, tethered, three runs.**
+
+**Re-run and confirmed on `iPadOS 26.6`, 2026-08-29** — device-stamped, not copied.
+
+⛑ *An earlier draft of this line said `iPadOS 26.5`, carried across from `LENS-PROBE-2026-08-24.md`
+rather than measured here — and the iPad turned out to have updated to 26.6 in between, so the
+original runs' OS was genuinely unknowable from the record.* **A version quoted as measured that was
+copied from another document is the same defect as a stale config reading**, and this file exists to
+be cited. `HSControlProbe` now stamps `UIDevice.current.systemVersion` on every run.
+
+**The re-run reproduces everything**, which is what makes the correction cheap rather than alarming:
+all six controls took and held, torch 6 ms in both directions, 13 formats / 4 distinct resolutions,
+new resolution live at 580–806 ms, tracking `.normal` at **1431–1537 ms**, pose jump 0.0000 m.
+*Two independent runs, ten transitions, the same 1.5 s window.*
 Running list item 2: *"Either could kill decision one, and both are cheaper than finding out inside
 a big run."* ⚑ **Neither kills it. One of them prices it.**
 
@@ -53,6 +66,9 @@ Five real transitions (a sixth was correctly skipped as already-live):
 | 1280×720 → **3840×2160** | 817 ms | 1452 ms | 0.07 mm |
 | 3840×2160 → 1920×1440 | 718 ms | 1556 ms | 0.21 mm |
 | 1920×1440 → 1920×1080 | 657 ms | 1505 ms | 0.02 mm |
+
+**Second run, iPadOS 26.6 confirmed** — 580 / 600 / 806 / 657 / 719 ms to the new resolution, and
+**1431 / 1447 / 1471 / 1511 / 1537 ms** to `.normal`, every pose jump 0.0000 m.
 
 ⚑ **The world survives — `HSLensProbe`'s finding holds and is now tighter.** Sub-millimetre jumps
 with the iPad stationary; the 15 mm previously measured was a hand moving.

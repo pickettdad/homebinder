@@ -709,6 +709,26 @@ export const stopCamera = () => requireCamera().stop();
  * ordinary reason — its `frame.role` is not `primary`, and the pose is on the primary of the same
  * `captureId`. Stamping a refusal on those would make `positioned: false` the majority case and
  * *drown the refusals worth reading*.
+ *
+ * ## ⛑ Currently unreachable on the shipping path, and saying so rather than letting it look live
+ *
+ * **The room shot frames WIDE** (owner ruling 2026-08-16, and the field re-confirmed it on
+ * 2026-08-28: *"in a tight room, without viewing through wide angle, it's hard to know if I am
+ * getting the shot I need"*). So the 120° frame is the **primary**, the 1× frame is the sibling,
+ * and this predicate's wide branch does not fire — `room-shot` is the only door that requests a
+ * pair. *Verified on device: `lenses: wide,normal`.*
+ *
+ * **Kept, because it is the correct rule for the configuration and the configuration can change** —
+ * any future door that asks for a pair from a normal-framed capture gets the right record for free.
+ * ⚑ **But it is named here as unreached rather than left to look live**, because a tested predicate
+ * nobody calls is exactly the rule-43 shape this file has paid for six times, and one written an
+ * hour ago is no different from one written in July.
+ *
+ * ⛑ **The live question it leaves open is the design session's, not this file's.** The pose now
+ * lands on a wide frame. *The pose itself is honest — it is where the concierge STOOD, which no
+ * lens changes.* What does not carry across is the **camera model**: ARKit's `transform` describes
+ * a 1× wide-angle camera, so the 120° image **cannot be projected through it**. Recorded in
+ * `MANIFEST-FIELD6-ADDITIONS.md`; whether the desk wants that stated as a field is theirs to rule.
  */
 export function positionForSibling(
   frame: Pick<CaptureFrame, "lens">,

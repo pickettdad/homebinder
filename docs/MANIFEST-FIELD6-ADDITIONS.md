@@ -58,6 +58,26 @@ whose reason is known exactly.
 `positioned: false` the majority case and drown the refusals worth reading — *a signal that speaks
 on the majority case is one nobody reads on the minority case that matters.*
 
+### ⛑ And on a room shot the positioned frame is the 120° one — desk, read this
+
+**The room shot frames wide** (owner ruling 2026-08-16, re-confirmed in the field 2026-08-28), so
+the **primary is the 120° frame** and the 1× frame is its sibling. *Verified on device:
+`lenses: wide,normal`, one press, 328 ms.* ⚑ **So `position` on a `intent: "room-shot"` capture is
+stamped on a wide-angle photograph, and the design's earlier premise — *the 1× frame carries the
+measured position* — is inverted on this door.**
+
+**The pose is still honest.** It is **where the concierge stood**, and no lens changes that. `x/y/z`
+and the translation column of `transform` mean exactly what they mean on any other frame.
+
+⛑ **What does NOT carry across is the camera model.** ARKit's `transform` describes its own 1×
+wide-angle camera — the ultra-wide is not offered to world tracking on this device — so **the 120°
+image cannot be projected through that matrix.** *Use the pose; do not use it as a camera.* The 1×
+sibling of the same `frame.captureId` is the frame whose geometry the matrix does describe.
+
+**Stated rather than fielded.** Whether the desk wants this as an explicit flag is the design
+session's ruling, not the field's, and inventing a manifest field for it here is how two homes for
+one fact begin.
+
 **`position.surface` is not `position.x/y/z`.** The pose is **where the concierge stood**; `surface`
 is the ray-cast hit **in front of the lens**, with its distance. For a nameplate shot the two are
 0.3–1 m apart, which is the difference between placing the water heater and placing the person

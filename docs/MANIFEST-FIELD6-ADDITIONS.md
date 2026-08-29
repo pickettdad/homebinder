@@ -17,7 +17,8 @@ Three states, and the third is the one worth building for.
 | `{ positioned: true, … }` | measured, with `tracking`, a full 4×4 `transform`, and `surface` when a ray-cast hit |
 | `{ positioned: false, why }` | ⚑ **a refusal** — the app could take a position here and did not |
 | field absent, `owner.kind: "pin"` | this frame inherits from its container, which is the normal case |
-| field absent, `owner.kind: "zone"` | ⛑ **nobody knows** — there is no container to inherit from |
+| field absent, `frame.role` is not `primary` | a **sibling** — the pose is on the `primary` frame of the same `frame.captureId` |
+| field absent, `owner.kind: "zone"`, no `frame` | ⛑ **nobody knows** — there is no container to inherit from |
 
 ⛑ **The distinction between the last three is the whole design.** *At least one frame per container
 carries a position; everything else inherits it.* So an absent `position` on nine frames of a
@@ -39,6 +40,23 @@ traverse sibling frames, the floorplan and the mesh.**
 ⛑ *Stated because an absence that means both "fine" and "unplaceable" is a signal nobody can read —
 and this manifest very nearly shipped one.* The disambiguator was already present: `owner` is on
 every entry (`MediaFileEntryV3.owner`). It just was not named as load-bearing.
+
+**And `frame.role` is the second disambiguator, for the same reason.** *A sibling — a bracket
+exposure, the unlit companion — is absent because the pose belongs to its primary, which the shared
+`frame.captureId` names.* **Read `role` and `owner` before reading the absence, in that order.**
+
+### ⚑ The one sibling that refuses instead
+
+**The 120° frame of a sibling pair carries `{positioned: false, why: "wide lens is not offered to
+world tracking…"}`.** *The ultra-wide is not offered to `ARWorldTrackingConfiguration` on this iPad
+— measured, `HSLensProbe` 2026-08-24 — while the physical lens exists.* ⛑ **That is a hardware fact
+no reader can derive from an absence**, and a room shot files to the zone, where absence already
+means *nobody knows*. Without the refusal the record would say *nobody knows* about the one frame
+whose reason is known exactly.
+
+**Only that frame gets it.** Stamping a refusal on every bracket exposure would make
+`positioned: false` the majority case and drown the refusals worth reading — *a signal that speaks
+on the majority case is one nobody reads on the minority case that matters.*
 
 **`position.surface` is not `position.x/y/z`.** The pose is **where the concierge stood**; `surface`
 is the ray-cast hit **in front of the lens**, with its distance. For a nameplate shot the two are

@@ -922,8 +922,9 @@ final class CameraController: NSObject {
     private var videoInput: AVCaptureDeviceInput?
     /// The glass currently in the session.
     private var lens: CameraLens = .normal
-    /// Set for the length of the wide half of a sibling pair. See `fireWideSibling`.
-    private var wideSiblingOverride = false
+    /// The glass to hold for the second half of a sibling pair — the one the concierge did NOT
+    /// frame with — set for the length of one exposure. See `fireWideSibling`.
+    private var siblingLensOverride: CameraLens?
     /// What the concierge asked for, which survives a mode change. ⚑ Kept separate from `lens`
     /// because Text *refuses* wide: stepping into Text must not silently discard a choice the
     /// concierge made, and stepping back out must restore it rather than making them ask twice.
@@ -1433,7 +1434,7 @@ final class CameraController: NSObject {
         /* ⚑ The one thing that outranks the mode's lens policy, and it is deliberately narrow:
            the second half of a sibling pair, for the length of one exposure. `requestedLens` is
            untouched, so the concierge's standing choice survives the swap in both directions. */
-        let wantedLens = wideSiblingOverride ? .wide : goal.lens(requested: requestedLens)
+        let wantedLens = siblingLensOverride ?? goal.lens(requested: requestedLens)
         if wantedLens != lens { _ = swapLens(to: wantedLens) }
         if lens != wantedLens { unmet.append("lens") }
 
@@ -2060,7 +2061,18 @@ final class CameraController: NSObject {
            straight lines — so a wide frame of a plate is not a second look at it, it is a worse
            one. Refused here rather than at the door, so the rule lives with the policy it belongs
            to instead of being restated in TypeScript. */
-        let wantsWide = wideSibling && !goal.lensLocked && !isTraversing && lens != .wide
+        /* ⚑ **The sibling is THE OTHER GLASS, not "the wide one".**
+
+           The room shot already defaults to wide — `lensPolicyFor`, owner ruling 2026-08-16, *both
+           are "get the whole of it in"* — so a pair defined as "add the 120° frame" would have
+           refused itself on the one door that asks for it, and delivered a single frame that looked
+           entirely normal. ⛑ *A feature that declines on its only caller, silently, is the shape of
+           every rule-43 instance in this repo.*
+
+           Defined as the other glass it holds whichever way round the concierge is pointing: they
+           keep the framing they chose as the PRIMARY, and the frame they did not choose arrives
+           beside it. */
+        let wantsWide = wideSibling && !goal.lensLocked && !isTraversing
 
         if wantsTorchPair {
             beginPairWithUnlitFrame(bracketed: wantsBracket, wideSibling: wantsWide, completion: completion)
@@ -2335,16 +2347,17 @@ final class CameraController: NSObject {
      result, because *an absence with no reason* is the signal nobody can act on.
      */
     private func fireWideSibling(for job: CaptureJob) {
-        guard AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil else {
-            job.wideRefused = "no ultra-wide on this device"
+        let other: CameraLens = lens == .wide ? .normal : .wide
+        guard AVCaptureDevice.default(other.deviceType, for: .video, position: .back) != nil else {
+            job.wideRefused = "no \(other.rawValue) lens on this device"
             completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
             return
         }
         let started = CACurrentMediaTime()
-        wideSiblingOverride = true
+        siblingLensOverride = other
         let achieved = apply(mode: mode)
-        guard lens == .wide else {
-            wideSiblingOverride = false
+        guard lens == other else {
+            siblingLensOverride = nil
             _ = apply(mode: mode)
             job.wideRefused = achieved.unmet.contains("lens") ? "lens swap refused" : "swap did not take"
             completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
@@ -2379,8 +2392,8 @@ final class CameraController: NSObject {
     /// Undo the override and re-run the mode's own policy. Never `requestLens` — that would write
     /// the concierge's standing choice, and this swap was the app's decision, not theirs.
     private func restoreLensAfterWideSibling() {
-        guard wideSiblingOverride else { return }
-        wideSiblingOverride = false
+        guard siblingLensOverride != nil else { return }
+        siblingLensOverride = nil
         _ = apply(mode: mode)
     }
 
@@ -2601,6 +2614,27 @@ final class CameraController: NSObject {
         // The top-level read stays frame 0's — the declared surface, unchanged. Stored by nobody,
         // because there is nowhere for it to land (#163).
         if let first = reads.first, let read = first { payload["ocr"] = read }
+        /*
+         ⛑ **A live line per capture, for the tethered console.** `print` rather than `NSLog`
+         because NSLog does not reach the stream `devicectl … --console` captures on modern iOS —
+         a fact that cost two probe runs on 2026-08-28 before it was noticed.
+
+         It says what the frames ARE, not that a capture happened: how many, which glass took each,
+         and what the wide sibling cost or why it was refused. ⚑ *Capture is the one act where the
+         record and the photograph can disagree and nothing downstream can tell*, so the line names
+         both halves.
+        */
+        let lensLine = outgoing.map { $0.lens.rawValue }.joined(separator: ",")
+        print("HS-CAP frames=\(written.count) lenses=[\(lensLine)] wideSibling=\(job.wideFrame != nil) "
+              + "wideRefused=\(job.wideRefused ?? "-") lensSwapMs=\(job.lensSwapMs.map { String(format: "%.0f", $0) } ?? "-") "
+              + "torchPaired=\(job.pairFired) bracketed=\(job.bracketed) mode=\(mode.rawValue)")
+        HSZoneLog.record("capture", [
+            "frames": written.count,
+            "lenses": lensLine,
+            "wideSibling": job.wideFrame != nil,
+            "wideRefused": job.wideRefused ?? "-",
+            "lensSwapMs": job.lensSwapMs ?? -1,
+        ])
         job.completion(.success(payload))
     }
 

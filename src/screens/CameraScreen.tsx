@@ -43,6 +43,7 @@ import {
   cameraAvailable,
   captureFrames,
   captureWantsRetake,
+  positionForSibling,
   frameBlob,
   frameLabel,
   frameStateOf,
@@ -799,6 +800,10 @@ export function CameraScreen({
             mime: "image/jpeg",
             read: readOf(i + 1),
             frame: roleOf(i + 1),
+            /* ⚑ The doctrine lives in `positionForSibling`, not here — a rule inside a
+               component cannot be scanned or tested, which is the same reason `globalCameraApplies`
+               is a predicate. Read it there; it is the reason the wide frame refuses. */
+            position: positionForSibling(f, result.wideSibling === true),
           })),
         );
         /*
@@ -1246,22 +1251,55 @@ export function CameraScreen({
     }
   };
 
-  const chooseLens = async (lens: CameraLens) => {
+  /** ⚑ Returns the lens ACHIEVED, so a caller can paint from the return rather than the ask. It
+   *  used to return nothing, which left every caller with only the request to go on. */
+  const chooseLens = async (lens: CameraLens): Promise<CameraLens | null> => {
     try {
       const achieved = await requestLens(lens);
       if (achieved.lens !== lens) showToast(`lens stayed ${achieved.lens}`);
+      return achieved.lens;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     }
   };
 
   /** The mode's default lens for a door, applied when that door is opened. The concierge can still
    *  change it afterwards — this is a default, never a lock. */
+  /**
+   * ⚑ **Waits for the status, and says so when it never comes.**
+   *
+   * The room-shot effect fires the moment the zone opens. `modeStatus` is an event from the native
+   * side and has usually **not arrived yet** — so the previous version read `status` (the state,
+   * out of its own render's closure), found `null`, and **returned silently**. The room shot then
+   * opened on NORMAL while the ruling of 2026-08-16 says wide, and the field found it before any
+   * test did: *"in a tight room, without viewing through wide angle, it's hard to know if I am
+   * getting the shot I need."*
+   *
+   * ⛑ Two defects, one line. It read the **state** where the traverse path twenty lines above
+   * correctly reads `statusRef.current` — the third instance of that class in this file today. And
+   * it treated *not ready yet* as *nothing to do*, which is the silent-no-op shape this repo keeps
+   * paying for. It now waits, and if the status never comes it **reports** rather than shrugging.
+   */
   const applyIntentLens = async (intent: LensIntent) => {
-    if (!status?.lensAvailable) return;
-    const policy = lensPolicyFor(status.mode, intent);
-    if (policy.locked || status.lens === policy.default) return;
-    await chooseLens(policy.default);
+    const deadline = Date.now() + 2500;
+    while (!statusRef.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const live = statusRef.current;
+    if (!live) {
+      setZoneNote("camera never reported its state — lens left as found");
+      return;
+    }
+    if (!live.lensAvailable) return;
+    const policy = lensPolicyFor(live.mode, intent);
+    if (policy.locked || live.lens === policy.default) return;
+    const achieved = await chooseLens(policy.default);
+    /* Painted from the return, never from the ask. A control that claims a field of view the
+       photograph does not have is the failure this whole contract exists to prevent. */
+    if (achieved && achieved !== policy.default) {
+      setZoneNote(`lens stayed ${achieved} — wanted ${policy.default}`);
+    }
   };
 
   const diagnosis = traverseResult ? traverseDiagnosis(traverseResult) : null;

@@ -175,7 +175,16 @@ interface AppStore {
       /** ⚑ On the primary only. Siblings inherit — a pose on all three of a bracket would read as
        *  three positions of one object. A REFUSAL is stored as a refusal, never as an absence. */
       position?: CapturePositionMeta;
-      siblings?: { blob: Blob; mime?: string; read?: FrameReadMeta; frame?: FrameRoleMeta }[];
+      siblings?: {
+        blob: Blob;
+        mime?: string;
+        read?: FrameReadMeta;
+        frame?: FrameRoleMeta;
+        /** ⚑ A sibling that has a REASON for carrying no pose of its own says so. See the wide
+         *  frame of a sibling pair: the ultra-wide is not offered to world tracking, which is a
+         *  hardware fact no reader can derive from an absence. */
+        position?: CapturePositionMeta;
+      }[];
     },
   ): Promise<string>;
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
@@ -484,6 +493,7 @@ export const useApp = create<AppStore>((set, get) => ({
         bytes: sib.blob.size,
         read: sib.read,
         frame: sib.frame,
+        position: sib.position,
       });
     }
 

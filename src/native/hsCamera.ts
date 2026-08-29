@@ -694,6 +694,34 @@ const requireCamera = (): NativeCamera => {
 export const startCamera = (mode: CameraMode) => requireCamera().start({ mode });
 export const stopCamera = () => requireCamera().stop();
 /**
+ * ⚑ **What a sibling frame's `position` field must say — a predicate, not a line inside a
+ * component**, for the reason `globalCameraApplies` states: doctrine buried in a screen cannot be
+ * scanned, cited or tested, and this one is doctrine.
+ *
+ * ⛑ **The 120° frame of a sibling pair REFUSES a position; it does not quietly lack one.** The
+ * ultra-wide is not offered to `ARWorldTrackingConfiguration` on this iPad (`HSLensProbe`,
+ * 2026-08-24: thirteen formats, every one wide-angle, while the physical lens exists). That is a
+ * hardware fact **no reader can derive from an absence** — and a room shot files to the *zone*,
+ * where an absent position already means *nobody knows*. Without this the record would say *nobody
+ * knows* about the one frame whose reason is known exactly.
+ *
+ * ⚑ **Only that frame gets it.** A bracket exposure or an unlit companion is absent for the
+ * ordinary reason — its `frame.role` is not `primary`, and the pose is on the primary of the same
+ * `captureId`. Stamping a refusal on those would make `positioned: false` the majority case and
+ * *drown the refusals worth reading*.
+ */
+export function positionForSibling(
+  frame: Pick<CaptureFrame, "lens">,
+  wideSiblingTaken: boolean,
+): { positioned: false; why: string } | undefined {
+  if (!wideSiblingTaken || frame.lens !== "wide") return undefined;
+  return {
+    positioned: false,
+    why: "wide lens is not offered to world tracking; the pose is on the primary frame of this captureId",
+  };
+}
+
+/**
  * ⚑ `wideSibling` asks for the 120° frame beside the 1× one — the sibling pair.
  *
  * It is a REQUEST, not an instruction: a lens-locked mode (Text) refuses it, and so does a device

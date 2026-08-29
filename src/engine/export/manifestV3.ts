@@ -295,6 +295,7 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
         source: sib.source,
         read: sib.read,
         frame: sib.frame,
+        position: sib.position,
       });
     }
   };

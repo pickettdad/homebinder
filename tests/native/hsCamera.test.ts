@@ -17,12 +17,14 @@ import {
   lensPolicyFor,
   shouldOfferRetake,
   captureWantsRetake,
+  positionForSibling,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
   type TraverseFrame,
   type TraversePair,
 } from "../../src/native/hsCamera";
+import type { CameraLens } from "../../src/native/hsCamera";
 
 const running = (mode: (typeof CAMERA_MODES)[number], unmet: string[] = []) => ({
   mode,
@@ -474,5 +476,44 @@ describe("framesTurnedFromStamp", () => {
   it("takes its baseline from the first frame that has one, not from a constant", () => {
     // A leg begun in landscape must not report every one of its own frames as turned.
     expect(framesTurnedFromStamp({ frames: [frame(0, 0), frame(1, 0), frame(2, 0)] })).toEqual([]);
+  });
+});
+
+/**
+ * ⚑ **The wide frame of a sibling pair refuses a position; it does not quietly lack one.**
+ *
+ * This is the doctrine's own test case. The ultra-wide is not offered to world tracking on this
+ * iPad (`HSLensProbe`, 2026-08-24) — a hardware fact **no reader can derive from an absence** — and
+ * a room shot files to the zone, where an absent position already means *nobody knows*. Without the
+ * refusal the record would say *nobody knows* about the one frame whose reason is known exactly.
+ *
+ * ⛑ And only that frame gets it: stamping a refusal on every bracket exposure would make
+ * `positioned: false` the majority case and drown the refusals worth reading.
+ */
+describe("the sibling pair's record", () => {
+  const frame = (lens: CameraLens) => ({
+    path: `/tmp/${lens}.jpg`,
+    bytes: 1,
+    index: 0,
+    exifOrientation: 1,
+    torch: false,
+    lens,
+  });
+
+  it("refuses on the wide frame, with a reason a person can act on", () => {
+    const refusal = positionForSibling(frame("wide"), true);
+    expect(refusal?.positioned).toBe(false);
+    // The reason must name the hardware fact, not merely restate the absence.
+    expect(refusal && "why" in refusal ? refusal.why : "").toMatch(/world tracking/);
+  });
+
+  it("stays silent on an ordinary sibling, so refusals keep meaning something", () => {
+    expect(positionForSibling(frame("normal"), true)).toBeUndefined();
+  });
+
+  it("stays silent when no pair was taken, whatever a frame calls its lens", () => {
+    // A capture the concierge shot on wide by hand is not a sibling pair, and its frames are
+    // ordinary captures that inherit the usual way.
+    expect(positionForSibling(frame("wide"), false)).toBeUndefined();
   });
 });

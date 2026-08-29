@@ -16,6 +16,7 @@ import {
   glareSuspected,
   lensPolicyFor,
   shouldOfferRetake,
+  captureWantsRetake,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
@@ -72,6 +73,45 @@ describe("the retake trigger", () => {
 
   it("stays silent on a confident read", () => {
     expect(shouldOfferRetake({ characterCount: 14, marginal: false })).toBe(false);
+  });
+
+  /**
+   * ⚑ The rule asked of a photograph rather than of the live loop — the form that has a reader.
+   * It reads the PRIMARY frame, because that is the one that counts and the only one any count
+   * sees; a bracket exposure reading badly is what a bracket is for.
+   */
+  describe("asked of a capture", () => {
+    const frame = (ocr?: { characterCount: number; marginal: boolean }) => ({
+      path: "/tmp/f.jpg",
+      bytes: 1,
+      index: 0,
+      exifOrientation: 1,
+      torch: false,
+      ocr: ocr
+        ? { lines: [], text: "x", meanConfidence: 0.4, engine: "e", osVersion: "26", ...ocr }
+        : undefined,
+    });
+
+    it("says nothing about a capture that read nothing, which is most captures", () => {
+      expect(captureWantsRetake({ frames: [frame()] })).toBe(false);
+    });
+
+    it("offers a retake when the primary frame held characters and read them badly", () => {
+      expect(captureWantsRetake({ frames: [frame({ characterCount: 22, marginal: true })] })).toBe(true);
+    });
+
+    it("judges the primary, not whichever frame happens to have read worst", () => {
+      // A bracket exposure reading badly is the bracket working. The primary is the photograph.
+      expect(
+        captureWantsRetake({
+          frames: [frame({ characterCount: 22, marginal: false }), frame({ characterCount: 4, marginal: true })],
+        }),
+      ).toBe(false);
+    });
+
+    it("does not fire on a capture with no frames at all", () => {
+      expect(captureWantsRetake({ frames: [] })).toBe(false);
+    });
   });
 });
 

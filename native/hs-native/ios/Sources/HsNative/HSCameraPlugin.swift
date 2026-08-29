@@ -3856,10 +3856,26 @@ final class CameraController: NSObject {
             total += Double(candidate.confidence)
         }
         guard !lines.isEmpty else { return nil }
+        let mean = total / Double(lines.count)
+        let characters = lines.reduce(0) { $0 + (($1["text"] as? String)?.count ?? 0) }
         return [
             "lines": lines,
             "text": lines.compactMap { $0["text"] as? String }.joined(separator: "\n"),
-            "meanConfidence": total / Double(lines.count),
+            "meanConfidence": mean,
+            /*
+             ⚑ **The verdict is computed HERE, against the one constant that defines it.**
+
+             `LiveRead.goodConfidence` is the single boundary between a read going well and one
+             that is not — used by the live retake trigger and the torch veto alike, and its own
+             comment says why: *two constants meaning the same thing is precisely how the two
+             rotation tables drifted apart.* A TypeScript threshold beside it would be a third.
+
+             ⛑ And `marginal` is **never "no text found"**. Most captures legitimately contain
+             none — a pipe, a stain, a wide shot — so a trigger that fires on nothing-read nags on
+             the majority case and is ignored by the time a plate needs it.
+            */
+            "characterCount": characters,
+            "marginal": characters >= LiveRead.worthReadingCharacters && mean < LiveRead.goodConfidence,
             // Named precisely, because a read is only comparable against another read from the
             // same recogniser on the same OS (Register #135). Nothing here persists it.
             "engine": "vision.VNRecognizeTextRequest.accurate.rev\(VNRecognizeTextRequest.currentRevision)",

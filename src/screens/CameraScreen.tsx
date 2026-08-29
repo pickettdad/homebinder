@@ -42,6 +42,7 @@ import {
   adjustCamera,
   cameraAvailable,
   captureFrames,
+  captureWantsRetake,
   frameBlob,
   frameLabel,
   frameStateOf,
@@ -843,6 +844,27 @@ export function CameraScreen({
           claims nothing about captures from an earlier visit.
         */
         sessionFrames.current.set(mediaId, result);
+
+        /*
+          ⚑ **The retake rule finally has a reader** (running list item 5).
+
+          `shouldOfferRetake` has existed, correct and tested, since the day the trigger was ruled
+          on — and **nothing in the app called it**, so in the field it fired on nobody. That is
+          rule 43 again: *a value being computed is not the same as a reader being able to reach
+          it*, and this is the seventh instance.
+
+          ⛑ **A toast, not a sheet.** This screen's contract is *Assume Use, never Retake* — the
+          filmstrip is the confirmation. So this is an offer that costs nothing to ignore: shoot
+          again or move on, and the capture is already filed either way. A gate here would trade
+          the whole no-confirm-sheet design for one marginal plate.
+
+          And it says something only when there is something to say: `characterCount > 0 AND
+          marginal`. Most captures legitimately hold no text at all, and a prompt that fired on
+          those would be background noise by the time a plate needed it.
+        */
+        if (captureWantsRetake(result)) {
+          showToast("That plate read poorly — worth another, closer or with the light moved");
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -850,7 +872,7 @@ export function CameraScreen({
       busyRef.current = false;
       setBusy(false);
     }
-  }, [capturePhotoV2]);
+  }, [capturePhotoV2, showToast]);
 
   /**
    * The `+` at the top of the strip. Tapping it while inside a container closes that one and

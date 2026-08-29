@@ -175,6 +175,14 @@ export interface FrameRead {
   meanConfidence: number;
   engine: string;
   osVersion: string;
+  /** Characters this frame actually read. ⚑ Zero is the ordinary case — a pipe, a stain, a wide
+   *  shot — and is why `marginal` is not "nothing found". */
+  characterCount?: number;
+  /** ⚑ **Characters were detected and read badly**, decided natively against the one constant
+   *  that defines that boundary (`LiveRead.goodConfidence`). Computed there rather than here so
+   *  the live trigger and the post-capture verdict cannot drift — the failure two rotation tables
+   *  already demonstrated in this file's history. */
+  marginal?: boolean;
 }
 
 export interface CaptureFrame {
@@ -945,8 +953,25 @@ export function frameStateOf(status: { mode: CameraMode; unmet: string[]; sessio
  * text — a pipe, a floor stain, a wide shot — so a trigger that fires on "nothing read" nags on
  * the majority case and is ignored by the time a plate needs it.
  */
-export function shouldOfferRetake(event: Pick<TextBoxesEvent, "characterCount" | "marginal">): boolean {
-  return event.characterCount > 0 && event.marginal;
+export function shouldOfferRetake(event: { characterCount?: number; marginal?: boolean }): boolean {
+  return (event.characterCount ?? 0) > 0 && event.marginal === true;
+}
+
+/**
+ * ⚑ **The same rule, asked of a photograph that has already been taken** — which is the only
+ * moment it can be acted on for free.
+ *
+ * Reads the PRIMARY frame's accurate read, never the live one: the live loop runs at the fast
+ * recognition level and jitters, and what matters is whether *this photograph* holds the plate.
+ * A capture with no read at all — most captures — returns false, because there is nothing to
+ * retake for.
+ *
+ * ⛑ Deliberately not a confirm sheet. The screen's own contract is *Assume Use, never Retake*, so
+ * this is an offer a concierge can ignore by taking the next shot, not a gate.
+ */
+export function captureWantsRetake(result: Pick<CaptureResult, "frames">): boolean {
+  const read = result.frames[0]?.ocr;
+  return read ? shouldOfferRetake(read) : false;
 }
 
 /**

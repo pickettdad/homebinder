@@ -227,7 +227,11 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Camera is not running — call start first")
             return
         }
-        controller.capture { result in
+        /* ⚑ **Asked for by the caller, not inferred from the mode.** The door knows it is taking
+           a room shot; the controller knows only that it is in `object` mode, which is also what a
+           nameplate close-up runs in. Inferring here would put a 120° frame on every object photo
+           in the house — thirty extra frames a room, for the one act that wanted two. */
+        controller.capture(wideSibling: call.getBool("wideSibling") ?? false) { result in
             switch result {
             case .success(let payload): call.resolve(payload)
             case .failure(let error): call.reject(error.localizedDescription)
@@ -912,6 +916,8 @@ final class CameraController: NSObject {
     private var videoInput: AVCaptureDeviceInput?
     /// The glass currently in the session.
     private var lens: CameraLens = .normal
+    /// Set for the length of the wide half of a sibling pair. See `fireWideSibling`.
+    private var wideSiblingOverride = false
     /// What the concierge asked for, which survives a mode change. ⚑ Kept separate from `lens`
     /// because Text *refuses* wide: stepping into Text must not silently discard a choice the
     /// concierge made, and stepping back out must restore it rather than making them ask twice.
@@ -1067,6 +1073,16 @@ final class CameraController: NSObject {
             /// Stamped per settings id at request time, never read off `torchOn` at delivery —
             /// by then the pair has already switched it.
             let torch: Bool
+            /**
+             ⚑ **Per FRAME, not per job — because the wide sibling is the one case where they
+             differ**, and it is the whole point of the pair.
+
+             The job-level `lens` was accurate for every capture built before this: one tap, one
+             glass. A room shot now delivers a 1× frame and a 120° frame from one press, and a
+             desk told *this capture was wide* about a pair where only the last frame was would be
+             told something false about three frames to be told something true about one.
+            */
+            let lens: CameraLens
         }
         let completion: (Result<[String: Any], Error>) -> Void
         let bracketed: Bool
@@ -1091,16 +1107,30 @@ final class CameraController: NSObject {
         var outstanding: Int
         var wantsTorchPair: Bool
         var pairFired = false
+        /// ⚑ Asked for by the door, then granted or refused by the hardware — see `wideRefused`.
+        var wantsWideSibling: Bool
+        var wideFired = false
+        /// The 120° frame, held aside like the companion and appended LAST for the same reason:
+        /// every index-keyed reading downstream would move if the array were re-ordered.
+        var wideFrame: Frame?
+        /// ⛑ **Measured, not assumed.** Two input swaps and two full re-configures per room shot,
+        /// reported on the capture so the cost is a number in the record rather than a guess in a
+        /// document — and so a device where it is expensive says so on the first walk.
+        var lensSwapMs: Double?
+        /// Why there is no wide frame, when one was asked for. An absence with no reason is the
+        /// signal this project keeps having to go back and add.
+        var wideRefused: String?
 
         init(completion: @escaping (Result<[String: Any], Error>) -> Void,
              bracketed: Bool, torchAtCapture: Bool, lens: CameraLens,
-             outstanding: Int, wantsTorchPair: Bool) {
+             outstanding: Int, wantsTorchPair: Bool, wantsWideSibling: Bool = false) {
             self.completion = completion
             self.bracketed = bracketed
             self.torchAtCapture = torchAtCapture
             self.lens = lens
             self.outstanding = outstanding
             self.wantsTorchPair = wantsTorchPair
+            self.wantsWideSibling = wantsWideSibling
         }
     }
 
@@ -1394,7 +1424,10 @@ final class CameraController: NSObject {
         // the concierge without discarding their choice — `requestedLens` holds what they asked
         // for and it is restored the moment they leave Text. Swapped before the device is read
         // below, because a swap replaces the very device this method goes on to configure.
-        let wantedLens = goal.lens(requested: requestedLens)
+        /* ⚑ The one thing that outranks the mode's lens policy, and it is deliberately narrow:
+           the second half of a sibling pair, for the length of one exposure. `requestedLens` is
+           untouched, so the concierge's standing choice survives the swap in both directions. */
+        let wantedLens = wideSiblingOverride ? .wide : goal.lens(requested: requestedLens)
         if wantedLens != lens { _ = swapLens(to: wantedLens) }
         if lens != wantedLens { unmet.append("lens") }
 
@@ -1975,15 +2008,16 @@ final class CameraController: NSObject {
 
     /// Capacitor dispatches plugin calls off the main queue; job bookkeeping lives on main, so the
     /// hop happens once here rather than at three places inside.
-    func capture(_ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+    func capture(wideSibling: Bool = false, _ completion: @escaping (Result<[String: Any], Error>) -> Void) {
         if Thread.isMainThread {
-            performCapture(completion)
+            performCapture(wideSibling: wideSibling, completion)
         } else {
-            DispatchQueue.main.async { [weak self] in self?.performCapture(completion) }
+            DispatchQueue.main.async { [weak self] in self?.performCapture(wideSibling: wideSibling, completion) }
         }
     }
 
-    private func performCapture(_ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+    private func performCapture(wideSibling: Bool,
+                                _ completion: @escaping (Result<[String: Any], Error>) -> Void) {
         guard session.isRunning else {
             completion(.failure(CameraError.notRunning))
             return
@@ -2015,8 +2049,15 @@ final class CameraController: NSObject {
          */
         let wantsTorchPair = torchOn && !isTraversing
 
+        /* ⛑ **A mode that locks its lens refuses the sibling too, and it must.** Text is locked to
+           normal because a 120° lens bends straight lines near the frame edge and a plate is
+           straight lines — so a wide frame of a plate is not a second look at it, it is a worse
+           one. Refused here rather than at the door, so the rule lives with the policy it belongs
+           to instead of being restated in TypeScript. */
+        let wantsWide = wideSibling && !goal.lensLocked && !isTraversing && lens != .wide
+
         if wantsTorchPair {
-            beginPairWithUnlitFrame(bracketed: wantsBracket, completion: completion)
+            beginPairWithUnlitFrame(bracketed: wantsBracket, wideSibling: wantsWide, completion: completion)
             return
         }
 
@@ -2043,7 +2084,8 @@ final class CameraController: NSObject {
             torchAtCapture: torchOn,
             lens: lens,
             outstanding: wantsBracket ? 3 : 1,
-            wantsTorchPair: wantsTorchPair
+            wantsTorchPair: wantsTorchPair,
+            wantsWideSibling: wantsWide
         )
         torchForRequest[id] = torchOn
 
@@ -2185,8 +2227,10 @@ final class CameraController: NSObject {
         }
     }
 
-    private func completeCaptureFrame(id: Int64, data: Data?, error: Error?) {
-        guard let job = jobs[id] else { return }
+    /// `forcedJob` is how a refused wide sibling re-enters the completion path with no delivery
+    /// of its own: there is no settings id to look up because no photo was ever requested.
+    private func completeCaptureFrame(id: Int64, data: Data?, error: Error?, forcedJob: CaptureJob? = nil) {
+        guard let job = forcedJob ?? jobs[id] else { return }
         let requestedWithTorch = torchForRequest[id] ?? false
 
         if let error {
@@ -2199,8 +2243,12 @@ final class CameraController: NSObject {
         // is which, stamped when the request was made rather than read off `torchOn` now — by now
         // the pair has already switched it.
         if let data {
-            let frame = CaptureJob.Frame(data: data, torch: requestedWithTorch)
-            if job.wantsTorchPair && !requestedWithTorch {
+            // `lens` is read HERE rather than off the job: during the wide stage the session is
+            // genuinely on the other glass, and that is the fact the frame is meant to carry.
+            let frame = CaptureJob.Frame(data: data, torch: requestedWithTorch, lens: lens)
+            if job.wideFired && job.wideFrame == nil {
+                job.wideFrame = frame
+            } else if job.wantsTorchPair && !requestedWithTorch {
                 job.companion = frame
             } else {
                 job.frames.append(frame)
@@ -2217,6 +2265,33 @@ final class CameraController: NSObject {
             fireLitHalf(for: job)
             return
         }
+
+        /*
+         ⚑ **The other glass, in the same tap** — the sibling pair (running list item 7).
+
+         *The lens is a substitute for stepping backwards*, and in a mechanical room there is often
+         nowhere to step. So a room shot takes both: a 1× frame that carries the measured position,
+         and a 120° frame beside it that inherits from its own sibling.
+
+         ⛑ **It cannot be one exposure.** World tracking is offered only the wide-angle format on
+         this iPad (`HSLensProbe`, 2026-08-24) — the physical ultra-wide exists and ARKit is not
+         given it — so a positioned 0.5× frame is not available at any price. Two frames, one press,
+         and the position lives on the one that can hold it.
+
+         Fired here, after the torch pair, for the same reason the lit half is: the concierge
+         pressed once and gets one result back.
+        */
+        if job.wantsWideSibling && !job.wideFired && job.wideRefused == nil {
+            job.wideFired = true
+            release(job)
+            fireWideSibling(for: job)
+            return
+        }
+
+        // ⚑ **The glass goes back before anything else happens.** A swap is an operation with two
+        // ends, and this project's recurring defect is accounting for one of them: the preview,
+        // the next capture and the next `takePosition` all inherit whatever is left here.
+        if job.wideFired { restoreLensAfterWideSibling() }
 
         release(job)
         // The lamp goes out behind the pair. Whether it comes back is `applyCompanionVerdict`'s
@@ -2245,6 +2320,64 @@ final class CameraController: NSObject {
         }
     }
 
+    /**
+     The 120° half of a sibling pair: swap the glass, take one frame, and hand the glass back.
+
+     ⚑ **A refusal completes the capture rather than failing it.** The 1× frame is already in hand
+     and it is the one carrying the position; losing a room shot because the second lens was busy
+     would trade the frame that matters for the frame that helps. The reason is recorded on the
+     result, because *an absence with no reason* is the signal nobody can act on.
+     */
+    private func fireWideSibling(for job: CaptureJob) {
+        guard AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil else {
+            job.wideRefused = "no ultra-wide on this device"
+            completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
+            return
+        }
+        let started = CACurrentMediaTime()
+        wideSiblingOverride = true
+        let achieved = apply(mode: mode)
+        guard lens == .wide else {
+            wideSiblingOverride = false
+            _ = apply(mode: mode)
+            job.wideRefused = achieved.unmet.contains("lens") ? "lens swap refused" : "swap did not take"
+            completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
+            return
+        }
+        job.lensSwapMs = (CACurrentMediaTime() - started) * 1000
+
+        // Exposure and focus were just re-asserted on a device that has never seen this scene.
+        // The same settle the torch pair gets, for the same reason: a frame taken mid-converge is
+        // a frame nobody can compare against the one beside it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
+            guard let self else { return }
+            guard self.session.isRunning else {
+                self.restoreLensAfterWideSibling()
+                job.wideRefused = "session stopped"
+                self.completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
+                return
+            }
+            let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            settings.photoQualityPrioritization = .quality
+            let id = settings.uniqueID
+            job.outstanding = 1
+            self.jobs[id] = job
+            // ⛑ The torch is NOT fired for this frame. A 120° frame is a framing shot; a hotspot
+            // sized for a plate 300 mm away lights a fifth of it and blows that fifth out.
+            self.torchForRequest[id] = false
+            self.applyRotation(self.captureRotationAngle, to: self.photoOutput.connection(with: .video))
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+    }
+
+    /// Undo the override and re-run the mode's own policy. Never `requestLens` — that would write
+    /// the concierge's standing choice, and this swap was the app's decision, not theirs.
+    private func restoreLensAfterWideSibling() {
+        guard wideSiblingOverride else { return }
+        wideSiblingOverride = false
+        _ = apply(mode: mode)
+    }
+
     /// Every settings id pointing at this job — a torch pair registers two.
     private func release(_ job: CaptureJob) {
         for (key, value) in jobs where value === job {
@@ -2260,10 +2393,11 @@ final class CameraController: NSObject {
      answer rather than the lit frame's settings — which is what continuous AE gives it, once it has
      had `torchPairSettleSeconds` to converge.
      */
-    private func beginPairWithUnlitFrame(bracketed: Bool,
+    private func beginPairWithUnlitFrame(bracketed: Bool, wideSibling: Bool,
                                          completion: @escaping (Result<[String: Any], Error>) -> Void) {
         let job = CaptureJob(completion: completion, bracketed: bracketed, torchAtCapture: true,
-                             lens: lens, outstanding: 1, wantsTorchPair: true)
+                             lens: lens, outstanding: 1, wantsTorchPair: true,
+                             wantsWideSibling: wideSibling)
         setTorch(false)
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
             guard let self else { return }
@@ -2320,8 +2454,13 @@ final class CameraController: NSObject {
         // labels, the agreement comparison, the deskew and the top-level read all key off position.
         var outgoing = job.frames
         if let companion = job.companion { outgoing.append(companion) }
+        // ⚑ **After the companion**, so the array shape stays: primary, [bracket], [companion],
+        // [wide]. Every index-keyed reading downstream — the EV labels, the agreement comparison,
+        // the top-level read — was written against positions, and appending anywhere but the end
+        // moves all of them silently.
+        if let wide = job.wideFrame { outgoing.append(wide) }
         if wantsDeskew, let first = outgoing.first, let flattened = Self.flattenPage(jpeg: first.data) {
-            outgoing[0] = CaptureJob.Frame(data: flattened, torch: first.torch)
+            outgoing[0] = CaptureJob.Frame(data: flattened, torch: first.torch, lens: first.lens)
             deskewed = true
         }
 
@@ -2347,7 +2486,9 @@ final class CameraController: NSObject {
                 // A deskewed document frame is legitimately 1: the page was straightened
                 // into upright pixels, so there is nothing left for the tag to say.
                 "exifOrientation": Self.exifOrientation(of: frame.data),
-                "torch": frame.torch
+                "torch": frame.torch,
+                // Per frame, because in a sibling pair they differ — see `CaptureJob.Frame.lens`.
+                "lens": frame.lens.rawValue
             ]
             if let read { entry["ocr"] = read }
             written.append(entry)
@@ -2370,7 +2511,15 @@ final class CameraController: NSObject {
              shooting normal and simply could not step back far enough. Without this the two are
              indistinguishable and the wrong one gets acted on.
             */
+            /* ⛑ The lens the capture was TAKEN under — the 1× frame, the one carrying the
+               position. It is no longer a description of every frame: read `frames[i].lens` for
+               that. Kept under its own name rather than removed, because a manifest field that
+               changes meaning silently is worse than one that gains a neighbour. */
             "lens": job.lens.rawValue,
+            /// Whether a 120° sibling was asked for, whether one arrived, and what it cost.
+            "wideSibling": job.wideFrame != nil,
+            "wideRefused": job.wideRefused as Any,
+            "lensSwapMs": job.lensSwapMs as Any,
             "bracketed": job.bracketed,
             "torchPaired": job.pairFired,
             // Reported rather than assumed: a document capture where no page was found is a

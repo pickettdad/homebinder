@@ -190,6 +190,10 @@ export interface CaptureFrame {
   /** Per-frame accurate read, in text/document modes. On a pair these are two independent
    *  reads of one plate, and where they disagree is where the glare was. */
   ocr?: FrameRead;
+  /** ⚑ **Which glass took THIS frame.** Was a per-capture fact until the sibling pair, where a
+   *  1× frame and a 120° frame arrive from one press — so `CaptureResult.lens` describes the
+   *  capture and this describes the photograph. Read this one when labelling a frame. */
+  lens?: CameraLens;
 }
 
 /** One adjacent pair in a traverse. ⚑ `contiguity` has THREE values, and that is the design:
@@ -554,6 +558,17 @@ export interface CaptureResult {
    *  needs to know whether the wide view was in use and it still did not fit, or the concierge was
    *  on normal and could not step back far enough. Without this the two are indistinguishable. */
   lens: CameraLens;
+  /** ⚑ A 120° sibling arrived, as the LAST frame of `frames`. The array shape is fixed —
+   *  primary, [bracket], [unlit companion], [wide] — because every index-keyed reading
+   *  downstream was written against positions. */
+  wideSibling?: boolean;
+  /** ⛑ Why there is no wide frame when one was asked for. *An absence with no reason* is the
+   *  thing this project keeps going back to add, so it is here from the first version. */
+  wideRefused?: string | null;
+  /** ⛑ **What the swap cost, measured on the device rather than estimated in a document.** Two
+   *  input swaps and two full re-configures. Reported per capture so the first real walk answers
+   *  it, instead of a probe run nobody schedules. */
+  lensSwapMs?: number | null;
   /** The angle asked of the photo connection, beside each frame's `exifOrientation`. Two numbers
    *  that must agree — printed so they can be seen not to. */
   rotationAngle: number;
@@ -594,7 +609,7 @@ interface NativeCamera {
     meteringPoint?: { x: number; y: number };
     torchOverride?: boolean;
   }): Promise<void>;
-  capture(): Promise<CaptureResult>;
+  capture(options?: { wideSibling?: boolean }): Promise<CaptureResult>;
   startTraverse(options: { continuesFrom?: string }): Promise<TraverseStarted>;
   stopTraverse(): Promise<TraverseResult>;
   /** The device bench — see `src/dev/deviceBench.ts`. Dev-bench only; it takes the camera to
@@ -670,7 +685,15 @@ const requireCamera = (): NativeCamera => {
 
 export const startCamera = (mode: CameraMode) => requireCamera().start({ mode });
 export const stopCamera = () => requireCamera().stop();
-export const captureFrames = () => requireCamera().capture();
+/**
+ * ⚑ `wideSibling` asks for the 120° frame beside the 1× one — the sibling pair.
+ *
+ * It is a REQUEST, not an instruction: a lens-locked mode (Text) refuses it, and so does a device
+ * with no ultra-wide. Read `wideSibling` and `wideRefused` off the result to find out which
+ * happened, exactly as with `requestMode` — *paint from the return, never from the ask.*
+ */
+export const captureFrames = (options?: { wideSibling?: boolean }) =>
+  requireCamera().capture(options);
 
 /**
  * Ask for a mode; get back the mode ACHIEVED and what could not be reached.

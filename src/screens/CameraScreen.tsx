@@ -677,7 +677,18 @@ export function CameraScreen({
     busyRef.current = true;
     setBusy(true);
     try {
-      const result = await captureFrames();
+      /* ⚑ **The sibling pair, asked for by the door** (running list item 7).
+
+         A room shot is the one act whose job is *what is in this room* rather than *what is this
+         object*, and it is taken once per zone — so it is where a 120° frame is worth two input
+         swaps, and where paying for them forty times a room would not be. **The 1× frame carries
+         the measured position and the 120° one inherits from its own sibling**, because world
+         tracking is not offered the ultra-wide on this iPad (`HSLensProbe`, 2026-08-24) and a
+         positioned 0.5× frame is unavailable at any price.
+
+         A request, not an instruction: Text refuses it by policy and a device without the glass
+         refuses it by hardware. `result.wideRefused` says which. */
+      const result = await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
       /*
         ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
 
@@ -756,10 +767,24 @@ export function CameraScreen({
         const captureId = result.at;
         const roleOf = (index: number): FrameRoleMeta => ({
           captureId,
-          role: index === 0 ? "primary" : result.frames[index]?.torch === false && result.torchPaired ? "evidence" : "insurance",
+          /* ⛑ The 120° sibling is `evidence`, and that is the retention rule rather than a
+             label: *evidence survives, insurance is spendable once the desk has resolved the
+             plate.* A room's wide frame answers "what was around this" — a question that is still
+             being asked in five years. Which frame is the wide one is read off `lens`, not here. */
+          role:
+            index === 0
+              ? "primary"
+              : result.frames[index]?.lens === "wide" && result.wideSibling
+                ? "evidence"
+                : result.frames[index]?.torch === false && result.torchPaired
+                  ? "evidence"
+                  : "insurance",
           torch: result.frames[index]?.torch,
           ev: result.bracketed && index < 3 ? [-1, 0, 1][index] : undefined,
-          lens: result.lens,
+          /* ⚑ Per FRAME. `result.lens` describes the capture and was right for every capture
+             built before the sibling pair; on a pair it is right about three frames out of four,
+             which is the worst kind of right. */
+          lens: result.frames[index]?.lens ?? result.lens,
         });
         const readOf = (index: number): FrameReadMeta | undefined => {
           const ocr = result.frames[index]?.ocr;

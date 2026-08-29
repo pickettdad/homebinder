@@ -1,5 +1,5 @@
 {
-  "_note": "A hand-written EXAMPLE of the fields Field 6 adds to the manifest. Not an export — a shape to build against, so the binder side does not wait on a walk. See docs/MANIFEST-FIELD6-ADDITIONS.md.",
+  "_note": "A hand-written EXAMPLE of the fields Field 6 adds to the manifest. Not an export — a shape to build against, so the binder side does not wait on a walk. See docs/MANIFEST-FIELD6-ADDITIONS.md. ⚑ Two errors corrected 2026-08-28: the array was called `files[]` (the emitter has always written `media[]`) and `owner` was `{kind,id}` (the emitter writes `{kind:'pin',pinId,pinNumber}` and `{kind:'zone',zoneId}`). Both were silent failures — a receiver built on either finds nothing and says nothing. tests/engine/fixtureTripwire.test.ts now checks every path in this file against a manifest built by the real emitter, so a third one cannot survive a commit.",
   "manifestSchemaVersion": 3,
   "session": {
     "sessionId": "01a02616-843f-79df-8ecc-95f3c23a3e5f",
@@ -11,7 +11,11 @@
     {
       "mediaId": "media-anchor-1",
       "kind": "photo",
-      "owner": { "kind": "pin", "id": "pin-water-heater" },
+      "owner": {
+        "kind": "pin",
+        "pinId": "pin-water-heater",
+        "pinNumber": 1
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/pins/media-anchor-1.jpg",
       "mime": "image/jpeg",
@@ -19,7 +23,11 @@
       "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
       "capturedAt": "2026-08-23T17:41:02Z",
       "intent": null,
-      "frame": { "captureId": "2026-08-23T17:41:02Z", "role": "primary", "lens": "normal" },
+      "frame": {
+        "captureId": "2026-08-23T17:41:02Z",
+        "role": "primary",
+        "lens": "normal"
+      },
       "position": {
         "positioned": true,
         "zoneId": "zone-mechanical",
@@ -29,18 +37,39 @@
         "y": -0.518,
         "z": 3.407,
         "transform": [
-          0.998, 0.0, -0.062, 0.0,
-          0.004, 0.998, 0.062, 0.0,
-          0.062, -0.062, 0.996, 0.0,
-          1.243, -0.518, 3.407, 1.0
+          0.998,
+          0.0,
+          -0.062,
+          0.0,
+          0.004,
+          0.998,
+          0.062,
+          0.0,
+          0.062,
+          -0.062,
+          0.996,
+          0.0,
+          1.243,
+          -0.518,
+          3.407,
+          1.0
         ],
-        "surface": { "x": 1.61, "y": -0.44, "z": 3.92, "distance": 0.72 }
+        "surface": {
+          "x": 1.61,
+          "y": -0.44,
+          "z": 3.92,
+          "distance": 0.72
+        }
       }
     },
     {
       "mediaId": "media-detail-2",
       "kind": "photo",
-      "owner": { "kind": "pin", "id": "pin-water-heater" },
+      "owner": {
+        "kind": "pin",
+        "pinId": "pin-water-heater",
+        "pinNumber": 1
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/pins/media-detail-2.jpg",
       "mime": "image/jpeg",
@@ -52,7 +81,10 @@
     {
       "mediaId": "media-refused-3",
       "kind": "photo",
-      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/zone/media-refused-3.jpg",
       "mime": "image/jpeg",
@@ -67,8 +99,11 @@
     },
     {
       "mediaId": "media-plan-4",
-      "kind": "photo",
-      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "kind": "geometry",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/zone/media-plan-4.json",
       "mime": "application/json",
@@ -80,8 +115,11 @@
     },
     {
       "mediaId": "media-mesh-5",
-      "kind": "photo",
-      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "kind": "geometry",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/zone/media-mesh-5.json",
       "mime": "application/json",
@@ -102,23 +140,57 @@
           "id": "5B1F2C90-0000-4000-8000-000000000001",
           "width": 4.02,
           "height": 2.44,
-          "x": 0.0, "y": 1.22, "z": -2.1,
+          "x": 0.0,
+          "y": 1.22,
+          "z": -2.1,
           "confidence": "high",
           "transform": [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 1.22, -2.1, 1.0
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            1.22,
+            -2.1,
+            1.0
           ]
         }
       ],
       "doors": [
         {
           "id": "5B1F2C90-0000-4000-8000-000000000002",
-          "width": 0.81, "height": 2.03,
-          "x": 1.1, "y": 1.01, "z": -2.1,
+          "width": 0.81,
+          "height": 2.03,
+          "x": 1.1,
+          "y": 1.01,
+          "z": -2.1,
           "confidence": "medium",
-          "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 1.1,1.01,-2.1,1]
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1.1,
+            1.01,
+            -2.1,
+            1
+          ]
         }
       ],
       "windows": [],
@@ -127,8 +199,12 @@
         {
           "id": "5B1F2C90-0000-4000-8000-000000000003",
           "category": "storage",
-          "width": 0.6, "height": 1.8, "depth": 0.6,
-          "x": -1.4, "y": 0.9, "z": -1.6,
+          "width": 0.6,
+          "height": 1.8,
+          "depth": 0.6,
+          "x": -1.4,
+          "y": 0.9,
+          "z": -1.6,
           "confidence": "low",
           "_note": "RoomPlan's OWN taxonomy — sofas, refrigerators, storage. It has no water heater, no softener, no pressure tank. Context for the desk, NOT an inventory: reading it as one under-counts exactly the rooms this service exists for."
         }
@@ -142,13 +218,36 @@
           "id": "5B1F2C90-0000-4000-8000-000000000010",
           "vertices": 574,
           "faces": 1042,
-          "x": 0.82, "y": 0.4, "z": -1.35,
-          "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0.82,0.4,-1.35,1]
+          "x": 0.82,
+          "y": 0.4,
+          "z": -1.35,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0.82,
+            0.4,
+            -1.35,
+            1
+          ]
         }
       ],
       "walkedExtent": {
-        "minX": -2.2, "minY": -0.9, "minZ": -3.1,
-        "maxX": 2.4, "maxY": 1.6, "maxZ": 1.2,
+        "minX": -2.2,
+        "minY": -0.9,
+        "minZ": -3.1,
+        "maxX": 2.4,
+        "maxY": 1.6,
+        "maxZ": 1.2,
         "_note": "The extent of what was WALKED, never the extent of the room. A mesh hole reads UNKNOWN, never `nothing there`."
       }
     }

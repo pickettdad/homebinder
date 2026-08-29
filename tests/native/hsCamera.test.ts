@@ -18,6 +18,7 @@ import {
   shouldOfferRetake,
   captureWantsRetake,
   positionForSibling,
+  projectionFor,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
@@ -515,5 +516,49 @@ describe("the sibling pair's record", () => {
     // A capture the concierge shot on wide by hand is not a sibling pair, and its frames are
     // ordinary captures that inherit the usual way.
     expect(positionForSibling(frame("wide"), false)).toBeUndefined();
+  });
+});
+
+/**
+ * ⚑ **A pose and a camera model are two facts in one object** (owner ruling 2026-08-28).
+ *
+ * `x/y/z` is where the concierge stood and survives any lens. `transform` additionally describes
+ * ARKit's own 1× camera — the ultra-wide is not offered to world tracking — so a 120° image cannot
+ * be projected through it. ⛑ The invariant under test is **not** which lens is which: it is that
+ * *every positioned frame answers the question*, and that a frame which cannot be projected
+ * **names the frame that can, or says plainly that there is none.**
+ */
+describe("whether a pose describes the image it is stamped on", () => {
+  const f = (lens?: CameraLens) => ({ path: "/tmp/x.jpg", bytes: 1, index: 0, exifOrientation: 1, torch: false, lens });
+  const at = "2026-08-28T22:53:00Z";
+
+  it("says yes for an ordinary capture, on the lens ARKit models", () => {
+    expect(projectionFor({ frames: [f("normal")], at })).toEqual({ projectable: true });
+  });
+
+  it("says no for a wide primary, and names the sibling the matrix does describe", () => {
+    const p = projectionFor({ frames: [f("wide"), f("normal")], at });
+    expect(p.projectable).toBe(false);
+    // The pointer is captureId + lens — both already on every frame, so no join has to be invented.
+    expect(p.projectable === false && p.projectableFrame).toEqual({ captureId: at, lens: "normal" });
+  });
+
+  it("says no AND null when the pair was refused, because there is nothing to point at", () => {
+    // ⛑ A wide room shot whose sibling was refused has a real pose and no projectable frame at
+    // all. That is a different sentence from "look next door" and must not read as the same one.
+    const p = projectionFor({ frames: [f("wide")], at });
+    expect(p.projectable === false && p.projectableFrame).toBeNull();
+  });
+
+  it("gives a reason naming the lens, not a symptom", () => {
+    const p = projectionFor({ frames: [f("wide"), f("normal")], at });
+    expect(p.projectable === false && p.why).toMatch(/wide/);
+    expect(p.projectable === false && p.why).toMatch(/transform/);
+  });
+
+  it("treats a capture written before the field existed as projectable, not unknown", () => {
+    // Every such capture was taken on the lens ARKit models, so yes is the honest answer and
+    // `unknown` would be a fabricated doubt about frames nobody can re-examine.
+    expect(projectionFor({ frames: [f(undefined)], at })).toEqual({ projectable: true });
   });
 });

@@ -12,6 +12,7 @@
 
 import type { BenchSample } from "../dev/deviceBench";
 import type { ZoneMode, ZoneOpened, ZonePlan, ZonePosition } from "./zone";
+import type { PositionProjection } from "../engine/schema/events";
 
 export const HS_CAMERA_JS_NAME = "HSCamera";
 
@@ -738,6 +739,47 @@ export function positionForSibling(
   return {
     positioned: false,
     why: "wide lens is not offered to world tracking; the pose is on the primary frame of this captureId",
+  };
+}
+
+/**
+ * ⚑ **The one lens ARKit's `transform` describes.**
+ *
+ * World tracking runs on `AVCaptureDeviceTypeBuiltInWideAngleCamera` — our `normal` — and is not
+ * offered the ultra-wide on this device (`HSLensProbe`, 2026-08-24: thirteen formats, every one
+ * wide-angle, while the physical lens exists). ⛑ *Named once, here, because a second copy of this
+ * fact is how the two rotation tables drifted apart.*
+ */
+const PROJECTABLE_LENS: CameraLens = "normal";
+
+/**
+ * ⚑ **Does `transform` describe the camera that took this photograph?** (owner ruling 2026-08-28.)
+ *
+ * A pose and a camera model arrive in one object and are two different facts. `x/y/z` is **where
+ * the concierge stood** and is true whatever glass was fitted — *framing is a human act in a tight
+ * room and geometry bends to it, not the other way round*, which is why the room shot's primary
+ * stays the 120° frame the concierge framed. But `transform` also describes ARKit's own 1× camera,
+ * so **the 120° image cannot be projected through it.**
+ *
+ * ⛑ **Stated as a field the reader trips over rather than a paragraph they must already have
+ * read.** Left implicit, a future desk pass projects a 120° image through a 1× matrix and *the
+ * error looks like bad measurement rather than a wrong assumption* — the same shape as the `voice`
+ * fallthrough and the `files[]` drift, and the reason this is not documentation.
+ *
+ * ⚑ **When the pair was refused there is nothing to point at, and it says so** — `null` rather
+ * than a missing key. *A wide room shot with no sibling has a real pose and no projectable frame at
+ * all, and that is a different sentence from "look next door".*
+ */
+export function projectionFor(capture: Pick<CaptureResult, "frames" | "at">): PositionProjection {
+  const primary = capture.frames[0];
+  // Absent `lens` is a capture written before the field existed; those were all taken on the lens
+  // ARKit models, so the honest answer is yes rather than unknown.
+  if (!primary?.lens || primary.lens === PROJECTABLE_LENS) return { projectable: true };
+  const sibling = capture.frames.slice(1).find((f) => f.lens === PROJECTABLE_LENS);
+  return {
+    projectable: false,
+    why: `taken through the ${primary.lens} lens; transform describes ARKit's ${PROJECTABLE_LENS} camera, which is the only one world tracking is offered`,
+    projectableFrame: sibling ? { captureId: capture.at, lens: PROJECTABLE_LENS } : null,
   };
 }
 

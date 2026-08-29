@@ -58,7 +58,7 @@ whose reason is known exactly.
 `positioned: false` the majority case and drown the refusals worth reading — *a signal that speaks
 on the majority case is one nobody reads on the minority case that matters.*
 
-### ⛑ And on a room shot the positioned frame is the 120° one — desk, read this
+### ⛑ And on a room shot the positioned frame is the 120° one — `position.projection` says so
 
 **The room shot frames wide** (owner ruling 2026-08-16, re-confirmed in the field 2026-08-28), so
 the **primary is the 120° frame** and the 1× frame is its sibling. *Verified on device:
@@ -74,9 +74,42 @@ wide-angle camera — the ultra-wide is not offered to world tracking on this de
 image cannot be projected through that matrix.** *Use the pose; do not use it as a camera.* The 1×
 sibling of the same `frame.captureId` is the frame whose geometry the matrix does describe.
 
-**Stated rather than fielded.** Whether the desk wants this as an explicit flag is the design
-session's ruling, not the field's, and inventing a manifest field for it here is how two homes for
-one fact begin.
+### ⚑ `position.projection` — required on every positioned frame
+
+**Ruled 2026-08-28.** *A rule that lives only in a document is a rule the reader has to already
+know* — and left implicit, a desk pass projects a 120° image through a 1× matrix and **the error
+looks like bad measurement rather than a wrong assumption.** So it is a field.
+
+```json
+"projection": { "projectable": true }
+```
+```json
+"projection": {
+  "projectable": false,
+  "why": "taken through the wide lens; transform describes ARKit's normal camera, …",
+  "projectableFrame": { "captureId": "2026-08-23T17:38:10Z", "lens": "normal" }
+}
+```
+
+| | |
+|---|---|
+| `projectable: true` | `transform` describes the camera that took this image. Ordinary case |
+| `projectable: false` | **use the pose, do not use it as a camera.** `why` names the lens; `projectableFrame` names the frame in the **same capture** whose geometry the matrix does describe |
+| `projectableFrame: null` | ⛑ **there is no such frame** — the pair was refused. *A real pose and nothing to project at all, which is a different sentence from "look next door"* |
+
+⚑ **Required, not optional**, and that is the point rather than a style choice. An optional field
+can be forgotten by a producer *and* skipped by a consumer; a required one is answered every time a
+pose is stamped. *The field's own compiler caught the single emission site the moment the field was
+added, which is the strongest form of "a reader trips over it".*
+
+**Named by `captureId` + `lens` rather than by mediaId**, deliberately: a sibling's mediaId is
+minted **after** the pose is stamped, so carrying it here would couple the position to the order
+media rows are written in — a coupling that breaks silently when either moves. Both fields are on
+every entry already, so the desk resolves it with one filter.
+
+*Under the version policy this is an addition and stays `manifestSchemaVersion` 3.*
+`tests/engine/fixtureTripwire.test.ts` asserts every positioned frame answers the question and that
+a non-projectable one points somewhere or says `null`.
 
 **`position.surface` is not `position.x/y/z`.** The pose is **where the concierge stood**; `surface`
 is the ray-cast hit **in front of the lens**, with its distance. For a nameplate shot the two are

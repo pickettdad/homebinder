@@ -34,7 +34,7 @@ const fixture = JSON.parse(
 
 const source = { actor: "human" as const, actorId: "c", device: "ipad", appVersion: "t" };
 
-type Extra = { intent?: CaptureIntent; position?: unknown; frame?: unknown };
+type Extra = { intent?: CaptureIntent; position?: unknown; frame?: unknown; siblings?: unknown[] };
 const media = (mediaId: string, mime: string, extra: Extra = {}) => ({
   mediaId,
   sha256: "0".repeat(64),
@@ -74,6 +74,37 @@ const state = {
         }),
         media("media-plan-4", "application/json", { intent: "floorplan" }),
         media("media-mesh-5", "application/json", { intent: "mesh" }),
+        /* ⚑ The room shot — a WIDE primary whose pose is honest and whose matrix does not describe
+           it, with the 1× sibling it points at. The case the 2026-08-28 ruling exists for, and the
+           reason the fixture illustrating it must be exercised rather than merely declared. */
+        media("media-roomshot-6", "image/jpeg", {
+          intent: "room-shot",
+          frame: { captureId: "2026-08-23T17:38:10Z", role: "primary", lens: "wide" },
+          position: {
+            positioned: true,
+            zoneId: "zone-mechanical",
+            tracking: "normal",
+            at: "2026-08-23T17:38:10Z",
+            x: 0.412,
+            y: -0.503,
+            z: 1.884,
+            transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.412, -0.503, 1.884, 1],
+            projection: {
+              projectable: false,
+              why: "taken through the wide lens; transform describes ARKit's normal camera, which is the only one world tracking is offered",
+              projectableFrame: { captureId: "2026-08-23T17:38:10Z", lens: "normal" },
+            },
+          },
+          siblings: [
+            {
+              mediaId: "media-roomshot-6-sib",
+              sha256: "0".repeat(64),
+              mime: "image/jpeg",
+              bytes: 2048,
+              frame: { captureId: "2026-08-23T17:38:10Z", role: "evidence", lens: "normal" },
+            },
+          ],
+        }),
       ],
       voiceNotes: [],
       canvases: [],
@@ -102,6 +133,7 @@ const state = {
             z: 3.407,
             transform: [0.998, 0, -0.062, 0, 0.004, 0.998, 0.062, 0, 0.062, -0.062, 0.996, 0, 1.243, -0.518, 3.407, 1],
             surface: { x: 1.61, y: -0.44, z: 3.92, distance: 0.72 },
+            projection: { projectable: true },
           },
         }),
         media("media-detail-2", "image/jpeg"),
@@ -173,6 +205,27 @@ describe("the manifest fixture is a contract, not a photograph of one day", () =
     const wrong = [...documented].filter(([p, t]) => emitted.has(p) && emitted.get(p) !== t)
       .map(([p, t]) => `${p}: fixture says ${t}, emitter writes ${emitted.get(p)}`);
     expect(wrong).toEqual([]);
+  });
+
+  it("illustrates a pose whose matrix does not describe its own image, and names the frame it does", () => {
+    /* ⛑ The case a desk gets wrong silently: projecting a 120° image through a 1× matrix looks
+       like bad measurement, not a wrong assumption. The fixture must carry it or the binder is
+       built against a world where it never happens. */
+    const rows = (fixture.media as Record<string, unknown>[]) ?? [];
+    const wide = rows.find(
+      (m) => (m.position as { projection?: { projectable?: boolean } })?.projection?.projectable === false,
+    );
+    expect(wide, "no not-projectable example in the fixture").toBeDefined();
+    const projection = (wide!.position as { projection: { projectableFrame?: unknown; why?: string } }).projection;
+    // It must POINT somewhere, or say null. A missing key would be the ambiguity all over again.
+    expect(Object.prototype.hasOwnProperty.call(projection, "projectableFrame")).toBe(true);
+    expect(projection.why ?? "").not.toBe("");
+    // And every positioned frame answers the question at all — that is what "required" buys.
+    const positioned = rows.filter((m) => (m.position as { positioned?: boolean })?.positioned === true);
+    expect(positioned.length).toBeGreaterThan(0);
+    for (const m of positioned) {
+      expect((m.position as { projection?: unknown }).projection, `${m.mediaId} does not answer`).toBeDefined();
+    }
   });
 
   it("illustrates a geometry capture, a refusal and an inheriting frame — the three the desk reads", () => {

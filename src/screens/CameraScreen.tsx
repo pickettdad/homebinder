@@ -44,6 +44,7 @@ import {
   captureFrames,
   captureWantsRetake,
   positionForSibling,
+  projectionFor,
   frameBlob,
   frameLabel,
   frameStateOf,
@@ -826,7 +827,18 @@ export function CameraScreen({
           undefined, declared,
           /* ⚑ On the PRIMARY only. Siblings inherit — the container's anchor is one frame, and a
              pose stamped on all three of a bracket would read as three positions of one object. */
-          { read: readOf(0), frame: roleOf(0), position, siblings },
+          {
+            read: readOf(0),
+            frame: roleOf(0),
+            /* ⚑ **The pose is the native side's; what it DESCRIBES is this side's.**
+               `takePosition` knows where the iPad was and nothing about which glass took the
+               photograph — that fact lives here, with the frames. See `projectionFor`: the room
+               shot's primary is the 120° frame the concierge framed (owner ruling 2026-08-16,
+               re-confirmed in the field), so its pose is honest and its matrix does not describe
+               it, and the record must say so rather than leave the desk to know it. */
+            position: position?.positioned ? { ...position, projection: projectionFor(result) } : position,
+            siblings,
+          },
         );
         // One act, one capture: the door was for this shot, not for the rest of the room.
         pendingIntentRef.current = null;

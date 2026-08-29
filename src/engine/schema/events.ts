@@ -113,6 +113,44 @@ export interface CaptureMediaMeta {
   position?: CapturePositionMeta;
 }
 
+/**
+ * ⚑ **Whether `transform` describes the camera that took THIS image** (owner ruling 2026-08-28).
+ *
+ * A pose and a camera model are two different facts and they arrive in one object, which is exactly
+ * how they get confused. `x/y/z` is **where the concierge stood** and is true whatever glass was
+ * fitted. `transform` additionally describes **ARKit's own 1× wide-angle camera** — the ultra-wide
+ * is not offered to world tracking on this device (`HSLensProbe`, 2026-08-24) — so a 120° image
+ * cannot be projected through it.
+ *
+ * ⛑ **This is a field rather than a paragraph in a document, and the reason is the whole day's
+ * lesson.** *A rule that lives only in a document is a rule the reader has to already know.* Left
+ * implicit, some future desk pass projects a 120° image through a 1× matrix and **the error looks
+ * like bad measurement rather than a wrong assumption** — which is the same shape as the `voice`
+ * fallthrough and the `files[]` drift.
+ *
+ * ⚑ **Required, not optional**, so the compiler makes the emitter decide at every site. An optional
+ * field can be forgotten by a producer *and* skipped by a consumer; a required one is answered
+ * every time it is stamped.
+ */
+export type PositionProjection =
+  | { projectable: true }
+  | {
+      projectable: false;
+      /** Why this image cannot be projected through `transform` — the fact, not the symptom. */
+      why: string;
+      /**
+       * The frame in the SAME capture whose geometry `transform` does describe, named by the two
+       * fields every entry already carries. ⛑ **`null` means no such frame was taken** — a wide
+       * room shot whose sibling was refused has a real pose and nothing to project at all, and that
+       * is a different sentence from *look next door*.
+       *
+       * *Named by `captureId` + `lens` rather than by mediaId on purpose: a sibling's mediaId is
+       * minted after the pose is stamped, so carrying it here would couple the position to the
+       * order media rows are written in — a coupling that breaks silently when either moves.*
+       */
+      projectableFrame: { captureId: string; lens: string } | null;
+    };
+
 export type CapturePositionMeta =
   | {
       positioned: true;
@@ -129,6 +167,9 @@ export type CapturePositionMeta =
       /** ⚑ The pose is where the concierge STOOD. This is the surface in front of the lens, when
        *  geometry existed to hit it. Absent reads *unknown*, never *nothing there*. */
       surface?: { x: number; y: number; z: number; distance: number };
+      /** ⚑ Whether `transform` describes the camera that took this image. See `PositionProjection`
+       *  — required, so it is answered rather than assumed. */
+      projection: PositionProjection;
     }
   | { positioned: false; why: string; tracking?: string };
 

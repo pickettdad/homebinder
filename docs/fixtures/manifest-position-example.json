@@ -59,7 +59,11 @@
           "y": -0.44,
           "z": 3.92,
           "distance": 0.72
-        }
+        },
+        "projection": {
+          "projectable": true
+        },
+        "_note": "`projection` answers whether `transform` describes the camera that took THIS image. Required on every positioned frame, so it is answered rather than assumed."
       }
     },
     {
@@ -128,6 +132,84 @@
       "capturedAt": "2026-08-23T17:47:12Z",
       "intent": "mesh",
       "_note": "Scene reconstruction output. Content shape below under _payloads.mesh."
+    },
+    {
+      "mediaId": "media-roomshot-6",
+      "kind": "photo",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-roomshot-6.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2648112,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000006",
+      "capturedAt": "2026-08-23T17:38:10Z",
+      "intent": "room-shot",
+      "frame": {
+        "captureId": "2026-08-23T17:38:10Z",
+        "role": "primary",
+        "lens": "wide"
+      },
+      "position": {
+        "positioned": true,
+        "zoneId": "zone-mechanical",
+        "tracking": "normal",
+        "at": "2026-08-23T17:38:10Z",
+        "x": 0.412,
+        "y": -0.503,
+        "z": 1.884,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.412,
+          -0.503,
+          1.884,
+          1.0
+        ],
+        "projection": {
+          "projectable": false,
+          "why": "taken through the wide lens; transform describes ARKit's normal camera, which is the only one world tracking is offered",
+          "projectableFrame": {
+            "captureId": "2026-08-23T17:38:10Z",
+            "lens": "normal"
+          }
+        },
+        "_note": "⚑ THE ROOM SHOT. The pose is honest — it is where the concierge STOOD, which no lens changes. The MATRIX is not: it describes ARKit's 1x camera and this is a 120 degree image. Use the pose; do not use it as a camera. `projectableFrame` names the frame in this same capture whose geometry it does describe."
+      },
+      "_note": "The primary of a sibling pair. The concierge framed WIDE — owner ruling 2026-08-16, re-confirmed in the field 2026-08-28 — so the frame they framed stays primary and the 1x frame is its sibling below."
+    },
+    {
+      "mediaId": "media-roomshot-6-sib",
+      "kind": "photo",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-roomshot-6-sib.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2402880,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000007",
+      "capturedAt": "2026-08-23T17:38:10Z",
+      "intent": "room-shot",
+      "frame": {
+        "captureId": "2026-08-23T17:38:10Z",
+        "role": "evidence",
+        "lens": "normal"
+      },
+      "_note": "The 1x sibling, same press, ~330 ms later. No `position` of its own: its role is not `primary`, so the pose is on the primary of this captureId — and it is the frame that primary's `projection.projectableFrame` points at."
     }
   ],
   "_payloads": {

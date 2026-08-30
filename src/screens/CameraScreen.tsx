@@ -356,8 +356,15 @@ export function CameraScreen({
   const recorder = useVoiceRecorder();
   /** Where the current leg began. Taken before the exposure lock, held until the leg is filed. */
   const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
+  /** The anchor the last leg ended on — handed to the next leg when they are chained. */
+  const lastEnd = useRef<ZonePosition | null>(null);
   /** The `captureId` of the leg currently being walked, or null. Set by `beginTraverse`. */
   const legRef = useRef<string | null>(null);
+  /* ⚑ **The preview is genuinely black while ARKit holds the lens**, and it was unexplained.
+     `cameraYielded` stops the capture session, so there is nothing to draw for the 1–5 s ARKit
+     takes to relocalise. The field read that as a crash — *"screen goes black and stayed black"* —
+     which is what an unexplained black screen means to anyone. It is now labelled. */
+  const [measuring, setMeasuring] = useState(false);
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
   pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
@@ -927,7 +934,7 @@ export function CameraScreen({
    * held the surface back because the traverse and the run trace may be one primitive, and a
    * door built tonight would harden around the narrower of the two.
    */
-  const beginTraverse = useCallback(async (continuesFrom?: string) => {
+  const beginTraverse = useCallback(async (continuesFrom?: string, carriedStart?: ZonePosition) => {
     setTraverseResult(null);
     setTraverseProgress(null);
     try {
@@ -954,9 +961,30 @@ export function CameraScreen({
         doubles back is walked as separate legs* — `continuesFrom` already exists for exactly that —
         so the leg endpoints form a polyline of the route rather than a straight line through it.
       */
-      startPosition.current = await takePosition().catch(
-        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-      );
+      /*
+        ⛑ **A chained leg inherits the anchor the previous leg just measured.**
+
+        `next leg` used to end leg N — a position — and immediately start leg N+1 — another
+        position. **Two five-second handovers back to back, measuring the same spot twice**, with
+        the preview black for eleven seconds in between. The field: *"once the handover finally
+        happens.. takes a while."*
+
+        ⚑ The end of leg N and the start of leg N+1 **are the same place at the same moment** by
+        construction — that is what chaining means. Measuring it twice was not redundancy, it was
+        the same one-ended-operation error inverted: paying twice for one fact.
+      */
+      if (carriedStart) {
+        startPosition.current = carriedStart;
+      } else {
+        setMeasuring(true);
+        startPosition.current = await takePosition()
+          .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
+          .finally(() => setMeasuring(false));
+      }
+      /* Painted before the await that follows, not after it. `startTraverse` locks exposure and
+         focus and can take a moment; leaving the bar reading "start trace" while frames are
+         already firing is the state the field called confusing, and it was. */
+      setTraversing(true);
       // ⚑ Lens SECOND, and it MUST be before `startTraverse`. A traverse locks exposure, white
       // balance and focus on its first frame and refuses a lens swap mid-run — so a wide default
       // applied afterwards would be silently declined, and the run would be shot on normal while
@@ -971,8 +999,8 @@ export function CameraScreen({
       /* ⚑ Held so a voice note taken DURING this leg can name it. See `toggleVoice`. */
       legRef.current = started.startedAt;
       setLegNumber((n) => (continuesFrom ? n + 1 : 1));
-      setTraversing(true);
     } catch (err) {
+      setTraversing(false);
       setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
@@ -1035,9 +1063,11 @@ export function CameraScreen({
       setTraverseResult(result);
       /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
          a traverse — the two anchors bracket it rather than interrupt it. */
-      const endPosition = await takePosition().catch(
-        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-      );
+      setMeasuring(true);
+      const endPosition = await takePosition()
+        .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
+        .finally(() => setMeasuring(false));
+      lastEnd.current = endPosition;
 
       /*
         ⚑ **A traverse filed nothing at all, and nobody noticed because the numbers arrived.**
@@ -1513,6 +1543,16 @@ export function CameraScreen({
         to scale with the lengths on it, the concierge checks it against the room they are standing
         in, which is the only moment a wrong answer is cheap to fix.
       */}
+      {/* ⛑ **The black screen, named.** While ARKit holds the lens the capture session is stopped
+          and there is nothing to draw — 1 s on a fresh session, up to 5 s relocalising. Unlabelled,
+          that is indistinguishable from a crash, and the field read it as one twice. */}
+      {measuring && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70">
+          <p className="rounded-lg bg-slate-900/90 px-4 py-3 text-sm text-slate-200 ring-1 ring-slate-600">
+            measuring position — the preview is off while the sensor has the lens
+          </p>
+        </div>
+      )}
       {zoneId && plan && (scanning || !traversing) && (
         <div className="pointer-events-none absolute right-3 top-14 w-40">
           <div className="pointer-events-auto rounded-lg bg-slate-950/85 p-1 ring-1 ring-slate-700">
@@ -2179,7 +2219,7 @@ export function CameraScreen({
         {(startAction === "traverse" || traversing || traverseResult) && (
           <div className="mb-2 flex items-center gap-2 rounded-xl bg-slate-950/85 p-2 ring-1 ring-slate-700">
             <span className="shrink-0 px-1 text-xs text-slate-400">
-              {traversing ? `leg ${legNumber}` : legNumber > 0 ? `${legNumber} done` : "trace"}
+              {measuring ? "measuring…" : traversing ? `leg ${legNumber}` : legNumber > 0 ? `${legNumber} done` : "trace"}
             </span>
             <button
               type="button"
@@ -2196,7 +2236,9 @@ export function CameraScreen({
               <button
                 type="button"
                 onClick={() =>
-                  void endTraverse().then((r) => (r ? beginTraverse(r.startedAt) : undefined))
+                  void endTraverse().then((r) =>
+                    r ? beginTraverse(r.startedAt, lastEnd.current ?? undefined) : undefined,
+                  )
                 }
                 className="h-12 flex-1 rounded-lg bg-slate-900 text-sm font-medium text-slate-200 ring-1 ring-slate-600"
               >

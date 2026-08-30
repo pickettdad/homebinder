@@ -358,19 +358,16 @@ export function CameraScreen({
   const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
   /** The anchor the last leg ended on — handed to the next leg when they are chained. */
   const lastEnd = useRef<ZonePosition | null>(null);
-  /**
-   * ⚑ **The RUN, not the leg** — the `captureId` of the first leg in the current chain.
-   *
-   * A narration that spans three legs describes the run, not any one of them, and binding it to a
-   * single leg would be a lie whichever leg was chosen. *Legs chained by `continuesFrom` are one
-   * act; the first leg's id names it.*
-   *
-   * ⛑ **Which legs a note actually spanned needs no field**, and that is why none is invented: the
-   * note carries `capturedAt` and `durationMs`, and every leg's `captureId` **is** its start
-   * timestamp — so the desk computes the span by arithmetic on facts already recorded. *A second
-   * home for a derivable fact is how two records drift.*
-   */
-  const runRootRef = useRef<string | null>(null);
+  /* ⛑ **A note binds to its LEG, and the owner's reason is better than the one it replaces.**
+
+     I had it bind to the run, arguing that a narration spanning three legs describes all three.
+     True, and the wrong optimisation: *"if I narrated something specific to leg 6, the desk would
+     need to fish through all audio through all legs."* **A mechanical room is seven or eight legs**
+     — a run-long file makes every question a search, and a per-leg file makes it a lookup.
+
+     ⚑ So the note is *cycled* at each boundary instead: leg 6's narration is leg 6's file. The run
+     stays reachable by walking `frame.continuesFrom`, which costs the desk one hop and costs the
+     concierge nothing. See `cycleVoice`. */
   /** The `captureId` of the leg currently being walked, or null. Set by `beginTraverse`. */
   const legRef = useRef<string | null>(null);
   /* ⚑ **The preview is genuinely black while ARKit holds the lens**, and it was unexplained.
@@ -378,6 +375,8 @@ export function CameraScreen({
      takes to relocalise. The field read that as a crash — *"screen goes black and stayed black"* —
      which is what an unexplained black screen means to anyone. It is now labelled. */
   const [measuring, setMeasuring] = useState(false);
+  /** The last leg-boundary audio gap, in ms. Shown so the requirement is answered by a number. */
+  const [voiceGapMs, setVoiceGapMs] = useState<number | null>(null);
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
   pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
@@ -1011,8 +1010,6 @@ export function CameraScreen({
       const started = await startTraverse(continuesFrom);
       /* ⚑ Held so a voice note taken DURING this leg can name it. See `toggleVoice`. */
       legRef.current = started.startedAt;
-      // A leg with no `continuesFrom` is the head of a new run; a chained one inherits the head.
-      if (!continuesFrom) runRootRef.current = started.startedAt;
       setLegNumber((n) => (continuesFrom ? n + 1 : 1));
     } catch (err) {
       setTraversing(false);
@@ -1057,7 +1054,7 @@ export function CameraScreen({
            describes all three, and `runRootRef` is the only value that stays true for all of it —
            `legRef` would name whichever leg happened to be running when the concierge stopped
            talking, which is the least meaningful of the three. */
-        const leg = traversing ? runRootRef.current : null;
+        const leg = traversing ? legRef.current : null;
         await capturePhotoV2(
           { kind: "zone", id: zone },
           rec.blob,
@@ -1085,10 +1082,49 @@ export function CameraScreen({
    * `next leg` reaches this function too, and nothing here knew which of the two acts it was
    * serving. A parameter, because a function that cannot tell its callers apart will keep guessing.
    */
+  /**
+   * Close the note on this leg and open one on the next, without letting go of the microphone.
+   *
+   * ⚑ **Only when a note is actually running** (owner clarification 2026-08-30). If the concierge
+   * stopped talking during leg 6, leg 7 must not start recording on its own — *"concierge already
+   * stopped the audio in that string."* The trigger is the live state, never the act of changing legs.
+   *
+   * ⛑ **Restart first, file afterwards.** The gap the concierge hears is `stop` → `start` and
+   * nothing else; writing a blob to storage takes as long as it takes and happens behind them. And
+   * the microphone stays open across the cycle — `getUserMedia` was the expensive half and it used
+   * to run every time.
+   *
+   * The gap is **measured and logged**, not hoped for: the requirement was *a fraction of a second
+   * would be fine*, and a requirement stated as a number deserves an answer as one.
+   */
+  const cycleVoice = useCallback(async () => {
+    if (recorder.state !== "recording") return;
+    const zone = zoneRef.current;
+    const closingLeg = legRef.current;
+    const began = performance.now();
+    const rec = await recorder.stop({ keepStream: true });
+    await recorder.start();
+    const gapMs = performance.now() - began;
+    setVoiceGapMs(Math.round(gapMs));
+    if (rec && zone) {
+      // Filed behind the restart, deliberately — see above.
+      void capturePhotoV2(
+        { kind: "zone", id: zone },
+        rec.blob,
+        rec.mime,
+        rec.durationMs,
+        undefined,
+        closingLeg ? { frame: { captureId: closingLeg, role: "evidence" } } : undefined,
+      );
+    }
+  }, [recorder, capturePhotoV2]);
+
   const endTraverse = useCallback(async (finishing = true): Promise<TraverseResult | null> => {
     try {
       // The concierge who pressed *stop trace* has every reason to believe the recording stopped.
+      // ⚑ A LEG change is not that act — it cycles instead, so each leg gets its own file.
       if (finishing && recorder.state === "recording") await toggleVoice();
+      else if (!finishing) await cycleVoice();
       const result = await stopTraverse();
       setTraverseResult(result);
       /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
@@ -1098,7 +1134,6 @@ export function CameraScreen({
         .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
         .finally(() => setMeasuring(false));
       lastEnd.current = endPosition;
-      if (finishing) runRootRef.current = null;
 
       /*
         ⚑ **A traverse filed nothing at all, and nobody noticed because the numbers arrived.**
@@ -1180,7 +1215,7 @@ export function CameraScreen({
     } finally {
       setTraversing(false);
     }
-  }, [capturePhotoV2, recorder.state, toggleVoice]);
+  }, [capturePhotoV2, recorder.state, toggleVoice, cycleVoice]);
 
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;
@@ -2313,7 +2348,9 @@ export function CameraScreen({
                   : "bg-slate-900 text-slate-200 ring-slate-600"
               }`}
             >
-              {recorder.state === "recording" ? `${Math.round(recorder.elapsedMs / 1000)}s` : "🎙"}
+              {recorder.state === "recording"
+                ? `${Math.round(recorder.elapsedMs / 1000)}s${voiceGapMs !== null ? ` ·${voiceGapMs}ms` : ""}`
+                : "🎙"}
             </button>
           </div>
         )}

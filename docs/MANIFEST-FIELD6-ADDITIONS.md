@@ -141,26 +141,30 @@ shot **wide** and the run locks the lens for its whole length, so there is **no 
 a traverse** — a real pose and nothing to project at all. *This is the case that field was built
 for.*
 
-### ⚑ A voice note taken during a trace binds to the RUN, not to a leg
+### ⚑ A voice note taken during a trace binds to its LEG — one note per leg, cycled at the boundary
 
-**Ruled 2026-08-30.** A narration recorded while walking a pipe carries `frame.captureId` set to the
-**first leg of the chain** — the run's own id — and `role: "evidence"`, because a narration survives
-and is never a spare exposure.
+**Ruled 2026-08-30.** A narration recorded while walking a pipe carries `frame.captureId` set to
+**the leg it covers**, and `role: "evidence"`, because a narration survives and is never a spare
+exposure.
 
-⛑ **The run, not the leg, and the reason is that a note routinely outlives one.** The concierge
-talks continuously and presses *next leg* at a corner; a note opened in leg 1 and closed in leg 3
-describes all three. **Binding it to any single leg would be false whichever leg was chosen** —
-and binding it to the leg that happened to be running when they stopped talking is the least
-meaningful of the three.
+⛑ **The leg, not the run, and the reason is the desk's working day.** *"If I narrated something
+specific to leg 6, the desk would need to fish through all audio through all legs."* **A mechanical
+room is seven or eight legs** — a run-long file makes every question a search, and a per-leg file
+makes it a lookup. The run stays reachable by walking `frame.continuesFrom`: one hop for the desk,
+nothing for the concierge.
 
-⚑ **Which legs it actually spanned needs no field, so none was invented.** The note carries
-`capturedAt` and `durationMs`; every leg's `captureId` **is** its start timestamp. *The span is
-arithmetic on facts already in the manifest* — and a second home for a derivable fact is how two
-records drift apart.
+**So the note is cycled rather than spanned.** When *next leg* is pressed **while a note is
+recording**, the note closes against the leg it covered and a new one opens on the next leg —
+without releasing the microphone. `getUserMedia` was the expensive half of a restart and no longer
+runs at a boundary; the blob is written *behind* the restart, so the only gap the concierge hears is
+`stop` → `start`. **Measured on the device and shown on the traverse bar.**
 
-**Legs of one run are linked by `frame.continuesFrom`**, so the desk walks the chain from the note's
-`captureId` forward and has the whole run: every leg, every frame, in order, with the narration that
-covers them.
+⚑ **The trigger is the live recording, never the leg change.** If the concierge stopped talking
+during leg 6, leg 7 does not start recording on its own — *"concierge already stopped the audio in
+that string."*
+
+**What the desk gets:** for each leg, its frames, its two position anchors, and the narration spoken
+over exactly that leg — bound by one `captureId`, with `continuesFrom` linking the legs into the run.
 
 ### ⚑ Why not a position per frame, said plainly so nobody asks for it as a small change
 

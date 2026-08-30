@@ -33,6 +33,7 @@ import {
   tapContainer,
   type OpenContainer,
 } from "../capture/objectContainer";
+import { useVoiceRecorder } from "../capture/useVoiceRecorder";
 import { ZoneStrip } from "./ZoneStrip";
 import { FloorPlanView } from "./FloorPlanView";
 import { zoneMeasures } from "../native/zone";
@@ -350,6 +351,9 @@ export function CameraScreen({
   const [pendingIntent, setPendingIntent] = useState<CaptureIntent | null>(null);
   /** How many legs of one walk have been recorded. Resets when a traverse starts unrelated. */
   const [legNumber, setLegNumber] = useState(1);
+  /* ⚑ The narration a trace is FOR. A concierge walking a pipe describing what it does will not
+     leave the viewfinder to say it, so the recorder lives here rather than on the zone screen. */
+  const recorder = useVoiceRecorder();
   /** Where the current leg began. Taken before the exposure lock, held until the leg is filed. */
   const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
@@ -969,7 +973,30 @@ export function CameraScreen({
     }
   }, []);
 
-  const endTraverse = useCallback(async () => {
+  /** ⚑ Returns the finished leg, so the next one can declare itself its continuation. Without a
+   *  return there is no way to chain legs from the viewfinder, and legs are the whole route. */
+  /**
+   * Start or finish a spoken note without leaving the viewfinder.
+   *
+   * ⛑ **Files to the ZONE, never the open container** — the same rule the trace itself follows. A
+   * narration recorded while walking a run describes the run, and filing it inside whichever object
+   * happened to be open would assert the pipe belongs to that object.
+   */
+  const toggleVoice = useCallback(async () => {
+    const zone = zoneRef.current;
+    if (recorder.state === "recording") {
+      const rec = await recorder.stop();
+      if (rec && zone) await capturePhotoV2({ kind: "zone", id: zone }, rec.blob, rec.mime, rec.durationMs);
+      return;
+    }
+    if (recorder.state === "unsupported") {
+      showToast("This device will not record audio here");
+      return;
+    }
+    await recorder.start();
+  }, [recorder, capturePhotoV2, showToast]);
+
+  const endTraverse = useCallback(async (): Promise<TraverseResult | null> => {
     try {
       const result = await stopTraverse();
       setTraverseResult(result);
@@ -1052,8 +1079,10 @@ export function CameraScreen({
           { frame: roleFor(0), position: withProjection(startPosition.current), siblings },
         );
       }
+      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       setTraversing(false);
     }
@@ -2091,6 +2120,68 @@ export function CameraScreen({
                 )}
               </button>
             ))}
+          </div>
+        )}
+
+        {/*
+          ⚑ **The traverse, promoted from instrument to control** (owner ruling 2026-08-29).
+
+          It has lived inside the collapsed instruments panel, in monospace, *"nothing a concierge
+          would ever find"* — deliberately, because the capture kind was held back while the run
+          trace's costing was open: **a surface built then would have hardened around a kind whose
+          job might double.** ⛑ *That costing closed today.* The run-trace video is retired and the
+          traverse takes its job, so the reason to hide it is gone and the field found the hole the
+          same hour: **"there's nothing there that is for the traverse."**
+
+          ⚑ **`Next leg` is the load-bearing button, not `Stop`.** A run that doubles back must be
+          walked as separate legs or the desk gets a straight line through a route that is not
+          straight — and that is exactly the wrong answer the traverse exists to prevent. Burying
+          the chaining behind *stop, leave, re-enter, start* would leave it unused, which is how
+          this control got hidden in the first place.
+
+          The voice button is here because **a trace is where narration is actually spoken** — the
+          concierge is walking a pipe describing what it does — and sending them back to the zone
+          screen to say it means it does not get said.
+        */}
+        {(startAction === "traverse" || traversing || traverseResult) && (
+          <div className="mb-2 flex items-center gap-2 rounded-xl bg-slate-950/85 p-2 ring-1 ring-slate-700">
+            <span className="shrink-0 px-1 text-xs text-slate-400">
+              {traversing ? `leg ${legNumber}` : legNumber > 0 ? `${legNumber} done` : "trace"}
+            </span>
+            <button
+              type="button"
+              onClick={() => void (traversing ? endTraverse() : beginTraverse())}
+              className={`h-12 flex-1 rounded-lg text-sm font-medium ring-1 ${
+                traversing
+                  ? "bg-brass-500 text-slate-950 ring-brass-400"
+                  : "bg-slate-900 text-slate-200 ring-slate-600"
+              }`}
+            >
+              {traversing ? "stop trace" : "start trace"}
+            </button>
+            {traversing && (
+              <button
+                type="button"
+                onClick={() =>
+                  void endTraverse().then((r) => (r ? beginTraverse(r.startedAt) : undefined))
+                }
+                className="h-12 flex-1 rounded-lg bg-slate-900 text-sm font-medium text-slate-200 ring-1 ring-slate-600"
+              >
+                next leg ↩
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label={recorder.state === "recording" ? "Stop the voice note" : "Voice note"}
+              onClick={() => void toggleVoice()}
+              className={`h-12 w-16 rounded-lg text-lg ring-1 ${
+                recorder.state === "recording"
+                  ? "bg-red-500 text-white ring-red-400"
+                  : "bg-slate-900 text-slate-200 ring-slate-600"
+              }`}
+            >
+              {recorder.state === "recording" ? `${Math.round(recorder.elapsedMs / 1000)}s` : "🎙"}
+            </button>
           </div>
         )}
 

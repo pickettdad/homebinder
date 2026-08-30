@@ -1228,6 +1228,19 @@ final class CameraController: NSObject {
     }
 
     private func configureSession() throws {
+        /* ⛑ **Re-asserted before the early return, because it used to be unreachable after launch.**
+
+           `sessionPreset = .photo` below sits after this guard — and `stop()` never removes inputs
+           (`removeInput` appears once in this file, inside `swapLens`), while the controller is a
+           process-lifetime singleton. **So the preset was set once per app launch and a full
+           stop/start cycle could never restore it.** Harmless while nothing else moved it; a latent
+           trap now that ARKit does. */
+        if session.sessionPreset != .photo, session.canSetSessionPreset(.photo) {
+            session.beginConfiguration()
+            session.sessionPreset = .photo
+            session.commitConfiguration()
+            HSZoneLog.record("presetReasserted", ["preset": session.sessionPreset.rawValue])
+        }
         guard session.inputs.isEmpty else { return }
         guard let device = AVCaptureDevice.default(CameraLens.normal.deviceType, for: .video, position: .back) else {
             throw CameraError.noCamera
@@ -2102,6 +2115,9 @@ final class CameraController: NSObject {
 
     private func performCapture(wideSibling: Bool,
                                 _ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        // Same barrier as `startTraverse`, same reason: a still taken while the format restore is
+        // still in flight is ARKit's video frame wearing a photograph's filename.
+        sessionQueue.sync { }
         guard session.isRunning else {
             completion(.failure(CameraError.notRunning))
             return
@@ -2983,6 +2999,20 @@ final class CameraController: NSObject {
          the white balance lock the frames do not even colour-match, and a concierge looking at
          the result cannot tell that from a lighting change in the room.
          */
+        /*
+         ⛑ **Wait for the format before planning an exposure against it.**
+
+         `traverseExposurePlan` opens with `let format = device.activeFormat` and derives the ISO
+         ceiling and the shutter clamps from it. `lightScore()` reads it too, so the torch decision
+         inherits the same numbers. ⚑ **If the preset restore is still in flight, the whole leg's
+         exposure is planned against ARKit's binned video format** — which is how a lit room produced
+         grain, and it would have survived the fix that made the restore asynchronous.
+
+         `sessionQueue` is serial and the restore is already enqueued on it, so an empty `sync` is a
+         **barrier**: it returns exactly when the restore ahead of it has finished. Costs nothing
+         when there is nothing pending, which is the ordinary case.
+        */
+        sessionQueue.sync { }
         var exposureRecord: [String: Any] = [:]
         if let device {
             do {

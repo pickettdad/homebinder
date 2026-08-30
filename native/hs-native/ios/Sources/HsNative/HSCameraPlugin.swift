@@ -1323,9 +1323,41 @@ final class CameraController: NSObject {
            ⚑ **I made the outbound handover synchronous a day ago and left its twin behind.** A
            handover has two ends and only one of them was waiting. */
         sessionQueue.sync {
+            /*
+             ⛑ **ARKit hands the lens back on ITS format, and that is the whole regression.**
+
+             `HSZoneSession` sets `config.videoFormat` (:204, :223), which sets the shared
+             `AVCaptureDevice.activeFormat`. Once `activeFormat` is set directly, the session goes to
+             **`AVCaptureSessionPresetInputPriority` and `sessionPreset` stops being consulted at
+             all** — so every still taken after a position handover comes off ARKit's *video* format:
+             **640×480, 40 KB, visibly grainy**, measured on device 2026-08-30 across three legs and
+             three object captures.
+
+             ⚑ **This is where the fix belongs, and my first attempt at it belongs nowhere.** I put
+             the preset restoration in `swapLens`, where it logged `restored: true` **and changed
+             nothing** — the swap was never the cause, and the handover that was ran afterwards and
+             put the device straight back on ARKit's format. *A fix that reports success while
+             fixing nothing is worse than no fix*, because the log then argues against looking
+             further. Same class as every other one-ended operation in this file, with the extra
+             insult that the instrument agreed with it.
+
+             Setting `sessionPreset` is what takes a session back OUT of input priority, so it is set
+             here, on the way back in, inside a configuration block — and **read back afterwards**,
+             because the thing consulted must be the thing that governs.
+            */
+            session.beginConfiguration()
+            if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
+            session.commitConfiguration()
             if !session.isRunning { session.startRunning() }
         }
-        HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
+        HSZoneLog.record("cameraReclaimed", [
+            "running": session.isRunning,
+            "preset": session.sessionPreset.rawValue,
+            // ⚑ Never assumed. If this reads false the stills are ARKit's video frames and every
+            // texture score, every file size and every grain complaint downstream follows from it.
+            "photoRestored": session.sessionPreset == .photo,
+            "dims": "\(device?.activeFormat.highResolutionStillImageDimensions.width ?? 0)x\(device?.activeFormat.highResolutionStillImageDimensions.height ?? 0)",
+        ])
     }
 
     func stop() {

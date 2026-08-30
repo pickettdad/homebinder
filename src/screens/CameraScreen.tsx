@@ -358,6 +358,19 @@ export function CameraScreen({
   const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
   /** The anchor the last leg ended on — handed to the next leg when they are chained. */
   const lastEnd = useRef<ZonePosition | null>(null);
+  /**
+   * ⚑ **The RUN, not the leg** — the `captureId` of the first leg in the current chain.
+   *
+   * A narration that spans three legs describes the run, not any one of them, and binding it to a
+   * single leg would be a lie whichever leg was chosen. *Legs chained by `continuesFrom` are one
+   * act; the first leg's id names it.*
+   *
+   * ⛑ **Which legs a note actually spanned needs no field**, and that is why none is invented: the
+   * note carries `capturedAt` and `durationMs`, and every leg's `captureId` **is** its start
+   * timestamp — so the desk computes the span by arithmetic on facts already recorded. *A second
+   * home for a derivable fact is how two records drift.*
+   */
+  const runRootRef = useRef<string | null>(null);
   /** The `captureId` of the leg currently being walked, or null. Set by `beginTraverse`. */
   const legRef = useRef<string | null>(null);
   /* ⚑ **The preview is genuinely black while ARKit holds the lens**, and it was unexplained.
@@ -998,6 +1011,8 @@ export function CameraScreen({
       const started = await startTraverse(continuesFrom);
       /* ⚑ Held so a voice note taken DURING this leg can name it. See `toggleVoice`. */
       legRef.current = started.startedAt;
+      // A leg with no `continuesFrom` is the head of a new run; a chained one inherits the head.
+      if (!continuesFrom) runRootRef.current = started.startedAt;
       setLegNumber((n) => (continuesFrom ? n + 1 : 1));
     } catch (err) {
       setTraversing(false);
@@ -1038,7 +1053,11 @@ export function CameraScreen({
           note-to-media targeting. Outside a traverse nothing is stamped, because there is no act to
           name and a captureId pointing at nothing is worse than none.
         */
-        const leg = traversing ? legRef.current : null;
+        /* ⚑ The RUN's id, not the current leg's. A note opened in leg 1 and closed in leg 3
+           describes all three, and `runRootRef` is the only value that stays true for all of it —
+           `legRef` would name whichever leg happened to be running when the concierge stopped
+           talking, which is the least meaningful of the three. */
+        const leg = traversing ? runRootRef.current : null;
         await capturePhotoV2(
           { kind: "zone", id: zone },
           rec.blob,
@@ -1057,14 +1076,19 @@ export function CameraScreen({
     await recorder.start();
   }, [recorder, capturePhotoV2, showToast, traversing]);
 
-  const endTraverse = useCallback(async (): Promise<TraverseResult | null> => {
+  /**
+   * @param finishing `false` when this end is the first half of a `next leg`.
+   *
+   * ⛑ **The distinction is the whole of the owner's ruling** and the first cut lost it: stopping
+   * the trace stops the narration, **but a leg change is not stopping the trace.** *That is one
+   * continuous run and the narration belongs to all of it* — it was cut at every boundary because
+   * `next leg` reaches this function too, and nothing here knew which of the two acts it was
+   * serving. A parameter, because a function that cannot tell its callers apart will keep guessing.
+   */
+  const endTraverse = useCallback(async (finishing = true): Promise<TraverseResult | null> => {
     try {
-      /* ⚑ **Stopping the trace stops the narration** (owner ruling 2026-08-30). A note that
-         outlives the act it describes goes on recording into whatever happens next — and the
-         concierge, who pressed stop, has every reason to believe it stopped. *Recording across a
-         `next leg` boundary is deliberate and stays*: that is one continuous run and the narration
-         belongs to all of it. Ending the trace is the act that ends. */
-      if (recorder.state === "recording") await toggleVoice();
+      // The concierge who pressed *stop trace* has every reason to believe the recording stopped.
+      if (finishing && recorder.state === "recording") await toggleVoice();
       const result = await stopTraverse();
       setTraverseResult(result);
       /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
@@ -1074,6 +1098,7 @@ export function CameraScreen({
         .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
         .finally(() => setMeasuring(false));
       lastEnd.current = endPosition;
+      if (finishing) runRootRef.current = null;
 
       /*
         ⚑ **A traverse filed nothing at all, and nobody noticed because the numbers arrived.**
@@ -2269,7 +2294,7 @@ export function CameraScreen({
               <button
                 type="button"
                 onClick={() =>
-                  void endTraverse().then((r) =>
+                  void endTraverse(false).then((r) =>
                     r ? beginTraverse(r.startedAt, lastEnd.current ?? undefined) : undefined,
                   )
                 }

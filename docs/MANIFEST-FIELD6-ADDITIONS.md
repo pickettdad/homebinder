@@ -141,6 +141,27 @@ shot **wide** and the run locks the lens for its whole length, so there is **no 
 a traverse** — a real pose and nothing to project at all. *This is the case that field was built
 for.*
 
+### ⚑ A voice note taken during a trace binds to the RUN, not to a leg
+
+**Ruled 2026-08-30.** A narration recorded while walking a pipe carries `frame.captureId` set to the
+**first leg of the chain** — the run's own id — and `role: "evidence"`, because a narration survives
+and is never a spare exposure.
+
+⛑ **The run, not the leg, and the reason is that a note routinely outlives one.** The concierge
+talks continuously and presses *next leg* at a corner; a note opened in leg 1 and closed in leg 3
+describes all three. **Binding it to any single leg would be false whichever leg was chosen** —
+and binding it to the leg that happened to be running when they stopped talking is the least
+meaningful of the three.
+
+⚑ **Which legs it actually spanned needs no field, so none was invented.** The note carries
+`capturedAt` and `durationMs`; every leg's `captureId` **is** its start timestamp. *The span is
+arithmetic on facts already in the manifest* — and a second home for a derivable fact is how two
+records drift apart.
+
+**Legs of one run are linked by `frame.continuesFrom`**, so the desk walks the chain from the note's
+`captureId` forward and has the whole run: every leg, every frame, in order, with the narration that
+covers them.
+
 ### ⚑ Why not a position per frame, said plainly so nobody asks for it as a small change
 
 **It is not a tuning problem, it is decision one.** A traverse runs on the `AVCaptureSession` with

@@ -1059,6 +1059,12 @@ export function CameraScreen({
 
   const endTraverse = useCallback(async (): Promise<TraverseResult | null> => {
     try {
+      /* ⚑ **Stopping the trace stops the narration** (owner ruling 2026-08-30). A note that
+         outlives the act it describes goes on recording into whatever happens next — and the
+         concierge, who pressed stop, has every reason to believe it stopped. *Recording across a
+         `next leg` boundary is deliberate and stays*: that is one continuous run and the narration
+         belongs to all of it. Ending the trace is the act that ends. */
+      if (recorder.state === "recording") await toggleVoice();
       const result = await stopTraverse();
       setTraverseResult(result);
       /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
@@ -1149,7 +1155,7 @@ export function CameraScreen({
     } finally {
       setTraversing(false);
     }
-  }, [capturePhotoV2]);
+  }, [capturePhotoV2, recorder.state, toggleVoice]);
 
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;

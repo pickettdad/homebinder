@@ -3013,6 +3013,39 @@ final class CameraController: NSObject {
          when there is nothing pending, which is the ordinary case.
         */
         sessionQueue.sync { }
+        /*
+         ⛑ **Let auto-exposure converge before metering it. This is the black viewfinder.**
+
+         `traverseExposurePlan` reads `device.exposureDuration` and `device.iso` **at the instant of
+         the call**, and since the leg anchors landed that instant is ~300 ms after the capture
+         session restarted from an ARKit handover. **Auto-exposure has not converged yet**, so
+         `light = duration × ISO` is computed from a reading of nothing: the plan then picks the
+         fastest shutter and the lowest ISO and *locks them for the whole leg*.
+
+         ⚑ **The field named it and the name was exact** — *"the exposure must be set on something
+         wild because the image in the viewfinder is SO dark it almost looks black."* It was: not a
+         black screen, a correctly-locked near-black exposure. And it explains the texture scores
+         that survived every other fix — **a near-black frame has no Laplacian energy**, which is
+         precisely what 1.0–3.2 against a threshold of 5 looks like.
+
+         ⛑ **Third variant of one class in three days**: the meter is right, the moment is wrong.
+         Before the leg anchors, `startTraverse` ran on a camera that had been settled for seconds.
+
+         `isAdjustingExposure` is the device's own signal that it has finished, so it is what is
+         waited on — never a sleep long enough to *probably* be enough. Bounded, and the wait is
+         **recorded**: a leg that starts on an unconverged meter must be visible afterwards rather
+         than inferred from a dark photograph.
+        */
+        var exposureWaitMs = 0.0
+        var exposureSettled = true
+        if let device {
+            let began = CACurrentMediaTime()
+            while device.isAdjustingExposure, CACurrentMediaTime() - began < 1.5 {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            exposureWaitMs = (CACurrentMediaTime() - began) * 1000
+            exposureSettled = !device.isAdjustingExposure
+        }
         var exposureRecord: [String: Any] = [:]
         if let device {
             do {
@@ -3068,12 +3101,19 @@ final class CameraController: NSObject {
                leg produced one frame took pulling the app's temp directory off the device by hand.
                A run now says it started, and says what the session was set to when it did — which
                is the fact that would have named tonight's regression in one line. */
-            HSZoneLog.record("traverseStart", [
+            /* ⚑ The exposure the leg was actually locked to, and how long the meter took to
+               settle. The plan has always been computed and only ever reached JavaScript; the one
+               number that would have named this in a line was not in the file anybody pulls. */
+            var started: [String: Any] = [
                 "preset": self.session.sessionPreset.rawValue,
                 "lens": self.lens.rawValue,
                 "continuesFrom": continuesFrom ?? "-",
                 "unmet": unmet,
-            ])
+                "exposureWaitMs": exposureWaitMs,
+                "exposureSettled": exposureSettled,
+            ]
+            for (k, v) in exposureRecord { started["exp_\(k)"] = v }
+            HSZoneLog.record("traverseStart", started)
             DispatchQueue.main.async {
                 completion(.success([
                     "exposure": exposureRecord,

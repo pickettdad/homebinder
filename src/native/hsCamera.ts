@@ -551,9 +551,14 @@ export interface TraverseResult {
 }
 
 export interface TraverseProgressEvent {
+  /** Frames KEPT. ⚑ Not frames taken — see `discarded`, which is the difference and the one
+   *  that matters when a leg is going wrong. */
   frames: number;
   pairs: TraversePair[];
   lastPair?: TraversePair | null;
+  /** ⛑ Frames taken and thrown away for too little texture. **Always sent, including zero**, so a
+   *  reader can compute *kept of taken* rather than having to know it is sometimes absent. */
+  discarded?: number;
 }
 
 export interface CaptureResult {

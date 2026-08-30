@@ -3363,7 +3363,11 @@ final class CameraController: NSObject {
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
         // survive the bridge as a JS null, it survives as something the far side cannot read.
-        var progress: [String: Any] = ["frames": run.frames.count, "pairs": run.pairs]
+        // ⚑ `discarded` on EVERY progress event, including zero. Sending it only when something
+        // was dropped means the reader cannot tell *nothing discarded* from *this build does not
+        // report it* — and the screen would show a blank where the answer belongs.
+        var progress: [String: Any] = ["frames": run.frames.count, "pairs": run.pairs,
+                                       "discarded": run.discarded]
         if let last = run.pairs.last { progress["lastPair"] = last }
         onTraverse?(progress)
     }

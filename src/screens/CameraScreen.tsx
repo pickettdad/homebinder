@@ -2224,8 +2224,35 @@ export function CameraScreen({
         */}
         {(startAction === "traverse" || traversing || traverseResult) && (
           <div className="mb-2 flex items-center gap-2 rounded-xl bg-slate-950/85 p-2 ring-1 ring-slate-700">
-            <span className="shrink-0 px-1 text-xs text-slate-400">
-              {measuring ? "measuring…" : traversing ? `leg ${legNumber}` : legNumber > 0 ? `${legNumber} done` : "trace"}
+            {/*
+              ⛑ **Keeping N of M, where the concierge is looking** (2026-08-30).
+
+              Four legs were walked across two nights that kept **nothing** — `kept: 0` every time —
+              and the app said so only in a log file pulled off the device over a cable afterwards.
+              *The count existed the whole time*: `onTraverse` has always carried `frames` and
+              `discarded`, and the screen showed `frames` alone, inside the collapsed instruments
+              panel. **A leg that is throwing everything away is visible in two seconds or it is
+              visible in a post-mortem**, and this project has now done the post-mortem four times.
+
+              ⚑ Amber only when frames are being taken and none are being kept — *a verdict before
+              the prose*. Nothing to say on a leg that is going fine.
+            */}
+            <span
+              className={`shrink-0 px-1 text-xs ${
+                traversing && traverseProgress && traverseProgress.frames === 0 && (traverseProgress.discarded ?? 0) > 0
+                  ? "text-amber-400"
+                  : "text-slate-400"
+              }`}
+            >
+              {measuring
+                ? "measuring…"
+                : traversing && traverseProgress
+                  ? `leg ${legNumber} · keeping ${traverseProgress.frames}/${traverseProgress.frames + (traverseProgress.discarded ?? 0)}`
+                  : traversing
+                    ? `leg ${legNumber}`
+                    : legNumber > 0
+                      ? `${legNumber} done`
+                      : "trace"}
             </span>
             <button
               type="button"

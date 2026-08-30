@@ -1401,7 +1401,31 @@ final class CameraController: NSObject {
             return false
         }
         session.addInput(newInput)
+        /*
+         ⛑ **Re-assert the preset, because adding an input can move it and nothing puts it back.**
+
+         `sessionPreset` is set to `.photo` once at setup. AVFoundation is documented to change the
+         preset when an input is added that cannot support the current one — and it does not change
+         back when the original input returns. **Measured 2026-08-29:** after the sibling pair's
+         swap, the session sat at `vga640x480` and every subsequent capture came back **640×480,
+         49 KB** where the same code path had produced **2.5 MB** a fortnight earlier. The traverse
+         is what found it, because a traverse takes the next captures on that session.
+
+         ⚑ *A swap is an operation with two ends and this accounted for one of them* — the input was
+         restored, the format the input implied was not. Same class as the lens itself, one layer
+         down, in the change that fixed the lens. **The preset is re-asserted on every swap in both
+         directions, and the achieved value is recorded rather than assumed.**
+        */
+        if session.canSetSessionPreset(.photo) {
+            session.sessionPreset = .photo
+        }
         session.commitConfiguration()
+        HSZoneLog.record("lensSwap", [
+            "to": wanted.rawValue,
+            // Read back AFTER commit. The thing consulted must be the thing that governs.
+            "preset": session.sessionPreset.rawValue,
+            "restored": session.sessionPreset == .photo,
+        ])
 
         videoInput = newInput
         device = newDevice
@@ -2957,6 +2981,16 @@ final class CameraController: NSObject {
             run.continuesFrom = continuesFrom
             self.traverse = run
             self.isTraversing = true
+            /* ⚑ **The traverse logged nothing, and it is the thing under test.** Finding out why a
+               leg produced one frame took pulling the app's temp directory off the device by hand.
+               A run now says it started, and says what the session was set to when it did — which
+               is the fact that would have named tonight's regression in one line. */
+            HSZoneLog.record("traverseStart", [
+                "preset": self.session.sessionPreset.rawValue,
+                "lens": self.lens.rawValue,
+                "continuesFrom": continuesFrom ?? "-",
+                "unmet": unmet,
+            ])
             DispatchQueue.main.async {
                 completion(.success([
                     "exposure": exposureRecord,
@@ -2989,6 +3023,14 @@ final class CameraController: NSObject {
     }
 
     func stopTraverse(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        /* ⚑ What the leg actually produced, said at the moment it ends. A leg that kept one frame
+           of nine is not a leg, and nothing in the app said so on 2026-08-29. */
+        if let r = traverse {
+            HSZoneLog.record("traverseStop", [
+                "kept": r.frames.count, "discarded": r.discarded, "pairs": r.pairs.count,
+                "preset": session.sessionPreset.rawValue,
+            ])
+        }
         visionQueue.async { [weak self] in
             guard let self else { return }
             guard let run = self.traverse else {
@@ -3154,6 +3196,14 @@ final class CameraController: NSObject {
                                                 droppedSteps: run.droppedAtRequest))
             }
             run.lastKeptBuffer = run.pendingBuffer
+            /* ⛑ **A discard is a decision and it was silent.** Eight of nine frames were dropped
+               for low texture in a dark room on 2026-08-29 and the concierge was told nothing — he
+               walked the leg believing it was recording. Logged with the score and the threshold so
+               *too dark to register* and *nothing was captured* stop looking identical. */
+            HSZoneLog.record("traverseDiscard", [
+                "index": index, "texture": texture, "keepAbove": Self.traverseKeepTexture,
+                "kept": run.frames.count, "discarded": run.discarded,
+            ])
             onTraverse?(["frames": run.frames.count, "pairs": run.pairs, "discarded": run.discarded])
             return
         }

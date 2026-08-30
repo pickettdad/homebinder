@@ -1345,19 +1345,40 @@ final class CameraController: NSObject {
              here, on the way back in, inside a configuration block — and **read back afterwards**,
              because the thing consulted must be the thing that governs.
             */
-            session.beginConfiguration()
-            if session.canSetSessionPreset(.photo) { session.sessionPreset = .photo }
-            session.commitConfiguration()
             if !session.isRunning { session.startRunning() }
         }
-        HSZoneLog.record("cameraReclaimed", [
-            "running": session.isRunning,
-            "preset": session.sessionPreset.rawValue,
-            // ⚑ Never assumed. If this reads false the stills are ARKit's video frames and every
-            // texture score, every file size and every grain complaint downstream follows from it.
-            "photoRestored": session.sessionPreset == .photo,
-            "dims": "\(device?.activeFormat.highResolutionStillImageDimensions.width ?? 0)x\(device?.activeFormat.highResolutionStillImageDimensions.height ?? 0)",
-        ])
+        HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
+        /*
+         ⛑ **The restore is asynchronous, and that is a correction to yesterday's correction.**
+
+         Restoring the preset *inside* the synchronous reclaim was right about the cause and wrong
+         about the cost: **measured 9.3 s per handover on device 2026-08-30**, three times in one
+         run, against 0.45 s before. That is the freeze and the black screen the field reported —
+         *"froze up or lagged significantly when starting traverse, and then screen goes black."*
+         The preview is down for the whole of a `startRunning` that has to renegotiate the device
+         format ARKit left behind.
+
+         ⚑ **A nine-second black screen is a worse defect than a soft first frame**, and the two are
+         not close. So the reclaim returns immediately, the preview comes back, and the format
+         settles behind it — with the settle **timed and logged**, because I have now guessed twice
+         at this and a number is what ends that.
+        */
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let began = CACurrentMediaTime()
+            guard self.session.sessionPreset != .photo, self.session.canSetSessionPreset(.photo) else { return }
+            self.session.beginConfiguration()
+            self.session.sessionPreset = .photo
+            self.session.commitConfiguration()
+            HSZoneLog.record("presetRestored", [
+                "ms": (CACurrentMediaTime() - began) * 1000,
+                "preset": self.session.sessionPreset.rawValue,
+                // ⚑ Never assumed. If this reads false the stills are ARKit's video frames, and
+                // every texture score and grain complaint downstream follows from it.
+                "photoRestored": self.session.sessionPreset == .photo,
+                "dims": "\(self.device?.activeFormat.highResolutionStillImageDimensions.width ?? 0)x\(self.device?.activeFormat.highResolutionStillImageDimensions.height ?? 0)",
+            ])
+        }
     }
 
     func stop() {

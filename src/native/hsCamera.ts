@@ -80,10 +80,25 @@ export function lensPolicyFor(
 ): { default: CameraLens; locked: boolean } {
   // The refusal wins over any intent: a plate is a plate whatever door was used to reach it.
   if (mode === "text" || mode === "document") return { default: "normal", locked: true };
-  // ⚑ Room shot and traverse default wide — both are "get the whole of it in", which is the exact
-  // job the lens does. Run trace is NOT in the ruling and so is not assumed into it; it follows a
-  // pipe rather than framing a room, and the concierge can still choose.
-  if (intent === "room-shot" || intent === "traverse") return { default: "wide", locked: false };
+  /* ⚑ **Room shot defaults wide. The traverse does NOT, and that is a field measurement
+     overturning an untested default** (2026-08-30).
+
+     Both were ruled wide on 2026-08-16 as *"get the whole of it in"*. ⛑ **The traverse half was
+     never actually in force**: `applyIntentLens` read React state instead of the ref and returned
+     silently before the camera had reported, so every successful traverse this project has ever run
+     was shot on **normal**. Fixing that bug applied the wide default for the first time — and the
+     traverse collapsed.
+
+     **The numbers, and they are not close.** Real traverse frames score **6.2–18.1** on
+     `textureScore` (2026-08-19: 70 frames, mean 14.5 on a wall, 6.4 on carry; the metered shutter
+     took the median from 6.2 to 18.1). On wide, 2026-08-30: **1.1–1.99 across 31 frames in three
+     lit rooms, every one discarded** against a keep threshold of 5.
+
+     *A 120° frame spreads the same wall over a fifth of the pixels*, and the traverse registers by
+     detail — so wide does not merely reduce quality, it removes the signal the whole mechanism runs
+     on. **The room shot keeps wide**, because it is one framed photograph and needs no registration
+     at all. Two capture kinds, two answers, and only one of them was ever tested. */
+  if (intent === "room-shot") return { default: "wide", locked: false };
   return { default: "normal", locked: false };
 }
 

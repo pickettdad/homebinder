@@ -342,9 +342,30 @@ describe("which lens a door opens on", () => {
     }
   });
 
-  it("defaults wide for the doors whose job is fitting the whole of something in", () => {
+  it("defaults wide for the one door whose job is fitting the whole of something in", () => {
+    // A room shot is ONE framed photograph and needs no registration at all, so the widest view
+    // that fits the room is simply the better photograph.
     expect(lensPolicyFor("object", "room-shot").default).toBe("wide");
-    expect(lensPolicyFor("object", "traverse").default).toBe("wide");
+  });
+
+  /**
+   * ⛑ **A capture that REGISTERS must keep the detail it registers on** (field 2026-08-30).
+   *
+   * The traverse was ruled wide alongside the room shot on 2026-08-16, on the reasoning that both
+   * are *"get the whole of it in"*. ⚑ **That half was never in force** — `applyIntentLens` read
+   * React state instead of its ref and returned before the camera had reported, so every successful
+   * traverse this project has run was shot on normal. Fixing that bug applied the default for the
+   * first time and the traverse collapsed: **texture 1.1–1.99 across 31 frames in three lit rooms,
+   * every one discarded**, against 6.2–18.1 on the walks that worked.
+   *
+   * *A 120° frame spreads the same wall over a fifth of the pixels*, and the traverse registers by
+   * detail — so wide does not reduce quality, it removes the signal the mechanism runs on. The
+   * invariant is that one, not the value: **framing wants width, registration wants detail.**
+   */
+  it("does not default a registering capture to the lens that removes its signal", () => {
+    expect(lensPolicyFor("object", "traverse").default).not.toBe("wide");
+    // Still the concierge's to change — this is a default, never a lock.
+    expect(lensPolicyFor("object", "traverse").locked).toBe(false);
   });
 
   it("leaves the choice open wherever it is the concierge's to make", () => {

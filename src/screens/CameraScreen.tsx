@@ -356,6 +356,8 @@ export function CameraScreen({
   const recorder = useVoiceRecorder();
   /** Where the current leg began. Taken before the exposure lock, held until the leg is filed. */
   const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
+  /** The `captureId` of the leg currently being walked, or null. Set by `beginTraverse`. */
+  const legRef = useRef<string | null>(null);
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
   pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
@@ -965,7 +967,9 @@ export function CameraScreen({
           await requestLens(policy.default);
         }
       }
-      await startTraverse(continuesFrom);
+      const started = await startTraverse(continuesFrom);
+      /* ⚑ Held so a voice note taken DURING this leg can name it. See `toggleVoice`. */
+      legRef.current = started.startedAt;
       setLegNumber((n) => (continuesFrom ? n + 1 : 1));
       setTraversing(true);
     } catch (err) {
@@ -986,7 +990,36 @@ export function CameraScreen({
     const zone = zoneRef.current;
     if (recorder.state === "recording") {
       const rec = await recorder.stop();
-      if (rec && zone) await capturePhotoV2({ kind: "zone", id: zone }, rec.blob, rec.mime, rec.durationMs);
+      if (rec && zone) {
+        /*
+          ⚑ **A note spoken during a leg names that leg** (owner question 2026-08-30: *"are the
+          voice notes carried to the manifest so they bind with the traverse leg?"*).
+
+          ⛑ **They were not.** The note filed to the zone with a timestamp and nothing else, so the
+          desk could only correlate it by clock — and *"whatever notes are in it are judged first
+          against that leg and its images"* was not something the record supported.
+
+          ⚑ **Bound through `frame.captureId`, which is the key that already means "these belong to
+          one act."** A leg's frames all carry it; the note now carries the same value, so the note
+          and the leg's images are one group by the mechanism that already exists rather than a new
+          one. *`role: "evidence"` because a narration survives — it is never a spare exposure.*
+
+          ⛑ **This is a proposal, not a ruling.** Baseline Service Design §8 item 2 gives the design
+          session note-binding, and `CaptureTarget` still has no media variant — so this binds a note
+          to a *capture group*, which is the thing a leg actually is, and stops short of inventing
+          note-to-media targeting. Outside a traverse nothing is stamped, because there is no act to
+          name and a captureId pointing at nothing is worse than none.
+        */
+        const leg = traversing ? legRef.current : null;
+        await capturePhotoV2(
+          { kind: "zone", id: zone },
+          rec.blob,
+          rec.mime,
+          rec.durationMs,
+          undefined,
+          leg ? { frame: { captureId: leg, role: "evidence" } } : undefined,
+        );
+      }
       return;
     }
     if (recorder.state === "unsupported") {
@@ -994,7 +1027,7 @@ export function CameraScreen({
       return;
     }
     await recorder.start();
-  }, [recorder, capturePhotoV2, showToast]);
+  }, [recorder, capturePhotoV2, showToast, traversing]);
 
   const endTraverse = useCallback(async (): Promise<TraverseResult | null> => {
     try {

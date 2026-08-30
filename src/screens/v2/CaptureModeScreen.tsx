@@ -431,33 +431,71 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
             🖼 Room shot
           </PhotoInput>
         )}
-        <PhotoInput
-          onPhoto={(file) => setPending({ file, intent: "pan" })}
-          fromLibrary
-          className={SECONDARY_DOOR}
-        >
-          ↔ Traverse
-        </PhotoInput>
+        {/* ⛑ **This was a photo-LIBRARY picker** (field report 2026-08-29: *"the traverse button
+            does nothing when pressed"*). It was `<PhotoInput fromLibrary>` filing `intent: "pan"` —
+            it never touched `startTraverse`, never locked exposure, never registered a pair. ⚑ *The
+            native traverse has existed and shipped for a fortnight, in the viewfinder, behind a
+            button this door did not lead to.*
+
+            Same defect as Paper below and the same cause: a browser-path control left standing on
+            the native shell where a native door belongs. Room shot got its native door; these two
+            did not. The browser arm stays — it is the control, not the shipping surface. */}
+        {cameraAvailable() ? (
+          <BigButton
+            variant="secondary"
+            className={SECONDARY_DOOR}
+            onClick={() => navigate({ name: "camera2", zoneId: zone.zoneId, startAction: "traverse" })}
+          >
+            ↔ Traverse
+          </BigButton>
+        ) : (
+          <PhotoInput
+            onPhoto={(file) => setPending({ file, intent: "pan" })}
+            fromLibrary
+            className={SECONDARY_DOOR}
+          >
+            ↔ Traverse
+          </PhotoInput>
+        )}
         {/* §4.1d. Manuals, invoices, permits, the well record — photographed whether or not
             anyone knows what they are, which is §4.1a's rule applied to paper. It files to the
-            current zone like everything else, which records the drawer it came out of. */}
-        <PhotoInput onPhoto={(file) => setPending({ file, intent: "document" })} className={SECONDARY_DOOR}>
-          📄 Paper
-        </PhotoInput>
+            current zone like everything else, which records the drawer it came out of.
+
+            ⛑ **One capability, two front doors, and this was the one that could not read**
+            (design ruling 2026-08-29). The viewfinder's Document mode finds the page, flattens it
+            and runs accurate text recognition on the result; this button took a flat photograph of
+            a curled invoice at an angle and filed it as a document. **The door that reads wins**,
+            which is the design session's own test. Native goes to the viewfinder in Document mode;
+            the browser arm keeps the plain capture, because there is no page-finder there either. */}
+        {cameraAvailable() ? (
+          <BigButton
+            variant="secondary"
+            className={SECONDARY_DOOR}
+            onClick={() => navigate({ name: "camera2", zoneId: zone.zoneId, startAction: "document" })}
+          >
+            📄 Paper
+          </BigButton>
+        ) : (
+          <PhotoInput onPhoto={(file) => setPending({ file, intent: "document" })} className={SECONDARY_DOOR}>
+            📄 Paper
+          </PhotoInput>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-2">
         <VideoInput onVideo={(file, ms) => setPending({ file, durationMs: ms })} className={SECONDARY_DOOR}>
           🎥 Video
         </VideoInput>
-        {/* §4.1b. Mostly desk-prescribed for visit two — in Discovery this is the obvious
-            ones in utility spaces. The narration is the deliverable, so the label says so. */}
-        <VideoInput
-          onVideo={(file, ms) => setPending({ file, durationMs: ms, intent: "run-trace" })}
-          className={SECONDARY_DOOR}
-        >
-          🎬 Run trace
-        </VideoInput>
+        {/* ⛑ **The run-trace VIDEO door is retired** (owner ruling 2026-08-29). *A video that
+            measures nothing, carries no position and nobody watches is the worst of all three —
+            expensive to store, expensive to send, and it answers nothing the stills do not.*
+
+            ⚑ The **traverse** takes the job: it registers frame to frame, it will carry world
+            anchors at each leg boundary, and its frames are stills a desk can actually read. The
+            `run-trace` **intent value stays valid** — ids are never retired or reused, and captures
+            already filed under it keep their meaning. Only the door goes. `captureTargetFor`'s
+            run-trace branch stays for the same reason: *a trace starts inside a container and ends
+            outside it*, and that rule outlives the video that first needed it. */}
         {/* Standalone voice note, from anywhere in capture mode (§3). The concierge is
             already talking; the transcript is orientation the desk cannot otherwise get. */}
         <BigButton variant="secondary" className={SECONDARY_DOOR} onClick={() => setVoiceOpen(true)}>

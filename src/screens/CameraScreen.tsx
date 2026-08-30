@@ -24,7 +24,7 @@ import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
 import type { MediaRef } from "../engine/v2/fold";
 import { db } from "../storage/db";
-import type { FrameReadMeta, FrameRoleMeta } from "../engine/schema/events";
+import type { FrameReadMeta, FrameRoleMeta, CapturePositionMeta } from "../engine/schema/events";
 import type { CaptureIntent } from "../engine/v2/events";
 import {
   captureTargetFor,
@@ -328,7 +328,7 @@ export function CameraScreen({
   startAction,
 }: {
   zoneId?: string;
-  startAction?: "floorplan" | "mesh" | "room-shot";
+  startAction?: "floorplan" | "mesh" | "room-shot" | "traverse" | "document";
 }) {
   const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
@@ -350,6 +350,8 @@ export function CameraScreen({
   const [pendingIntent, setPendingIntent] = useState<CaptureIntent | null>(null);
   /** How many legs of one walk have been recorded. Resets when a traverse starts unrelated. */
   const [legNumber, setLegNumber] = useState(1);
+  /** Where the current leg began. Taken before the exposure lock, held until the leg is filed. */
+  const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
   pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
@@ -499,6 +501,19 @@ export function CameraScreen({
         if (startAction === "room-shot") {
           await applyIntentLens("room-shot");
           setPendingIntent("room-shot");
+        } else if (startAction === "traverse") {
+          /* ⛑ **Armed, not started.** The lens goes wide because that is what a traverse wants —
+             `lensPolicyFor` already rules it, and it MUST be applied before `startTraverse`, which
+             locks exposure, focus and white balance and refuses a swap mid-run. But the run itself
+             waits for the concierge to press: *a traverse that began the instant the screen opened
+             would record the walk to the pipe rather than the pipe.* */
+          await applyIntentLens("traverse");
+        } else if (startAction === "document") {
+          /* ⚑ The door that READS. Document mode finds the page, flattens it and runs accurate
+             recognition on the result — which is the whole reason this door now leads here instead
+             of to a flat photograph of a curled invoice. */
+          const achieved = await requestMode("document");
+          if (live && achieved.unmet.length) setZoneNote(`document: could not reach ${achieved.unmet.join(", ")}`);
         } else if (startAction === "floorplan") {
           const started = await startRoomPlan();
           if (live && started.started) {
@@ -910,7 +925,33 @@ export function CameraScreen({
     setTraverseResult(null);
     setTraverseProgress(null);
     try {
-      // ⚑ Lens first, and it MUST be before `startTraverse`. A traverse locks exposure, white
+      /*
+        ⚑ **Where this leg BEGINS, in the world** (design ruling 2026-08-29).
+
+        A traverse registers frame to frame by image overlap — translation-only, image space — so
+        it recovers *order* and *shape* and knows nothing about where in the house it happened.
+        ⛑ **The order is the thing the desk cannot get any other way.** The owner's own mechanical
+        room has a water line that crosses the room, skips a unit and doubles back to it: a desk
+        reasoning from what sits near what does not merely fail, it *confidently produces the wrong
+        sequence.*
+
+        **Per-frame position is not available and this is not a tuning problem.** A traverse runs on
+        the `AVCaptureSession` with exposure, focus and white balance locked; ARKit cannot hold the
+        lens at the same time, and one position costs a full camera handover — **1.70 s, measured
+        on device 2026-08-28** (yield → `limited(initializing)` → `normal` → read → reclaim). A
+        handover mid-run would also break the exposure lock the whole registration model depends on,
+        which is why `swapLens` already refuses while traversing. Per-frame world position **is**
+        decision one, not an addition to this.
+
+        **So: an anchor at each end of each leg**, taken where the concierge has already stopped.
+        The chain between them carries the order; these two carry the room. ⚑ *And a run that
+        doubles back is walked as separate legs* — `continuesFrom` already exists for exactly that —
+        so the leg endpoints form a polyline of the route rather than a straight line through it.
+      */
+      startPosition.current = await takePosition().catch(
+        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+      );
+      // ⚑ Lens SECOND, and it MUST be before `startTraverse`. A traverse locks exposure, white
       // balance and focus on its first frame and refuses a lens swap mid-run — so a wide default
       // applied afterwards would be silently declined, and the run would be shot on normal while
       // the control said wide.
@@ -932,6 +973,11 @@ export function CameraScreen({
     try {
       const result = await stopTraverse();
       setTraverseResult(result);
+      /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
+         a traverse — the two anchors bracket it rather than interrupt it. */
+      const endPosition = await takePosition().catch(
+        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+      );
 
       /*
         ⚑ **A traverse filed nothing at all, and nobody noticed because the numbers arrived.**
@@ -972,11 +1018,27 @@ export function CameraScreen({
           continuesFrom: result.continuesFrom ?? undefined,
         });
         const blobFor = async (path: string) => (await fetch(frameUrl(path))).blob();
+        /*
+          ⚑ **The two anchors ride the first and last frames**, which is where they were taken and
+          the only honest place to put them. Every frame between carries none — its role is not
+          `primary`, so the manifest's own rule already says the pose is on the primary of this
+          `captureId`, and the desk reads the leg rather than the frame.
+
+          ⛑ *A traverse is shot WIDE* (`lensPolicyFor`, and the run locks the lens for its whole
+          length), so both anchors are honest poses whose matrix does not describe their image —
+          and there is **no 1× frame anywhere in a traverse**, so `projectableFrame` is `null`.
+          *That is the case the field exists for: a real pose and nothing to project at all.*
+        */
+        const traverseProjection = { frames: [{ lens: statusRef.current?.lens }], at: result.startedAt };
+        const withProjection = (p: ZonePosition): CapturePositionMeta =>
+          p.positioned ? { ...p, projection: projectionFor(traverseProjection) } : p;
+        const lastIndex = rest.length - 1;
         const siblings = await Promise.all(
           rest.map(async (f, i) => ({
             blob: await blobFor(f.path),
             mime: "image/jpeg",
             frame: roleFor(i + 1),
+            position: i === lastIndex ? withProjection(endPosition) : undefined,
           })),
         );
         await capturePhotoV2(
@@ -987,7 +1049,7 @@ export function CameraScreen({
           "image/jpeg",
           undefined,
           "pan",
-          { frame: roleFor(0), siblings },
+          { frame: roleFor(0), position: withProjection(startPosition.current), siblings },
         );
       }
     } catch (err) {

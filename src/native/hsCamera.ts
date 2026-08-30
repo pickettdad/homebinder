@@ -770,7 +770,7 @@ const PROJECTABLE_LENS: CameraLens = "normal";
  * than a missing key. *A wide room shot with no sibling has a real pose and no projectable frame at
  * all, and that is a different sentence from "look next door".*
  */
-export function projectionFor(capture: Pick<CaptureResult, "frames" | "at">): PositionProjection {
+export function projectionFor(capture: { frames: { lens?: CameraLens }[]; at: string }): PositionProjection {
   const primary = capture.frames[0];
   // Absent `lens` is a capture written before the field existed; those were all taken on the lens
   // ARKit models, so the honest answer is yes rather than unknown.

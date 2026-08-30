@@ -116,6 +116,46 @@ is the ray-cast hit **in front of the lens**, with its distance. For a nameplate
 0.3–1 m apart, which is the difference between placing the water heater and placing the person
 photographing it.
 
+### ⚑ A traverse leg carries two anchors — its first frame and its last
+
+**Ruled 2026-08-29.** *The value of a traverse is not the pictures; it is recovering where a run
+goes **and in what sequence**.* ⛑ **The sequence is the thing the desk cannot get any other way** —
+the owner's mechanical room has a water line that crosses the room, skips a unit and doubles back to
+it, so a desk reasoning from *what sits near what* does not merely fail, it **confidently produces
+the wrong order.**
+
+A traverse files as **one capture, `intent: "pan"`**: frame 0 is the primary, the rest are siblings.
+It now carries a measured position on the **first** frame and on the **last**, and none in between.
+
+| | |
+|---|---|
+| primary (`role: primary`) | **where the leg began** |
+| final sibling | **where the leg ended** |
+| every frame between | absent — `role` is not `primary`, so the manifest's own rule applies: *the pose is on the primary of this `captureId`* |
+
+**Read the leg, not the frame.** Frame order within the capture is the traversal order; the two
+anchors put that order in the room.
+
+⛑ **`projection.projectable` is `false` on both, with `projectableFrame: null`.** A traverse is
+shot **wide** and the run locks the lens for its whole length, so there is **no 1× frame anywhere in
+a traverse** — a real pose and nothing to project at all. *This is the case that field was built
+for.*
+
+### ⚑ Why not a position per frame, said plainly so nobody asks for it as a small change
+
+**It is not a tuning problem, it is decision one.** A traverse runs on the `AVCaptureSession` with
+exposure, focus and white balance locked; **ARKit cannot hold the lens at the same time**, and one
+position costs a full camera handover — **1.70 s, measured on device 2026-08-28** (yield →
+`limited(initializing)` → `normal` → read → reclaim). A handover mid-run would also break the
+exposure lock the entire registration model is defined against, which is why the code already
+refuses a lens swap while traversing.
+
+**And the desk gets the route anyway, from the concierge rather than from the sensor:** *a run that
+doubles back is walked as separate legs.* `continuesFrom` already links them, so **the leg endpoints
+form a polyline of the actual route** rather than a straight line through it. ⚑ *That is a better
+answer than per-frame position for the stated need, because frame-to-frame image registration cannot
+give world direction at any price.*
+
 ## 2 · Two new `intent` values — `floorplan` and `mesh`
 
 Both are ordinary captures: real files, real hashes, listed in `media[]` like any photograph, with

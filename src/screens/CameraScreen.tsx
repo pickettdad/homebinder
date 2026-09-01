@@ -731,6 +731,25 @@ export function CameraScreen({
 
          A request, not an instruction: Text refuses it by policy and a device without the glass
          refuses it by hardware. `result.wideRefused` says which. */
+      /*
+        ⛑ **The container is decided HERE, at the shutter, and it used to be decided at the write.**
+
+        Field 2026-08-30: *"I took a nameplate shot of one of the water treatment systems, then
+        immediately hit new object container, and since it took a while for the nameplate capture to
+        register, it ended up landing as the first object container picture instead of in the
+        previous object container as its nameplate."*
+
+        ⚑ `captureTargetFor(openRef.current, …)` ran **after** the frames came back — a window of
+        one to three seconds on a bracket — so a container opened during that window took ownership
+        of a photograph of the previous object. **A nameplate filed against the wrong equipment is
+        worse than a missing one**: it is a wrong answer that looks like a right one, and nothing
+        downstream can tell.
+
+        *The container that was open when the concierge pressed is the container that owns the
+        frame.* Same class as every other value read at the wrong moment in this file — and the
+        first one where the wrong value silently corrupts the record rather than the experience.
+      */
+      const targetAtShutter = openRef.current;
       const result = await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
       /*
         ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
@@ -863,7 +882,7 @@ export function CameraScreen({
         */
         const declared = pendingIntentRef.current ?? undefined;
         const mediaId = await capturePhotoV2(
-          captureTargetFor(openRef.current, currentZone, declared), blob, "image/jpeg",
+          captureTargetFor(targetAtShutter, currentZone, declared), blob, "image/jpeg",
           undefined, declared,
           /* ⚑ On the PRIMARY only. Siblings inherit — the container's anchor is one frame, and a
              pose stamped on all three of a bracket would read as three positions of one object. */
@@ -880,9 +899,21 @@ export function CameraScreen({
             siblings,
           },
         );
-        // One act, one capture: the door was for this shot, not for the rest of the room.
-        pendingIntentRef.current = null;
-        setPendingIntent(null);
+        /* ⛑ **A room shot stays armed; every other declared intent fires once.**
+
+           *"You take one shot and it exits the room-shot container, so you can't take follow-up
+           shots"* — field 2026-08-30, having taken **three** room shots to get three angles of a
+           mechanical room, one of which landed as an ordinary zone capture because the door had
+           already disarmed. The 2026-08-21 ruling that a room shot *"happens once, at the start of
+           a zone"* was written before anyone had photographed a room with equipment on four walls.
+
+           ⚑ A traverse or a document is one act by construction; **a room shot is one act per
+           angle**, and the concierge decides how many angles a room has. It disarms on leaving the
+           viewfinder, which is the act that ends it. */
+        if (pendingIntentRef.current !== "room-shot") {
+          pendingIntentRef.current = null;
+          setPendingIntent(null);
+        }
         /*
           ⚑ **The link back from the filed capture to the frames it came from**, and it exists to
           undo a regression this session caused.
@@ -934,6 +965,13 @@ export function CameraScreen({
   /**
    * The `+` at the top of the strip. Tapping it while inside a container closes that one and
    * opens a new one — one gesture, and the previous object needs no closing act of its own.
+   *
+   * ⛑ **It also returns the camera to `object` mode**, because the field found the alternative:
+   * *"I think I took the main object shot of the GSW hot water tank using the nameplate mode,
+   * because it was the last mode I was in when I switched object container."* ⚑ *A container opens
+   * on the whole thing* — that is what the first frame of a container is for — and inheriting the
+   * close-focus, spot-metered, lens-locked Text mode from the previous object's plate is a setting
+   * chosen for a different job, silently applied to the shot that identifies the equipment.
    *
    * ⚑ The container is created with no type and no label, and nothing here asks for one. It
    * declares *this is a thing and I am now photographing it*, never what the thing is.
@@ -1223,6 +1261,14 @@ export function CameraScreen({
     try {
       const pinId = await createPin(currentZone);
       setOpen({ pinId, zoneId: currentZone });
+      /* ⚑ Back to `object`. See this function's header: a container opens on the whole thing, and
+         Text mode inherited from the previous object's plate is close-focused, spot-metered and
+         lens-locked — settings chosen for a job this frame is not doing. Painted from the return,
+         as everything on this screen must be. */
+      if (statusRef.current && statusRef.current.mode !== "object") {
+        const achieved = await requestMode("object").catch(() => null);
+        if (achieved && achieved.mode !== "object") showToast(`mode stayed ${achieved.mode}`);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not start an object here");
     }

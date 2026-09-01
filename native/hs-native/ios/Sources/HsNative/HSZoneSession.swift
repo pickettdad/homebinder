@@ -273,7 +273,15 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private func harvestMesh() -> [String: Any] {
         let anchors = (session.currentFrame?.anchors ?? []).compactMap { $0 as? ARMeshAnchor }
         HSZoneLog.record("harvestMesh", ["anchors": anchors.count])
-        guard !anchors.isEmpty else { return ["anchors": 0, "faces": 0, "why": "nothing was meshed"] }
+        /* ⛑ **The mesh names its own zone.** Every floorplan payload carries `zoneId` and both
+           meshes of the 2026-08-30 walk carried `""` — so a mesh read on its own could not say which
+           room it was of. The manifest's `owner.zoneId` recovers it, but *a payload that cannot
+           identify itself is one join away from being anonymous*, and the doc's own example shows
+           the field populated. Two rooms were meshed on that walk; the difference between them is
+           the entire question the desk is asking. */
+        guard !anchors.isEmpty else {
+            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "why": "nothing was meshed"]
+        }
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
         var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
         var faces = 0
@@ -294,6 +302,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         return [
             "anchors": anchors.count,
             "faces": faces,
+            // ⚑ Two rooms were meshed on the 2026-08-30 walk and neither payload could say which
+            // it was. See the guard above.
+            "zoneId": zoneId,
             "pieces": pieces,
             // The volume somebody walked, which is the honest name for it.
             "walkedExtent": [

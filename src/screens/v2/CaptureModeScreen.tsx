@@ -23,6 +23,7 @@ import { useVoiceRecorder } from "../../capture/useVoiceRecorder";
 import { BigButton, Sheet } from "../../ui/bits";
 import { MediaThumb, MediaViewer, ZONE_LEVELS } from "./shared";
 import { cameraAvailable } from "../../native/hsCamera";
+import { zoneGaps } from "../../native/zone";
 import type { ChecklistConfig } from "../../engine/schema/checklistConfig";
 import type { CaptureIntent } from "../../engine/v2/events";
 
@@ -312,6 +313,30 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
   const media = zone.photos;
   const runs = groupIntoRuns(media);
 
+  /*
+    ⛑ **What this room is missing, said in the room** (design ruling 2026-09-01).
+
+    The full bath left the house with four objects, 34 photographs, six plate reads and **nothing to
+    place any of it on** — its floorplan was lost to a sensor failure mid-stop and the room looked
+    finished from inside the app. *Nobody knew until the desk opened the file two days later.*
+
+    ⚑ A gap discovered at the desk costs a second visit; the same gap named in the room costs a
+    minute. **It reports and never blocks** — a garage that genuinely needs no floorplan is a
+    legitimate zone and the concierge must be able to walk away from it.
+
+    ⚑ *This is also the reader `containerAnchorState` has been waiting for.* It has been computed,
+    exported and tested since Field 6 and called by no screen — rule 43, named by the owner and by
+    the design session's own §8 audit. **The question it answers is exactly the one this banner
+    asks**, so it is wired here rather than reimplemented.
+  */
+  const gaps = zoneGaps({
+    photos: zone.photos.length + v2Session.pins.filter((p) => p.zoneId === zone.zoneId).reduce((n, p) => n + p.photos.length, 0),
+    hasFloorplan: zone.photos.some((m) => m.intent === "floorplan"),
+    containers: v2Session.pins
+      .filter((p) => p.zoneId === zone.zoneId)
+      .map((p) => ({ frames: p.photos.map((m) => ({ position: m.position as never })) })),
+  });
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
       {/* The current zone, named and large. No open count, no checklist, no pins. */}
@@ -412,6 +437,14 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
         files under, and retirements are about instructions, never ids. Renaming the id would break
         every capture already exported under it to fix a word on a button.
       */}
+      {!gaps.complete && (
+        <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300 ring-1 ring-amber-500/40">
+          <span className="font-medium">Before you leave this room:</span> {gaps.missing.join(" · ")}.
+          {" "}
+          <span className="text-amber-400/70">Fixable here; costs a visit later.</span>
+        </p>
+      )}
+
       <div className="grid grid-cols-3 gap-2">
         {/* ⚑ **A zone-entry act, and it fires where the camera is.** The room shot happens once, at
             the start of a zone — so its door belongs here rather than in the row the concierge hits

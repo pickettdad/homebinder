@@ -65,6 +65,22 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     /// Live scan feedback — RoomPlan reports both and the first cut ignored both.
     private var roomProgress: [String: Any] = [:]
 
+    /**
+     ⚑ **How many times ARKit has re-established tracking since this zone opened.**
+
+     The 2026-08-30 export showed mechanical-room poses walking **3 m below the floor** over 42
+     minutes, in discrete 0.4–0.7 m steps. The device log across that walk records
+     `limited(initializing)` **109 times and `limited(relocalizing)` zero times** — so every wake
+     re-establishes tracking from scratch rather than matching the map it already had, and each
+     re-establishment re-derives the device pose with no correspondence to the last one.
+
+     ⛑ **A pose at minute 40 is not the same measurement as a pose at minute 2, and nothing in the
+     export said so.** This is the count that says it.
+    */
+    private(set) var reinitCount = 0
+    /// Seconds since the last re-establishment — the other half of *how old is this frame's frame*.
+    private var lastInitAt = Date()
+
     private(set) var zoneId: String = ""
     private(set) var mode: Mode?
     private(set) var paused = false
@@ -126,6 +142,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      */
     func openZone(_ id: String, onEvent: @escaping ([String: Any]) -> Void) -> [String: Any] {
         self.zoneId = id
+        reinitCount = 0
+        lastInitAt = Date()
         self.onEvent = onEvent
         startedAt = Date()
         mapSaves = 0
@@ -228,7 +246,14 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            already cleared `everRan`, and the first run after that resets rather than resumes. */
         let mustReset = reset || !everRan || failure != nil
         failure = nil
-        HSZoneLog.record("enter", ["mode": next.rawValue, "reset": mustReset, "unmet": unmet])
+        /* ⚑ Counted here, at the one place a session is (re)started. Every entry to this line is a
+           re-establishment of tracking — the walk of 2026-08-30 reached this 111 times in five
+           zones, and ARKit reported `initializing` on 109 of them and `relocalizing` on none. */
+        reinitCount += 1
+        lastInitAt = Date()
+        HSZoneLog.record("enter", [
+            "mode": next.rawValue, "reset": mustReset, "unmet": unmet, "reinits": reinitCount,
+        ])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
         everRan = true
         mode = next
@@ -291,10 +316,55 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let t = a.transform.columns.3
             minP = simd_min(minP, SIMD3<Float>(t.x, t.y, t.z))
             maxP = simd_max(maxP, SIMD3<Float>(t.x, t.y, t.z))
+            /*
+             ⛑ **The geometry itself, not a count of it** (owner ruling 2026-09-01).
+
+             `vertices: 14712` was a **count** shipped where the desk needed a **list**. The kitchen
+             mesh was 8,545 bytes declaring 74,494 vertices and 133,838 faces; the mechanical room
+             7,813 bytes declaring 150,832 and 262,642. ⚑ *A mesh that ships no vertices is a
+             receipt for a mesh.*
+
+             **All mesh processing is desk work** — Discovery is capture-only and the field app never
+             edits a floorplan from a mesh — so the shape has to leave the device or the ruling
+             cannot be executed at all. Roughly 0.9 MB and 1.6 MB against an export already carrying
+             1.4 GB: **0.2% for the only thing in the file that describes a surface.**
+
+             Vertices are read through the buffer's own stride and offset rather than assumed
+             contiguous — `MTLBuffer` layout is ARKit's to change, and reading it as a packed
+             `SIMD3<Float>` array is the kind of assumption that works until an OS release.
+            */
+            var verts: [Double] = []
+            let vb = a.geometry.vertices
+            verts.reserveCapacity(vb.count * 3)
+            for i in 0..<vb.count {
+                let p = vb.buffer.contents()
+                    .advanced(by: vb.offset + vb.stride * i)
+                    .assumingMemoryBound(to: (Float, Float, Float).self).pointee
+                verts.append(Double(p.0)); verts.append(Double(p.1)); verts.append(Double(p.2))
+            }
+            /* Face indices, flattened. `indexCountPerPrimitive` is 3 for a triangle mesh and is
+               read rather than assumed, for the same reason. */
+            var idx: [Int] = []
+            let fb = a.geometry.faces
+            let perFace = fb.indexCountPerPrimitive
+            idx.reserveCapacity(fb.count * perFace)
+            for i in 0..<(fb.count * perFace) {
+                idx.append(Int(fb.buffer.contents()
+                    .advanced(by: i * fb.bytesPerIndex)
+                    .assumingMemoryBound(to: UInt32.self).pointee))
+            }
             pieces.append([
                 "id": a.identifier.uuidString,
-                "vertices": a.geometry.vertices.count,
-                "faces": a.geometry.faces.count,
+                // ⚑ Kept as counts BESIDE the arrays, not replaced by them: a reader can check the
+                // array it received against the number the device meant to send.
+                "vertexCount": vb.count,
+                "faceCount": fb.count,
+                "indicesPerFace": perFace,
+                /* Flat `[x,y,z,x,y,z,…]` in the anchor's LOCAL frame — `transform` places it.
+                   Flat rather than nested triples because 150,000 three-element arrays is JSON
+                   overhead three times the size of the numbers. */
+                "vertices": verts,
+                "faces": idx,
                 "x": Double(t.x), "y": Double(t.y), "z": Double(t.z),
                 "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(a.transform[c][r]) } }
             ])
@@ -413,6 +483,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             return ["positioned": false, "why": failure ?? "settling", "recoverable": true]
         }
         let state = HSArProbe.describe(frame.camera.trackingState)
+        /*
+         ⛑ **`tracking` is TAUTOLOGICAL and this is the honest instrument beside it.**
+
+         The guard below refuses anything that is not `.normal`, so a *positioned* pose can only
+         ever carry `tracking: "normal"` — 109 of 109 across the whole export, which reads as
+         reassurance and is a restatement of the filter. **A field with one possible value carries
+         no information.** It stays, because its absence would be worse and the binder already
+         consumes it, but it can no longer stand alone.
+
+         ⚑ `worldMappingStatus` is ARKit's own answer to the question the desk is actually asking —
+         *how much of this room does the session believe it knows* — and unlike `trackingState` it
+         is not filtered by anything here. `.limited` or `.notAvailable` on a pose forty minutes
+         into a zone is the signal that pose is worth less than an early one.
+        */
+        let mapping: String
+        switch frame.worldMappingStatus {
+        case .notAvailable: mapping = "notAvailable"
+        case .limited: mapping = "limited"
+        case .extending: mapping = "extending"
+        case .mapped: mapping = "mapped"
+        @unknown default: mapping = "unknown"
+        }
         guard case .normal = frame.camera.trackingState else {
             // Not a failure to report later: a pose taken under `limited` is a pose that may be
             // metres out, and the caller has to decide with that in front of them.
@@ -424,6 +516,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "positioned": true,
             "zoneId": zoneId,
             "tracking": state,
+            // ⚑ The three that let a desk age a pose. See the comments above and on `reinitCount`.
+            "mapping": mapping,
+            "reinits": reinitCount,
+            "sinceInitSec": Date().timeIntervalSince(lastInitAt),
+            "featurePoints": frame.rawFeaturePoints?.points.count ?? 0,
             "mode": mode?.rawValue ?? "",
             "at": ISO8601DateFormatter().string(from: Date()),
             "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),

@@ -950,6 +950,25 @@ export function CameraScreen({
           marginal`. Most captures legitimately hold no text at all, and a prompt that fired on
           those would be background noise by the time a plate needed it.
         */
+        /*
+          ⛑ **Wide is a choice for one shot, never a mode** (owner ruling 2026-09-01).
+
+          *"Wide should always revert back to normal unless it's in room shot; room shot defaults to
+          wide. But once you exit out of room shot, back to always normal."*
+
+          ⚑ The lens was **sticky**: `requestedLens` survives a mode change by design, so a wide
+          chosen once — or inherited from a room shot — stayed on every object photograph and every
+          plate afterwards, silently. On the 2026-08-30 walk that is how 18 of 19 room-shot entries
+          came back `projectable: false` and how wide frames reached rooms nobody framed wide.
+
+          *A setting the concierge cannot see is a setting they cannot correct*, and this one
+          changes what the desk can do with the photograph rather than only how it looks.
+        */
+        if (pendingIntentRef.current !== "room-shot" && statusRef.current?.lens === "wide") {
+          const back = await requestLens("normal").catch(() => null);
+          if (back && back.lens !== "normal") showToast(`lens stayed ${back.lens}`);
+        }
+
         if (captureWantsRetake(result)) {
           showToast("That plate read poorly — worth another, closer or with the light moved");
         }

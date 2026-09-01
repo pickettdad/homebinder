@@ -167,6 +167,32 @@ export type CapturePositionMeta =
       /** ⚑ The pose is where the concierge STOOD. This is the surface in front of the lens, when
        *  geometry existed to hit it. Absent reads *unknown*, never *nothing there*. */
       surface?: { x: number; y: number; z: number; distance: number };
+      /**
+       * ⚑ **How much of the room ARKit believes it knows** — `notAvailable` | `limited` |
+       * `extending` | `mapped`, straight from `ARFrame.worldMappingStatus`.
+       *
+       * ⛑ **Read this, not `tracking`.** `tracking` can only ever say `normal` on a positioned
+       * pose, because the native side refuses anything else — 109 of 109 across the 2026-08-30
+       * export. *A field with one possible value carries no information*, and this is the one that
+       * does: `limited` forty minutes into a zone is a pose worth less than an early one.
+       */
+      mapping?: string;
+      /**
+       * ⚑ **How many times tracking has been re-established since this zone opened.**
+       *
+       * The mechanical room's poses walked **3 m below its own floor** over 42 minutes, in discrete
+       * 0.4–0.7 m steps. Across that walk ARKit reported `initializing` 109 times and
+       * `relocalizing` **zero** — so each wake re-derives the device pose rather than matching the
+       * map it already had, and the error between one pose and the next has no correspondence.
+       * *This count is what lets a desk say a late pose and an early one are not the same
+       * measurement.*
+       */
+      reinits?: number;
+      /** Seconds since that re-establishment — the other half of *how old is this pose's frame*. */
+      sinceInitSec?: number;
+      /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
+       *  a room with nothing to hold on to — which is the mechanical room's own description. */
+      featurePoints?: number;
       /** ⚑ Whether `transform` describes the camera that took this image. See `PositionProjection`
        *  — required, so it is answered rather than assumed. */
       projection: PositionProjection;

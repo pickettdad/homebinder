@@ -77,6 +77,27 @@ const state = {
         /* ⚑ The room shot — a WIDE primary whose pose is honest and whose matrix does not describe
            it, with the 1× sibling it points at. The case the 2026-08-28 ruling exists for, and the
            reason the fixture illustrating it must be exercised rather than merely declared. */
+        /* The degraded twin: a wide primary whose pair was refused, so there is nowhere to point.
+           Observed 10 times in 19 room-shot entries on the 2026-08-30 walk. */
+        media("media-roomshot-7-lone", "image/jpeg", {
+          intent: "room-shot",
+          frame: { captureId: "2026-08-23T17:38:44Z", role: "primary", lens: "wide" },
+          position: {
+            positioned: true,
+            zoneId: "zone-mechanical",
+            tracking: "normal",
+            at: "2026-08-23T17:38:44Z",
+            x: 0.9,
+            y: -0.5,
+            z: 2.1,
+            transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.9, -0.5, 2.1, 1],
+            projection: {
+              projectable: false,
+              why: "taken through the wide lens; transform describes ARKit's normal camera, which is the only one world tracking is offered",
+              projectableFrame: null,
+            },
+          },
+        }),
         media("media-roomshot-6", "image/jpeg", {
           intent: "room-shot",
           frame: { captureId: "2026-08-23T17:38:10Z", role: "primary", lens: "wide" },
@@ -170,16 +191,24 @@ const typeOf = (v: unknown): string =>
  * fields. Array elements collapse to `[]` so five example media entries state one contract about
  * what a media entry may contain, rather than five about positions in a list.
  */
-function paths(value: unknown, prefix = ""): Map<string, string> {
-  const out = new Map<string, string>();
+function paths(value: unknown, prefix = ""): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const add = (p: string, t: string) => {
+    const set = out.get(p) ?? new Set<string>();
+    set.add(t);
+    out.set(p, set);
+  };
+  const merge = (m: Map<string, Set<string>>) => {
+    for (const [k, ts] of m) for (const t of ts) add(k, t);
+  };
   if (Array.isArray(value)) {
-    for (const item of value) for (const [k, t] of paths(item, `${prefix}[]`)) out.set(k, t);
+    for (const item of value) merge(paths(item, `${prefix}[]`));
   } else if (value && typeof value === "object") {
     for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
       if (key.startsWith("_")) continue;
       const path = prefix ? `${prefix}.${key}` : key;
-      out.set(path, typeOf(v));
-      for (const [k, t] of paths(v, path)) out.set(k, t);
+      add(path, typeOf(v));
+      merge(paths(v, path));
     }
   }
   return out;
@@ -193,6 +222,8 @@ describe("the manifest fixture is a contract, not a photograph of one day", () =
     // A tripwire over an empty set passes forever. This is the guard on the guard.
     expect(documented.size).toBeGreaterThan(30);
     expect([...documented.keys()]).toContain("media[].position.transform");
+    // ⛑ And the nullable field is documented in BOTH its forms — see the type test below.
+    expect(documented.get("media[].position.projection.projectableFrame")?.size).toBe(2);
   });
 
   it("names every field the way the emitter names it", () => {
@@ -201,9 +232,21 @@ describe("the manifest fixture is a contract, not a photograph of one day", () =
     expect(missing).toEqual([]);
   });
 
-  it("gives every field the type the emitter gives it", () => {
-    const wrong = [...documented].filter(([p, t]) => emitted.has(p) && emitted.get(p) !== t)
-      .map(([p, t]) => `${p}: fixture says ${t}, emitter writes ${emitted.get(p)}`);
+  /**
+   * ⚑ **A SET of types per path, because a nullable field is one shape and not two.**
+   *
+   * `projection.projectableFrame` is an object *or* `null` — *look next door* or *there is nowhere
+   * to look* — and the 2026-08-30 export carries both: 9 of 19 room-shot entries named a sibling
+   * and **10 had none.** A one-type-per-path check called that a mismatch and would have pushed
+   * whoever hit it toward deleting one of the two forms the contract needs.
+   *
+   * The invariant is **the emitter produces every type the fixture documents**, not that a path has
+   * exactly one type.
+   */
+  it("produces every type the fixture documents, nullable fields included", () => {
+    const wrong = [...documented]
+      .filter(([p, types]) => emitted.has(p) && [...types].some((t) => !emitted.get(p)!.has(t)))
+      .map(([p, types]) => `${p}: fixture documents ${[...types].join("|")}, emitter writes ${[...emitted.get(p)!].join("|")}`);
     expect(wrong).toEqual([]);
   });
 
@@ -219,6 +262,15 @@ describe("the manifest fixture is a contract, not a photograph of one day", () =
     const projection = (wide!.position as { projection: { projectableFrame?: unknown; why?: string } }).projection;
     // It must POINT somewhere, or say null. A missing key would be the ambiguity all over again.
     expect(Object.prototype.hasOwnProperty.call(projection, "projectableFrame")).toBe(true);
+    /* ⚑ **Both forms, because the real export carries both.** The 2026-08-30 walk produced 19
+       room-shot entries: 9 named a 1× sibling and **10 had none**. A receiver built only against
+       the pointer form meets `null` on its first real export, which is exactly the surprise a
+       fixture exists to prevent. */
+    const projections = rows
+      .map((r) => (r.position as { projection?: { projectableFrame?: unknown } })?.projection)
+      .filter((x): x is { projectableFrame?: unknown } => !!x && "projectableFrame" in x);
+    expect(projections.some((x) => x.projectableFrame === null), "no null example").toBe(true);
+    expect(projections.some((x) => x.projectableFrame !== null), "no pointer example").toBe(true);
     expect(projection.why ?? "").not.toBe("");
     // And every positioned frame answers the question at all — that is what "required" buys.
     const positioned = rows.filter((m) => (m.position as { positioned?: boolean })?.positioned === true);

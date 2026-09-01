@@ -22,7 +22,6 @@
       "bytes": 2481920,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
       "capturedAt": "2026-08-23T17:41:02Z",
-      "intent": null,
       "frame": {
         "captureId": "2026-08-23T17:41:02Z",
         "role": "primary",
@@ -64,7 +63,8 @@
           "projectable": true
         },
         "_note": "`projection` answers whether `transform` describes the camera that took THIS image. Required on every positioned frame, so it is answered rather than assumed."
-      }
+      },
+      "_note": "⚑ `intent` is ABSENT, not null — corrected 2026-09-01 against the real export, which never writes an explicit null. An absent key reads *no intent was declared*; `null` would read *an intent was declared and it was nothing*, and this manifest keeps that distinction everywhere else."
     },
     {
       "mediaId": "media-detail-2",
@@ -210,6 +210,60 @@
         "lens": "normal"
       },
       "_note": "The 1x sibling, same press, ~330 ms later. No `position` of its own: its role is not `primary`, so the pose is on the primary of this captureId — and it is the frame that primary's `projection.projectableFrame` points at."
+    },
+    {
+      "mediaId": "media-roomshot-7-lone",
+      "kind": "photo",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-roomshot-7-lone.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2551104,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000008",
+      "capturedAt": "2026-08-23T17:38:44Z",
+      "intent": "room-shot",
+      "frame": {
+        "captureId": "2026-08-23T17:38:44Z",
+        "role": "primary",
+        "lens": "wide"
+      },
+      "position": {
+        "positioned": true,
+        "zoneId": "zone-mechanical",
+        "tracking": "normal",
+        "at": "2026-08-23T17:38:44Z",
+        "x": 0.9,
+        "y": -0.5,
+        "z": 2.1,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.9,
+          -0.5,
+          2.1,
+          1.0
+        ],
+        "projection": {
+          "projectable": false,
+          "why": "taken through the wide lens; transform describes ARKit's normal camera, which is the only one world tracking is offered",
+          "projectableFrame": null
+        },
+        "_note": "⚑ THE DEGRADED CASE, AND IT IS COMMON. `projectableFrame: null` means the 1x sibling was NOT taken — the mode refused the pair, or the device could not swap. A real pose, and NOTHING in this capture the matrix describes. Observed 10 times in 19 room-shot entries on the 2026-08-30 walk, so a receiver that only handles the pointer form will meet this on its first real export."
+      },
+      "_note": "A room shot with no sibling. Same shape as media-roomshot-6 above, and the ONLY difference is `projectableFrame: null` — which is the difference between *look next door* and *there is nowhere to look*."
     }
   ],
   "_payloads": {

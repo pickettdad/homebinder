@@ -314,8 +314,6 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         for a in anchors {
             faces += a.geometry.faces.count
             let t = a.transform.columns.3
-            minP = simd_min(minP, SIMD3<Float>(t.x, t.y, t.z))
-            maxP = simd_max(maxP, SIMD3<Float>(t.x, t.y, t.z))
             /*
              ⛑ **The geometry itself, not a count of it** (owner ruling 2026-09-01).
 
@@ -341,6 +339,16 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                     .advanced(by: vb.offset + vb.stride * i)
                     .assumingMemoryBound(to: (Float, Float, Float).self).pointee
                 verts.append(Double(p.0)); verts.append(Double(p.1)); verts.append(Double(p.2))
+                /* ⛑ **`walkedExtent` used to be the extent of anchor CENTRES**, so it measured the
+                   spread of ~1 m³ block origins and understated the real volume by roughly half a
+                   block on every face — while being compared, in a design review, against floorplan
+                   wall extents as though the two were the same measurement. *A number named for one
+                   thing and computed from another is worse than a missing number.* It is now the
+                   extent of the actual geometry, in world space. */
+                let w = a.transform * SIMD4<Float>(p.0, p.1, p.2, 1)
+                let wp = SIMD3<Float>(w.x, w.y, w.z)
+                minP = simd_min(minP, wp)
+                maxP = simd_max(maxP, wp)
             }
             /* Face indices, flattened. `indexCountPerPrimitive` is 3 for a triangle mesh and is
                read rather than assumed, for the same reason. */
@@ -480,7 +488,22 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            inside that, so a perfectly healthy wake reported `settling`. A warm one resumes into the
            same world and answers almost at once, so the two waits are not the same wait. */
         guard let frame = waitForTrackedFrame(timeout: wasAsleep ? 8.0 : 3.0) else {
-            return ["positioned": false, "why": failure ?? "settling", "recoverable": true]
+            /*
+             ⛑ **The refusal used to say `settling` and nothing else, and that word covered two
+             different failures.** `waitForTrackedFrame` only ever returns a `.normal` frame, so the
+             `guard case .normal` below is **unreachable** — every tracking-limited condition landed
+             here instead, as a bare `settling` indistinguishable from *no new frame arrived at all*.
+             The `tracking` member of the refusal variant was a field **no code path could
+             populate**. The filter destroyed information on the failure path as well as the success
+             one, which is the half the first fix missed.
+            */
+            let last = session.currentFrame.map { HSArProbe.describe($0.camera.trackingState) }
+            return [
+                "positioned": false,
+                "why": failure ?? (last.map { "tracking \($0)" } ?? "no frame"),
+                "tracking": last as Any,
+                "recoverable": true,
+            ]
         }
         let state = HSArProbe.describe(frame.camera.trackingState)
         /*
@@ -512,6 +535,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         }
         let t = frame.camera.transform
         let p = t.columns.3
+        /* Measured against the pose held at `sleepSession`, before anything else moves. */
+        let resumeJump: Float? = sleptAt.map { simd_distance($0, SIMD3<Float>(p.x, p.y, p.z)) }
         var out: [String: Any] = [
             "positioned": true,
             "zoneId": zoneId,
@@ -521,6 +546,31 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "reinits": reinitCount,
             "sinceInitSec": Date().timeIntervalSince(lastInitAt),
             "featurePoints": frame.rawFeaturePoints?.points.count ?? 0,
+            /*
+             ⚑ **The one measurement that observes the failure directly, at the instant it happens.**
+
+             *Where the session went to sleep, against where it thinks it woke up.* Everything else
+             on this pose — `mapping`, `reinits`, `sinceInitSec` — **describes conditions**. This
+             one is the discontinuity itself: the concierge does not teleport, so a large
+             `resumeJumpM` over a short `sleepSec` is the estimate moving, not the person.
+
+             ⛑ **Recorded because my own diagnosis was wrong and could not be tested.** I read
+             *zero `relocalizing` in 109 wakes* as evidence the wake was rebuilding the world —
+             and it is a **tautology**: `initialWorldMap` and `sessionShouldAttemptRelocalization`
+             appear nowhere in this plugin, so relocalisation was never possible to observe. *I
+             diagnosed one forced-constant field and built a conclusion on a second one in the same
+             message.* And `HSArProbe` had already measured this exact cycle: **origin moved
+             0.00003 m and the mesh came back byte-identical.** A wake that rebuilt the world could
+             not do that.
+
+             So the wake is not the mechanism, and **the mechanism is now something a number can
+             settle rather than an argument.** The leading candidate is genuine VIO drift in a
+             degenerate room — positioning is the one mode that runs with `sceneReconstruction = []`,
+             so it is the one mode without the LiDAR that would disambiguate repeating parallel
+             pipes at 0.3–0.6 m.
+            */
+            "resumeJumpM": resumeJump.map { Double($0) } as Any,
+            "sleepSec": sleptWhen.map { Date().timeIntervalSince($0) } as Any,
             "mode": mode?.rawValue ?? "",
             "at": ISO8601DateFormatter().string(from: Date()),
             "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
@@ -553,7 +603,16 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         enter(.positioning)
     }
 
+    /** Where the camera was when the session went to sleep. See `resumeJump` — this is half of the
+     *  only measurement that observes the failure directly. */
+    private var sleptAt: SIMD3<Float>?
+    private var sleptWhen: Date?
+
     private func sleepSession() {
+        if let c = session.currentFrame?.camera.transform.columns.3 {
+            sleptAt = SIMD3<Float>(c.x, c.y, c.z)
+        }
+        sleptWhen = Date()
         session.pause()
         paused = true
         releaseCamera?()

@@ -2133,9 +2133,13 @@ final class CameraController: NSObject {
          than the model line **by luck**, and where it lands is positional — no threshold can
          move it. The unlit frame holds exactly the characters the lit one erased.
 
-         ⚑ And the pair is **two independent reads of one plate by construction**: wherever the
-         two transcriptions disagree, the disagreement localises the glare to those characters.
-         That is a property of taking the pair at all, not something anybody has to implement.
+         ⚑ And the pair is **one reader on two illuminations of one plate** — *not* two independent
+         readings. Wherever the two transcriptions disagree, the disagreement localises the glare to
+         those characters, which is a property of taking the pair at all. ⛑ **But the same Vision
+         revision reads both**, so a systematic error of that reader appears identically in each and
+         cancels out of the comparison. *Field 5's second independent reading is a second **reader**,
+         and it is not built.* Called two independent reads here until 2026-09-01, which would have
+         let a roadmap tick a box this does not fill.
 
          Paired only when the torch actually fires — one extra frame, on the minority of captures
          where there is anything to compare. Never during a traverse, where the torch is latched

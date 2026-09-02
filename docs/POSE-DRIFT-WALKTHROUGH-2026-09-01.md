@@ -40,13 +40,19 @@ or standing up.* **This is not a frame collapsing underneath a stationary person
 
 ## The two extremes, looked at rather than reasoned about
 
-**The largest single drop (−0.684 m, 30.59 min)** is a photograph **straight down into the sump
-pit**: a hole in the concrete floor, a black discharge pipe, the pit lid filling the frame at close
-range. Its `surface.y` is **−3.07**, about a metre below the floor — ⚑ **and that ray-cast is
-probably correct.** A sump pit *is* a metre deep.
+⛑ **The objects are described, not named. An earlier cut of this file named them — "sump pit",
+"brine tank" — and the owner corrected both.** *Naming equipment from a photograph is exactly the
+inference this project forbids the app from making, and it cost a conclusion here:* the "sump pit"
+reading was defended on the grounds that a sump pit is a metre deep. **It is a pump lid sitting a
+few inches below the concrete**, so `surface.y = −3.07` — about a metre below the floor — is
+**wrong by roughly a metre and is not evidence the ray-cast was sound.**
 
-**The highest pose (+0.568 m, 14.31 min)** is a photograph of the **brine tank** — a large, smooth,
-featureless white plastic drum filling most of the frame at close range, against a white wall.
+**The largest single drop (−0.684 m, 30.59 min)** is taken **straight down** at a large circular
+black lid set into the concrete floor, with a black discharge pipe rising out of it. The lid, the
+pipe and bare concrete fill the frame at close range.
+
+**The highest pose (+0.568 m, 14.31 min)** is taken close on a **large, smooth, featureless
+translucent plastic drum**, filling most of the frame, against a white wall.
 
 ⛑ **Both extremes share one thing, and it is not the room: a large, smooth, close, low-texture
 surface filling the frame.** White poly tank; bare concrete and a pit mouth. *That is a property of

@@ -42,6 +42,12 @@ function extensionFor(mime: string): string {
     if (mime.includes("webm")) return "webm";
     return "mp4";
   }
+  /* ⛑ **The floorplan and the mesh ship as JSON and were being named `.bin`** — observed in the
+     2026-09-02 export, where five geometry payloads landed with an extension that says *opaque
+     bytes* about a file that is plain text a person can read. **`kind: "geometry"` already tells
+     the binder what it is; the filename was telling it the opposite**, and a desk that trusts the
+     extension over the manifest unpacks a mesh it thinks it cannot open. */
+  if (mime.includes("json")) return "json";
   if (mime.includes("jpeg")) return "jpg";
   if (mime.includes("png")) return "png";
   if (mime.includes("heic") || mime.includes("heif")) return "heic";

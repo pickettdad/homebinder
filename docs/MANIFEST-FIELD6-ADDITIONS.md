@@ -181,6 +181,66 @@ form a polyline of the actual route** rather than a straight line through it. �
 answer than per-frame position for the stated need, because frame-to-frame image registration cannot
 give world direction at any price.*
 
+## 1b · `media[].read` — the device's own transcription, and what it is *not*
+
+**Undeclared until now, and shipping since Field 6.** ⛑ *A field the export has carried on 109 media
+across a real walk, which no document named, is a contract by accident.* This declares it.
+
+```json
+"read": {
+  "text": "…",
+  "engine": "vision.VNRecognizeTextRequest.accurate.rev3",
+  "confidence": 0.986,
+  "osVersion": "26.6.1"
+}
+```
+
+**On every frame of a text or document capture** — not only the primary. On a torch pair that is two
+transcriptions of one plate, and **where they disagree is where the glare was.**
+
+### What it measured on the 2026-08-30 walk
+
+| | |
+|---|---|
+| media carrying a read | **109 of 548** |
+| confidence | median **1.000**, p25 0.968 — **93 of 109 at ≥0.9**, one below 0.55 |
+| text length | median **407 characters**, longest **3,533** |
+| mechanical-room containers with ≥1 read | **19 of 21** |
+| reads naming MODEL / SERIAL / CAT NO | **80 of 109** |
+| reads carrying an alphanumeric code (6+, containing a digit) | **97 of 109** |
+
+⚑ **The serials are landing, and that was worth checking rather than assuming.** Real codes recovered
+include `G9-50SDE-30`, `SHEM53Z35C`, `TTV049BGC01ARKS`, `KG42800081` and the UL file number
+`E147773`. *Only 21 of 109 reads contain warning boilerplate*, so it is not reading the large
+generic text in place of the small specific text — it is reading both.
+
+### ⛑ It is NOT a second independent reading, and must not be counted as one
+
+**One reader, run on every frame.** `usesLanguageCorrection = false` — correct for serials, since
+correction would "fix" a model number into a word — and `recognitionLevel = .accurate` on the
+full-resolution JPEG.
+
+⚑ **The torch pair is two *illuminations*, not two readers.** The same Vision revision reads both, so
+a systematic error of that recogniser appears identically in each and **cancels out of any
+comparison between them.** A second independent reading means a second **recogniser**, and there
+is not one.
+
+**What the desk may rely on:** this is a strong first read, stamped with the recogniser that
+produced it, suitable as **one source to confirm a desk read against** — never as the confirmation
+itself.
+
+### Two limits, stated rather than discovered
+
+⛑ **The revision is reported, not pinned.** `engine` is built from `VNRecognizeTextRequest.currentRevision`
+at call time, so an OS update changes the recogniser and the string changes with it — *the record
+stays honest, and reproducibility does not.* Two reads taken either side of an OS update are not
+comparable, which is exactly what the `engine` stamp exists to let a reader notice.
+
+**`minimumTextHeight` is left at Vision's default of 1/32 of image height** — on a 4032 px frame,
+about 94 px. Text smaller than that is not attempted. *The walk's numbers suggest it is not
+currently costing us serials, and lowering it is untested — recorded as a known lever, not as a
+defect.*
+
 ## 2 · Two new `intent` values — `floorplan` and `mesh`
 
 Both are ordinary captures: real files, real hashes, listed in `media[]` like any photograph, with

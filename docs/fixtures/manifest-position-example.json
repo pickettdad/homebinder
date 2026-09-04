@@ -1,5 +1,5 @@
 {
-  "_note": "A hand-written EXAMPLE of the fields Field 6 adds to the manifest. Not an export — a shape to build against, so the binder side does not wait on a walk. See docs/MANIFEST-FIELD6-ADDITIONS.md.",
+  "_note": "A hand-written EXAMPLE of the fields Field 6 adds to the manifest. Not an export — a shape to build against, so the binder side does not wait on a walk. See docs/MANIFEST-FIELD6-ADDITIONS.md. ⚑ Two errors corrected 2026-08-28: the array was called `files[]` (the emitter has always written `media[]`) and `owner` was `{kind,id}` (the emitter writes `{kind:'pin',pinId,pinNumber}` and `{kind:'zone',zoneId}`). Both were silent failures — a receiver built on either finds nothing and says nothing. tests/engine/fixtureTripwire.test.ts now checks every path in this file against a manifest built by the real emitter, so a third one cannot survive a commit.",
   "manifestSchemaVersion": 3,
   "session": {
     "sessionId": "01a02616-843f-79df-8ecc-95f3c23a3e5f",
@@ -7,19 +7,26 @@
     "exportedAt": "2026-08-23T18:00:00Z",
     "appVersion": "field-6a"
   },
-  "files": [
+  "media": [
     {
       "mediaId": "media-anchor-1",
       "kind": "photo",
-      "owner": { "kind": "pin", "id": "pin-water-heater" },
+      "owner": {
+        "kind": "pin",
+        "pinId": "pin-water-heater",
+        "pinNumber": 1
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/pins/media-anchor-1.jpg",
       "mime": "image/jpeg",
       "bytes": 2481920,
       "sha256": "0000000000000000000000000000000000000000000000000000000000000001",
       "capturedAt": "2026-08-23T17:41:02Z",
-      "intent": null,
-      "frame": { "captureId": "2026-08-23T17:41:02Z", "role": "primary", "lens": "normal" },
+      "frame": {
+        "captureId": "2026-08-23T17:41:02Z",
+        "role": "primary",
+        "lens": "normal"
+      },
       "position": {
         "positioned": true,
         "zoneId": "zone-mechanical",
@@ -29,18 +36,44 @@
         "y": -0.518,
         "z": 3.407,
         "transform": [
-          0.998, 0.0, -0.062, 0.0,
-          0.004, 0.998, 0.062, 0.0,
-          0.062, -0.062, 0.996, 0.0,
-          1.243, -0.518, 3.407, 1.0
+          0.998,
+          0.0,
+          -0.062,
+          0.0,
+          0.004,
+          0.998,
+          0.062,
+          0.0,
+          0.062,
+          -0.062,
+          0.996,
+          0.0,
+          1.243,
+          -0.518,
+          3.407,
+          1.0
         ],
-        "surface": { "x": 1.61, "y": -0.44, "z": 3.92, "distance": 0.72 }
-      }
+        "surface": {
+          "x": 1.61,
+          "y": -0.44,
+          "z": 3.92,
+          "distance": 0.72
+        },
+        "projection": {
+          "projectable": true
+        },
+        "_note": "`projection` answers whether `transform` describes the camera that took THIS image. Required on every positioned frame, so it is answered rather than assumed."
+      },
+      "_note": "⚑ `intent` is ABSENT, not null — corrected 2026-09-01 against the real export, which never writes an explicit null. An absent key reads *no intent was declared*; `null` would read *an intent was declared and it was nothing*, and this manifest keeps that distinction everywhere else."
     },
     {
       "mediaId": "media-detail-2",
       "kind": "photo",
-      "owner": { "kind": "pin", "id": "pin-water-heater" },
+      "owner": {
+        "kind": "pin",
+        "pinId": "pin-water-heater",
+        "pinNumber": 1
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/pins/media-detail-2.jpg",
       "mime": "image/jpeg",
@@ -52,7 +85,10 @@
     {
       "mediaId": "media-refused-3",
       "kind": "photo",
-      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/zone/media-refused-3.jpg",
       "mime": "image/jpeg",
@@ -67,8 +103,11 @@
     },
     {
       "mediaId": "media-plan-4",
-      "kind": "photo",
-      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "kind": "geometry",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/zone/media-plan-4.json",
       "mime": "application/json",
@@ -80,8 +119,11 @@
     },
     {
       "mediaId": "media-mesh-5",
-      "kind": "photo",
-      "owner": { "kind": "zone", "id": "zone-mechanical" },
+      "kind": "geometry",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
       "group": "zone-mechanical",
       "file": "media/zone-mechanical/zone/media-mesh-5.json",
       "mime": "application/json",
@@ -90,6 +132,138 @@
       "capturedAt": "2026-08-23T17:47:12Z",
       "intent": "mesh",
       "_note": "Scene reconstruction output. Content shape below under _payloads.mesh."
+    },
+    {
+      "mediaId": "media-roomshot-6",
+      "kind": "photo",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-roomshot-6.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2648112,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000006",
+      "capturedAt": "2026-08-23T17:38:10Z",
+      "intent": "room-shot",
+      "frame": {
+        "captureId": "2026-08-23T17:38:10Z",
+        "role": "primary",
+        "lens": "wide"
+      },
+      "position": {
+        "positioned": true,
+        "zoneId": "zone-mechanical",
+        "tracking": "normal",
+        "at": "2026-08-23T17:38:10Z",
+        "x": 0.412,
+        "y": -0.503,
+        "z": 1.884,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.412,
+          -0.503,
+          1.884,
+          1.0
+        ],
+        "projection": {
+          "projectable": false,
+          "why": "taken through the wide lens; transform describes ARKit's normal camera, which is the only one world tracking is offered",
+          "projectableFrame": {
+            "captureId": "2026-08-23T17:38:10Z",
+            "lens": "normal"
+          }
+        },
+        "_note": "⚑ THE ROOM SHOT. The pose is honest — it is where the concierge STOOD, which no lens changes. The MATRIX is not: it describes ARKit's 1x camera and this is a 120 degree image. Use the pose; do not use it as a camera. `projectableFrame` names the frame in this same capture whose geometry it does describe."
+      },
+      "_note": "The primary of a sibling pair. The concierge framed WIDE — owner ruling 2026-08-16, re-confirmed in the field 2026-08-28 — so the frame they framed stays primary and the 1x frame is its sibling below."
+    },
+    {
+      "mediaId": "media-roomshot-6-sib",
+      "kind": "photo",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-roomshot-6-sib.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2402880,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000007",
+      "capturedAt": "2026-08-23T17:38:10Z",
+      "intent": "room-shot",
+      "frame": {
+        "captureId": "2026-08-23T17:38:10Z",
+        "role": "evidence",
+        "lens": "normal"
+      },
+      "_note": "The 1x sibling, same press, ~330 ms later. No `position` of its own: its role is not `primary`, so the pose is on the primary of this captureId — and it is the frame that primary's `projection.projectableFrame` points at."
+    },
+    {
+      "mediaId": "media-roomshot-7-lone",
+      "kind": "photo",
+      "owner": {
+        "kind": "zone",
+        "zoneId": "zone-mechanical"
+      },
+      "group": "zone-mechanical",
+      "file": "media/zone-mechanical/zone/media-roomshot-7-lone.jpg",
+      "mime": "image/jpeg",
+      "bytes": 2551104,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000008",
+      "capturedAt": "2026-08-23T17:38:44Z",
+      "intent": "room-shot",
+      "frame": {
+        "captureId": "2026-08-23T17:38:44Z",
+        "role": "primary",
+        "lens": "wide"
+      },
+      "position": {
+        "positioned": true,
+        "zoneId": "zone-mechanical",
+        "tracking": "normal",
+        "at": "2026-08-23T17:38:44Z",
+        "x": 0.9,
+        "y": -0.5,
+        "z": 2.1,
+        "transform": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.9,
+          -0.5,
+          2.1,
+          1.0
+        ],
+        "projection": {
+          "projectable": false,
+          "why": "taken through the wide lens; transform describes ARKit's normal camera, which is the only one world tracking is offered",
+          "projectableFrame": null
+        },
+        "_note": "⚑ THE DEGRADED CASE, AND IT IS COMMON. `projectableFrame: null` means the 1x sibling was NOT taken — the mode refused the pair, or the device could not swap. A real pose, and NOTHING in this capture the matrix describes. Observed 10 times in 19 room-shot entries on the 2026-08-30 walk, so a receiver that only handles the pointer form will meet this on its first real export."
+      },
+      "_note": "A room shot with no sibling. Same shape as media-roomshot-6 above, and the ONLY difference is `projectableFrame: null` — which is the difference between *look next door* and *there is nowhere to look*."
     }
   ],
   "_payloads": {
@@ -102,23 +276,57 @@
           "id": "5B1F2C90-0000-4000-8000-000000000001",
           "width": 4.02,
           "height": 2.44,
-          "x": 0.0, "y": 1.22, "z": -2.1,
+          "x": 0.0,
+          "y": 1.22,
+          "z": -2.1,
           "confidence": "high",
           "transform": [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 1.22, -2.1, 1.0
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            1.22,
+            -2.1,
+            1.0
           ]
         }
       ],
       "doors": [
         {
           "id": "5B1F2C90-0000-4000-8000-000000000002",
-          "width": 0.81, "height": 2.03,
-          "x": 1.1, "y": 1.01, "z": -2.1,
+          "width": 0.81,
+          "height": 2.03,
+          "x": 1.1,
+          "y": 1.01,
+          "z": -2.1,
           "confidence": "medium",
-          "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 1.1,1.01,-2.1,1]
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1.1,
+            1.01,
+            -2.1,
+            1
+          ]
         }
       ],
       "windows": [],
@@ -127,8 +335,12 @@
         {
           "id": "5B1F2C90-0000-4000-8000-000000000003",
           "category": "storage",
-          "width": 0.6, "height": 1.8, "depth": 0.6,
-          "x": -1.4, "y": 0.9, "z": -1.6,
+          "width": 0.6,
+          "height": 1.8,
+          "depth": 0.6,
+          "x": -1.4,
+          "y": 0.9,
+          "z": -1.6,
           "confidence": "low",
           "_note": "RoomPlan's OWN taxonomy — sofas, refrigerators, storage. It has no water heater, no softener, no pressure tank. Context for the desk, NOT an inventory: reading it as one under-counts exactly the rooms this service exists for."
         }
@@ -142,13 +354,36 @@
           "id": "5B1F2C90-0000-4000-8000-000000000010",
           "vertices": 574,
           "faces": 1042,
-          "x": 0.82, "y": 0.4, "z": -1.35,
-          "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 0.82,0.4,-1.35,1]
+          "x": 0.82,
+          "y": 0.4,
+          "z": -1.35,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0.82,
+            0.4,
+            -1.35,
+            1
+          ]
         }
       ],
       "walkedExtent": {
-        "minX": -2.2, "minY": -0.9, "minZ": -3.1,
-        "maxX": 2.4, "maxY": 1.6, "maxZ": 1.2,
+        "minX": -2.2,
+        "minY": -0.9,
+        "minZ": -3.1,
+        "maxX": 2.4,
+        "maxY": 1.6,
+        "maxZ": 1.2,
         "_note": "The extent of what was WALKED, never the extent of the room. A mesh hole reads UNKNOWN, never `nothing there`."
       }
     }

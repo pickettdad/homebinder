@@ -42,6 +42,12 @@ function extensionFor(mime: string): string {
     if (mime.includes("webm")) return "webm";
     return "mp4";
   }
+  /* ⛑ **The floorplan and the mesh ship as JSON and were being named `.bin`** — observed in the
+     2026-09-02 export, where five geometry payloads landed with an extension that says *opaque
+     bytes* about a file that is plain text a person can read. **`kind: "geometry"` already tells
+     the binder what it is; the filename was telling it the opposite**, and a desk that trusts the
+     extension over the manifest unpacks a mesh it thinks it cannot open. */
+  if (mime.includes("json")) return "json";
   if (mime.includes("jpeg")) return "jpg";
   if (mime.includes("png")) return "png";
   if (mime.includes("heic") || mime.includes("heif")) return "heic";
@@ -52,9 +58,24 @@ function extensionFor(mime: string): string {
   return "bin";
 }
 
-/** Media kind in the manifest. `video` was added 2026-07-25; it rides in the visual
- *  (`photos`) collections beside stills, so kind is derived from mime, never assumed. */
-export type MediaKindV3 = "photo" | "voice" | "video";
+/**
+ * Media kind in the manifest — **what this file IS**, where `intent` answers *what the concierge
+ * was doing*. Two different questions, both already carried, and folding either into the other
+ * gives a fact two homes.
+ *
+ * `video` was added 2026-07-25 and rides in the visual (`photos`) collections beside stills.
+ *
+ * ⚑ **`geometry` — the raw floorplan and the raw mesh** (Capture-Kind Contract Note v1.1, owner-
+ * ruled). They are data, never a subject for identification, and a distinct kind is what makes that
+ * true **by construction rather than by remembering**: every gate in the binder that reaches a model
+ * is an allowlist or an equality on `'photo'` — five of them — so a kind they have never met is
+ * refused by all five without any of them changing. *One word for both; `intent` keeps
+ * `floorplan` and `mesh` distinguishable.*
+ *
+ * ⛑ **`unknown` is not a category, it is an admission**, and it exists because of what it replaced —
+ * see `kindOf`.
+ */
+export type MediaKindV3 = "photo" | "voice" | "video" | "geometry" | "unknown";
 
 /**
  * A frame that is not the photograph the concierge took.
@@ -66,8 +87,31 @@ export type MediaKindV3 = "photo" | "voice" | "video";
 const isSibling = (m: { frame?: FrameRoleMeta }): boolean =>
   m.frame !== undefined && m.frame.role !== "primary";
 
-const kindOf = (mime: string): MediaKindV3 =>
-  mime.startsWith("image") ? "photo" : mime.startsWith("video") ? "video" : "voice";
+/**
+ * What a file is, from what is actually known about it.
+ *
+ * ⛑ **This read `image ? photo : video ? video : voice`, and the final arm was the bug.** *Anything
+ * that was not an image or a video became a voice note* — so a floorplan at `application/json` would
+ * have filed as `kind: "voice"` and counted in `totals.voiceNotes`.
+ *
+ * ⚑ **And it was worse than a mislabel, which is why the fallthrough is the more valuable half of
+ * this change.** The binder surfaces an unrecognised `media.kind`. But the field could never emit
+ * one, because everything unrecognised collapsed to `voice` — a word the binder knows. **The
+ * producer defeated the consumer's guard: a check built on the assumption the bug also makes.**
+ *
+ * So: the declared act wins where there is one, mime decides where it is unambiguous, and anything
+ * else says `unknown` **out loud**. ⚑ *An `unknown` in an export is a thing to go and look at. A
+ * `voice` that is really a floorplan is a thing nobody will ever look at.*
+ */
+const kindOf = (mime: string, intent?: CaptureIntent): MediaKindV3 => {
+  // ⚑ Intent first, because it is a FACT the concierge declared rather than an inference from a
+  // container format. `application/json` is not inherently geometry; a floorplan is.
+  if (intent === "floorplan" || intent === "mesh") return "geometry";
+  if (mime.startsWith("image/")) return "photo";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "voice";
+  return "unknown";
+};
 
 /** What a media file is attached to — the binder builder files it accordingly. */
 export type MediaOwner =
@@ -189,6 +233,11 @@ export interface ManifestV3<TConfig = unknown> {
      *  through every bucket and photos+voiceNotes would silently undercount mediaFiles. */
     videos: number;
     voiceNotes: number;
+    /** ⚑ Raw floorplan and raw mesh. Data for the desk, never a subject for identification. */
+    geometry: number;
+    /** ⛑ A kind the field could not name. **Should be zero on every export**, and the day it is not
+     *  is the day something new began being captured without anybody saying so. */
+    unknown: number;
     notes: number;
     chats: number;
     inboxItems: number;
@@ -240,7 +289,7 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
     for (const sib of m.siblings ?? []) {
       out.push({
         mediaId: sib.mediaId,
-        kind: kindOf(sib.mime),
+        kind: kindOf(sib.mime, sib.intent),
         owner,
         group,
         file: `media/${group}/${sub}/${sib.mediaId}.${extensionFor(sib.mime)}`,
@@ -252,13 +301,14 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
         source: sib.source,
         read: sib.read,
         frame: sib.frame,
+        position: sib.position,
       });
     }
   };
 
   for (const zone of state.zones) {
     // kindOf, not "photo": videos ride in the visual collection beside stills.
-    for (const p of zone.photos) push(p, kindOf(p.mime), { kind: "zone", zoneId: zone.zoneId }, zone.zoneId, "_zone");
+    for (const p of zone.photos) push(p, kindOf(p.mime, p.intent), { kind: "zone", zoneId: zone.zoneId }, zone.zoneId, "_zone");
     for (const v of zone.voiceNotes) push(v, "voice", { kind: "zone", zoneId: zone.zoneId }, zone.zoneId, "_zone");
     for (const c of zone.canvases)
       push(c.media, "photo", { kind: "canvas", canvasId: c.canvasId }, zone.zoneId, "_canvas");
@@ -267,10 +317,10 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
     const group = pin.zoneId ?? MISC;
     const sub = `pin-${pin.number}`;
     const owner: MediaOwner = { kind: "pin", pinId: pin.pinId, pinNumber: pin.number };
-    for (const p of pin.photos) push(p, kindOf(p.mime), owner, group, sub);
+    for (const p of pin.photos) push(p, kindOf(p.mime, p.intent), owner, group, sub);
     for (const v of pin.voiceNotes) push(v, "voice", owner, group, sub);
   }
-  for (const m of state.inbox) push(m, kindOf(m.mime), { kind: "inbox" }, MISC, "_inbox");
+  for (const m of state.inbox) push(m, kindOf(m.mime, m.intent), { kind: "inbox" }, MISC, "_inbox");
   return out;
 }
 
@@ -353,6 +403,15 @@ export function buildManifestV3<TConfig = unknown>(args: {
       photos: media.filter((m) => m.kind === "photo" && !isSibling(m)).length,
       videos: media.filter((m) => m.kind === "video" && !isSibling(m)).length,
       voiceNotes: media.filter((m) => m.kind === "voice").length,
+      /* ⚑ **Counted, because the totals are how a person notices.** The kind filters above drop
+         geometry out of `photos`, `videos` and `voiceNotes` for free — which is the fail-safe — but
+         silently absent from every total is how a floorplan goes unnoticed in the other direction. */
+      geometry: media.filter((m) => m.kind === "geometry").length,
+      /* ⛑ **And `unknown` is counted first among things to look at.** A kind the field could not
+         name is a defect in the field, and a total is what makes it a number somebody reads rather
+         than a row somebody scrolls past. It should be zero on every export; the day it is not is
+         the day something new started being captured without anybody saying so. */
+      unknown: media.filter((m) => m.kind === "unknown").length,
       notes: state.notes.size,
       chats: state.chats.size,
       inboxItems: state.inbox.length,

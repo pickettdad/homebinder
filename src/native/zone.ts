@@ -47,6 +47,32 @@ export type ZonePosition =
        *  concierge stood; this is the surface in front of them, and the desk needs both to tell
        *  them apart. Absent means the mesh had no answer — *unknown*, never *nothing there*. */
       surface?: { x: number; y: number; z: number; distance: number };
+      /**
+       * ⚑ **How much of the room ARKit believes it knows** — `notAvailable` | `limited` |
+       * `extending` | `mapped`, straight from `ARFrame.worldMappingStatus`.
+       *
+       * ⛑ **Read this, not `tracking`.** `tracking` can only ever say `normal` on a positioned
+       * pose, because the native side refuses anything else — 109 of 109 across the 2026-08-30
+       * export. *A field with one possible value carries no information*, and this is the one that
+       * does: `limited` forty minutes into a zone is a pose worth less than an early one.
+       */
+      mapping?: string;
+      /**
+       * ⚑ **How many times tracking has been re-established since this zone opened.**
+       *
+       * The mechanical room's poses walked **3 m below its own floor** over 42 minutes, in discrete
+       * 0.4–0.7 m steps. Across that walk ARKit reported `initializing` 109 times and
+       * `relocalizing` **zero** — so each wake re-derives the device pose rather than matching the
+       * map it already had, and the error between one pose and the next has no correspondence.
+       * *This count is what lets a desk say a late pose and an early one are not the same
+       * measurement.*
+       */
+      reinits?: number;
+      /** Seconds since that re-establishment — the other half of *how old is this pose's frame*. */
+      sinceInitSec?: number;
+      /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
+       *  a room with nothing to hold on to — which is the mechanical room's own description. */
+      featurePoints?: number;
     }
   | { positioned: false; why: string; tracking?: string };
 
@@ -73,6 +99,40 @@ export interface ZonePlan {
    *  refrigerators and has no water heater, no softener, no pressure tank — so reading it as an
    *  inventory would under-count exactly the rooms this service exists for. Context, nothing more. */
   roomPlanObjects?: { id: string; category: string; width: number; height: number; depth: number }[];
+}
+
+/**
+ * ⚑ **What this zone is missing that only the concierge, standing in it, can still fix.**
+ *
+ * ⛑ **The full bath left the house with four objects, 34 photographs, six plate reads and nothing
+ * to place any of it on — and nobody knew until the desk opened the file two days later.** Its
+ * floorplan was lost to a sensor failure mid-stop; the room looked finished from inside the app.
+ *
+ * *A gap discovered at the desk costs a second visit. The same gap named in the room costs a
+ * minute.* So this is asked of a zone the concierge is looking at, not of an export.
+ *
+ * ⚑ **It reports and never blocks.** A garage that genuinely needs no floorplan is a legitimate
+ * zone, and a concierge who has decided that must be able to walk away. The line says what is
+ * missing; the judgement stays theirs.
+ *
+ * ⛑ **And it is a verdict before it is prose** — `complete` is the ordinary case and says nothing.
+ * A warning that fires on every zone is a warning nobody reads by the third room.
+ */
+export function zoneGaps(zone: {
+  photos: number;
+  hasFloorplan: boolean;
+  containers: { frames: { position?: ZonePosition }[] }[];
+}): { complete: boolean; missing: string[] } {
+  const missing: string[] = [];
+  // Only a zone somebody actually photographed can be missing anything. An untouched zone is not
+  // incomplete, it is unstarted, and saying otherwise would fire on every room before it is walked.
+  if (zone.photos === 0) return { complete: true, missing };
+  if (!zone.hasFloorplan) missing.push("no floorplan");
+  const unplaceable = zone.containers.filter((c) => !containerAnchorState(c.frames).anchored).length;
+  if (unplaceable > 0) {
+    missing.push(`${unplaceable} object${unplaceable === 1 ? "" : "s"} the desk cannot place`);
+  }
+  return { complete: missing.length === 0, missing };
 }
 
 /**

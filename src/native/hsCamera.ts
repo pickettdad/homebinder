@@ -12,6 +12,7 @@
 
 import type { BenchSample } from "../dev/deviceBench";
 import type { ZoneMode, ZoneOpened, ZonePlan, ZonePosition } from "./zone";
+import type { PositionProjection } from "../engine/schema/events";
 
 export const HS_CAMERA_JS_NAME = "HSCamera";
 
@@ -79,10 +80,25 @@ export function lensPolicyFor(
 ): { default: CameraLens; locked: boolean } {
   // The refusal wins over any intent: a plate is a plate whatever door was used to reach it.
   if (mode === "text" || mode === "document") return { default: "normal", locked: true };
-  // ⚑ Room shot and traverse default wide — both are "get the whole of it in", which is the exact
-  // job the lens does. Run trace is NOT in the ruling and so is not assumed into it; it follows a
-  // pipe rather than framing a room, and the concierge can still choose.
-  if (intent === "room-shot" || intent === "traverse") return { default: "wide", locked: false };
+  /* ⚑ **Room shot defaults wide. The traverse does NOT, and that is a field measurement
+     overturning an untested default** (2026-08-30).
+
+     Both were ruled wide on 2026-08-16 as *"get the whole of it in"*. ⛑ **The traverse half was
+     never actually in force**: `applyIntentLens` read React state instead of the ref and returned
+     silently before the camera had reported, so every successful traverse this project has ever run
+     was shot on **normal**. Fixing that bug applied the wide default for the first time — and the
+     traverse collapsed.
+
+     **The numbers, and they are not close.** Real traverse frames score **6.2–18.1** on
+     `textureScore` (2026-08-19: 70 frames, mean 14.5 on a wall, 6.4 on carry; the metered shutter
+     took the median from 6.2 to 18.1). On wide, 2026-08-30: **1.1–1.99 across 31 frames in three
+     lit rooms, every one discarded** against a keep threshold of 5.
+
+     *A 120° frame spreads the same wall over a fifth of the pixels*, and the traverse registers by
+     detail — so wide does not merely reduce quality, it removes the signal the whole mechanism runs
+     on. **The room shot keeps wide**, because it is one framed photograph and needs no registration
+     at all. Two capture kinds, two answers, and only one of them was ever tested. */
+  if (intent === "room-shot") return { default: "wide", locked: false };
   return { default: "normal", locked: false };
 }
 
@@ -175,6 +191,14 @@ export interface FrameRead {
   meanConfidence: number;
   engine: string;
   osVersion: string;
+  /** Characters this frame actually read. ⚑ Zero is the ordinary case — a pipe, a stain, a wide
+   *  shot — and is why `marginal` is not "nothing found". */
+  characterCount?: number;
+  /** ⚑ **Characters were detected and read badly**, decided natively against the one constant
+   *  that defines that boundary (`LiveRead.goodConfidence`). Computed there rather than here so
+   *  the live trigger and the post-capture verdict cannot drift — the failure two rotation tables
+   *  already demonstrated in this file's history. */
+  marginal?: boolean;
 }
 
 export interface CaptureFrame {
@@ -190,6 +214,10 @@ export interface CaptureFrame {
   /** Per-frame accurate read, in text/document modes. On a pair these are two independent
    *  reads of one plate, and where they disagree is where the glare was. */
   ocr?: FrameRead;
+  /** ⚑ **Which glass took THIS frame.** Was a per-capture fact until the sibling pair, where a
+   *  1× frame and a 120° frame arrive from one press — so `CaptureResult.lens` describes the
+   *  capture and this describes the photograph. Read this one when labelling a frame. */
+  lens?: CameraLens;
 }
 
 /** One adjacent pair in a traverse. ⚑ `contiguity` has THREE values, and that is the design:
@@ -523,9 +551,14 @@ export interface TraverseResult {
 }
 
 export interface TraverseProgressEvent {
+  /** Frames KEPT. ⚑ Not frames taken — see `discarded`, which is the difference and the one
+   *  that matters when a leg is going wrong. */
   frames: number;
   pairs: TraversePair[];
   lastPair?: TraversePair | null;
+  /** ⛑ Frames taken and thrown away for too little texture. **Always sent, including zero**, so a
+   *  reader can compute *kept of taken* rather than having to know it is sometimes absent. */
+  discarded?: number;
 }
 
 export interface CaptureResult {
@@ -554,6 +587,17 @@ export interface CaptureResult {
    *  needs to know whether the wide view was in use and it still did not fit, or the concierge was
    *  on normal and could not step back far enough. Without this the two are indistinguishable. */
   lens: CameraLens;
+  /** ⚑ A 120° sibling arrived, as the LAST frame of `frames`. The array shape is fixed —
+   *  primary, [bracket], [unlit companion], [wide] — because every index-keyed reading
+   *  downstream was written against positions. */
+  wideSibling?: boolean;
+  /** ⛑ Why there is no wide frame when one was asked for. *An absence with no reason* is the
+   *  thing this project keeps going back to add, so it is here from the first version. */
+  wideRefused?: string | null;
+  /** ⛑ **What the swap cost, measured on the device rather than estimated in a document.** Two
+   *  input swaps and two full re-configures. Reported per capture so the first real walk answers
+   *  it, instead of a probe run nobody schedules. */
+  lensSwapMs?: number | null;
   /** The angle asked of the photo connection, beside each frame's `exifOrientation`. Two numbers
    *  that must agree — printed so they can be seen not to. */
   rotationAngle: number;
@@ -594,7 +638,7 @@ interface NativeCamera {
     meteringPoint?: { x: number; y: number };
     torchOverride?: boolean;
   }): Promise<void>;
-  capture(): Promise<CaptureResult>;
+  capture(options?: { wideSibling?: boolean }): Promise<CaptureResult>;
   startTraverse(options: { continuesFrom?: string }): Promise<TraverseStarted>;
   stopTraverse(): Promise<TraverseResult>;
   /** The device bench — see `src/dev/deviceBench.ts`. Dev-bench only; it takes the camera to
@@ -670,7 +714,104 @@ const requireCamera = (): NativeCamera => {
 
 export const startCamera = (mode: CameraMode) => requireCamera().start({ mode });
 export const stopCamera = () => requireCamera().stop();
-export const captureFrames = () => requireCamera().capture();
+/**
+ * ⚑ **What a sibling frame's `position` field must say — a predicate, not a line inside a
+ * component**, for the reason `globalCameraApplies` states: doctrine buried in a screen cannot be
+ * scanned, cited or tested, and this one is doctrine.
+ *
+ * ⛑ **The 120° frame of a sibling pair REFUSES a position; it does not quietly lack one.** The
+ * ultra-wide is not offered to `ARWorldTrackingConfiguration` on this iPad (`HSLensProbe`,
+ * 2026-08-24: thirteen formats, every one wide-angle, while the physical lens exists). That is a
+ * hardware fact **no reader can derive from an absence** — and a room shot files to the *zone*,
+ * where an absent position already means *nobody knows*. Without this the record would say *nobody
+ * knows* about the one frame whose reason is known exactly.
+ *
+ * ⚑ **Only that frame gets it.** A bracket exposure or an unlit companion is absent for the
+ * ordinary reason — its `frame.role` is not `primary`, and the pose is on the primary of the same
+ * `captureId`. Stamping a refusal on those would make `positioned: false` the majority case and
+ * *drown the refusals worth reading*.
+ *
+ * ## ⛑ Currently unreachable on the shipping path, and saying so rather than letting it look live
+ *
+ * **The room shot frames WIDE** (owner ruling 2026-08-16, and the field re-confirmed it on
+ * 2026-08-28: *"in a tight room, without viewing through wide angle, it's hard to know if I am
+ * getting the shot I need"*). So the 120° frame is the **primary**, the 1× frame is the sibling,
+ * and this predicate's wide branch does not fire — `room-shot` is the only door that requests a
+ * pair. *Verified on device: `lenses: wide,normal`.*
+ *
+ * **Kept, because it is the correct rule for the configuration and the configuration can change** —
+ * any future door that asks for a pair from a normal-framed capture gets the right record for free.
+ * ⚑ **But it is named here as unreached rather than left to look live**, because a tested predicate
+ * nobody calls is exactly the rule-43 shape this file has paid for six times, and one written an
+ * hour ago is no different from one written in July.
+ *
+ * ⛑ **The live question it leaves open is the design session's, not this file's.** The pose now
+ * lands on a wide frame. *The pose itself is honest — it is where the concierge STOOD, which no
+ * lens changes.* What does not carry across is the **camera model**: ARKit's `transform` describes
+ * a 1× wide-angle camera, so the 120° image **cannot be projected through it**. Recorded in
+ * `MANIFEST-FIELD6-ADDITIONS.md`; whether the desk wants that stated as a field is theirs to rule.
+ */
+export function positionForSibling(
+  frame: Pick<CaptureFrame, "lens">,
+  wideSiblingTaken: boolean,
+): { positioned: false; why: string } | undefined {
+  if (!wideSiblingTaken || frame.lens !== "wide") return undefined;
+  return {
+    positioned: false,
+    why: "wide lens is not offered to world tracking; the pose is on the primary frame of this captureId",
+  };
+}
+
+/**
+ * ⚑ **The one lens ARKit's `transform` describes.**
+ *
+ * World tracking runs on `AVCaptureDeviceTypeBuiltInWideAngleCamera` — our `normal` — and is not
+ * offered the ultra-wide on this device (`HSLensProbe`, 2026-08-24: thirteen formats, every one
+ * wide-angle, while the physical lens exists). ⛑ *Named once, here, because a second copy of this
+ * fact is how the two rotation tables drifted apart.*
+ */
+const PROJECTABLE_LENS: CameraLens = "normal";
+
+/**
+ * ⚑ **Does `transform` describe the camera that took this photograph?** (owner ruling 2026-08-28.)
+ *
+ * A pose and a camera model arrive in one object and are two different facts. `x/y/z` is **where
+ * the concierge stood** and is true whatever glass was fitted — *framing is a human act in a tight
+ * room and geometry bends to it, not the other way round*, which is why the room shot's primary
+ * stays the 120° frame the concierge framed. But `transform` also describes ARKit's own 1× camera,
+ * so **the 120° image cannot be projected through it.**
+ *
+ * ⛑ **Stated as a field the reader trips over rather than a paragraph they must already have
+ * read.** Left implicit, a future desk pass projects a 120° image through a 1× matrix and *the
+ * error looks like bad measurement rather than a wrong assumption* — the same shape as the `voice`
+ * fallthrough and the `files[]` drift, and the reason this is not documentation.
+ *
+ * ⚑ **When the pair was refused there is nothing to point at, and it says so** — `null` rather
+ * than a missing key. *A wide room shot with no sibling has a real pose and no projectable frame at
+ * all, and that is a different sentence from "look next door".*
+ */
+export function projectionFor(capture: { frames: { lens?: CameraLens }[]; at: string }): PositionProjection {
+  const primary = capture.frames[0];
+  // Absent `lens` is a capture written before the field existed; those were all taken on the lens
+  // ARKit models, so the honest answer is yes rather than unknown.
+  if (!primary?.lens || primary.lens === PROJECTABLE_LENS) return { projectable: true };
+  const sibling = capture.frames.slice(1).find((f) => f.lens === PROJECTABLE_LENS);
+  return {
+    projectable: false,
+    why: `taken through the ${primary.lens} lens; transform describes ARKit's ${PROJECTABLE_LENS} camera, which is the only one world tracking is offered`,
+    projectableFrame: sibling ? { captureId: capture.at, lens: PROJECTABLE_LENS } : null,
+  };
+}
+
+/**
+ * ⚑ `wideSibling` asks for the 120° frame beside the 1× one — the sibling pair.
+ *
+ * It is a REQUEST, not an instruction: a lens-locked mode (Text) refuses it, and so does a device
+ * with no ultra-wide. Read `wideSibling` and `wideRefused` off the result to find out which
+ * happened, exactly as with `requestMode` — *paint from the return, never from the ask.*
+ */
+export const captureFrames = (options?: { wideSibling?: boolean }) =>
+  requireCamera().capture(options);
 
 /**
  * Ask for a mode; get back the mode ACHIEVED and what could not be reached.
@@ -922,8 +1063,25 @@ export function frameStateOf(status: { mode: CameraMode; unmet: string[]; sessio
  * text — a pipe, a floor stain, a wide shot — so a trigger that fires on "nothing read" nags on
  * the majority case and is ignored by the time a plate needs it.
  */
-export function shouldOfferRetake(event: Pick<TextBoxesEvent, "characterCount" | "marginal">): boolean {
-  return event.characterCount > 0 && event.marginal;
+export function shouldOfferRetake(event: { characterCount?: number; marginal?: boolean }): boolean {
+  return (event.characterCount ?? 0) > 0 && event.marginal === true;
+}
+
+/**
+ * ⚑ **The same rule, asked of a photograph that has already been taken** — which is the only
+ * moment it can be acted on for free.
+ *
+ * Reads the PRIMARY frame's accurate read, never the live one: the live loop runs at the fast
+ * recognition level and jitters, and what matters is whether *this photograph* holds the plate.
+ * A capture with no read at all — most captures — returns false, because there is nothing to
+ * retake for.
+ *
+ * ⛑ Deliberately not a confirm sheet. The screen's own contract is *Assume Use, never Retake*, so
+ * this is an offer a concierge can ignore by taking the next shot, not a gate.
+ */
+export function captureWantsRetake(result: Pick<CaptureResult, "frames">): boolean {
+  const read = result.frames[0]?.ocr;
+  return read ? shouldOfferRetake(read) : false;
 }
 
 /**

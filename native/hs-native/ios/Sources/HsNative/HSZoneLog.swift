@@ -17,7 +17,20 @@ import Foundation
  without becoming the thing it is measuring.
  */
 enum HSZoneLog {
-    private static let limit = 600
+    /**
+     ⚑ **Sized for a whole untethered walk, not a tethered experiment** (2026-08-29).
+
+     600 was right while every run was watched live on a cable: the console had the beginning and
+     the file only had to hold the end. **The first real walk is untethered** — several rooms, a
+     mechanical room captured every way it can be, traverse legs, floorplans, meshes — and this file
+     is then the *only* record of what the app did. At roughly five rows per capture, 600 wraps
+     partway through the first room and **silently hands back a beginning that is not the beginning.**
+    */
+    private static let limit = 3000
+    /// ⛑ **How many rows were dropped, not merely that some were.** `wrapped: true` tells a reader
+    /// the record is incomplete and nothing about how incomplete — which is the difference between
+    /// *you lost a little* and *you lost the first room*.
+    private static var dropped = 0
     private static var entries: [[String: Any]] = []
     private static let lock = NSLock()
     private static let started = Date()
@@ -33,7 +46,11 @@ enum HSZoneLog {
         ]
         for (k, v) in detail { row[k] = v }
         entries.append(row)
-        if entries.count > limit { entries.removeFirst(entries.count - limit) }
+        if entries.count > limit {
+            let excess = entries.count - limit
+            entries.removeFirst(excess)
+            dropped += excess
+        }
         flush()
         // Still NSLogged, so a working tether sees it live. The file is the record; the console is
         // a convenience — which is the right way round and was the wrong way round before.
@@ -48,7 +65,10 @@ enum HSZoneLog {
             "count": entries.count,
             // ⚑ Said out loud: a ring buffer that has wrapped is not a complete record, and a reader
             // who cannot tell has been handed a beginning that is not the beginning.
-            "wrapped": entries.count >= limit,
+            // ⚑ `dropped > 0` is the honest test. `count >= limit` calls a buffer that is merely
+            // FULL a buffer that has lost something, which are different facts.
+            "wrapped": dropped > 0,
+            "dropped": dropped,
             "takenAt": ISO8601DateFormatter().string(from: Date())
         ]
     }
@@ -71,11 +91,14 @@ enum HSZoneLog {
         guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         else { return }
         let url = dir.appendingPathComponent("hs-zone-log.json")
+        /* ⛑ Not pretty-printed. This is written on EVERY entry, and at 3000 rows the whitespace is
+           most of the bytes — a cost paid thousands of times during a walk so that a file nobody
+           reads by eye can be indented. It is machine-read; the reader pretty-prints. */
         guard let data = try? JSONSerialization.data(
             withJSONObject: ["entries": entries, "count": entries.count,
-                             "wrapped": entries.count >= limit,
+                             "wrapped": dropped > 0, "dropped": dropped,
                              "takenAt": ISO8601DateFormatter().string(from: Date())],
-            options: [.prettyPrinted]) else { return }
+            options: []) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
@@ -83,5 +106,6 @@ enum HSZoneLog {
         lock.lock()
         defer { lock.unlock() }
         entries.removeAll()
+        dropped = 0
     }
 }

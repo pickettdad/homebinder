@@ -91,6 +91,11 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        if CommandLine.arguments.contains("--hs-control-probe"), #available(iOS 16.0, *) {
+            let probe = HSControlProbe()
+            controlProbe = probe
+            probe.run { _ in self.controlProbe = nil }
+        }
         if CommandLine.arguments.contains("--hs-lens-probe"), #available(iOS 16.0, *) {
             let probe = HSLensProbe()
             lensProbe = probe
@@ -227,7 +232,11 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Camera is not running — call start first")
             return
         }
-        controller.capture { result in
+        /* ⚑ **Asked for by the caller, not inferred from the mode.** The door knows it is taking
+           a room shot; the controller knows only that it is in `object` mode, which is also what a
+           nameplate close-up runs in. Inferring here would put a 120° frame on every object photo
+           in the house — thirty extra frames a room, for the one act that wanted two. */
+        controller.capture(wideSibling: call.getBool("wideSibling") ?? false) { result in
             switch result {
             case .success(let payload): call.resolve(payload)
             case .failure(let error): call.reject(error.localizedDescription)
@@ -297,6 +306,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var bench: HSBench?
     private var lensProbe: AnyObject?
+    private var controlProbe: AnyObject?
 
     /// The zone session — see `HSZoneSession`. One per zone, three bounded modes, one origin.
     private var zoneStore: AnyObject?
@@ -912,6 +922,9 @@ final class CameraController: NSObject {
     private var videoInput: AVCaptureDeviceInput?
     /// The glass currently in the session.
     private var lens: CameraLens = .normal
+    /// The glass to hold for the second half of a sibling pair — the one the concierge did NOT
+    /// frame with — set for the length of one exposure. See `fireWideSibling`.
+    private var siblingLensOverride: CameraLens?
     /// What the concierge asked for, which survives a mode change. ⚑ Kept separate from `lens`
     /// because Text *refuses* wide: stepping into Text must not silently discard a choice the
     /// concierge made, and stepping back out must restore it rather than making them ask twice.
@@ -1067,6 +1080,16 @@ final class CameraController: NSObject {
             /// Stamped per settings id at request time, never read off `torchOn` at delivery —
             /// by then the pair has already switched it.
             let torch: Bool
+            /**
+             ⚑ **Per FRAME, not per job — because the wide sibling is the one case where they
+             differ**, and it is the whole point of the pair.
+
+             The job-level `lens` was accurate for every capture built before this: one tap, one
+             glass. A room shot now delivers a 1× frame and a 120° frame from one press, and a
+             desk told *this capture was wide* about a pair where only the last frame was would be
+             told something false about three frames to be told something true about one.
+            */
+            let lens: CameraLens
         }
         let completion: (Result<[String: Any], Error>) -> Void
         let bracketed: Bool
@@ -1091,16 +1114,30 @@ final class CameraController: NSObject {
         var outstanding: Int
         var wantsTorchPair: Bool
         var pairFired = false
+        /// ⚑ Asked for by the door, then granted or refused by the hardware — see `wideRefused`.
+        var wantsWideSibling: Bool
+        var wideFired = false
+        /// The 120° frame, held aside like the companion and appended LAST for the same reason:
+        /// every index-keyed reading downstream would move if the array were re-ordered.
+        var wideFrame: Frame?
+        /// ⛑ **Measured, not assumed.** Two input swaps and two full re-configures per room shot,
+        /// reported on the capture so the cost is a number in the record rather than a guess in a
+        /// document — and so a device where it is expensive says so on the first walk.
+        var lensSwapMs: Double?
+        /// Why there is no wide frame, when one was asked for. An absence with no reason is the
+        /// signal this project keeps having to go back and add.
+        var wideRefused: String?
 
         init(completion: @escaping (Result<[String: Any], Error>) -> Void,
              bracketed: Bool, torchAtCapture: Bool, lens: CameraLens,
-             outstanding: Int, wantsTorchPair: Bool) {
+             outstanding: Int, wantsTorchPair: Bool, wantsWideSibling: Bool = false) {
             self.completion = completion
             self.bracketed = bracketed
             self.torchAtCapture = torchAtCapture
             self.lens = lens
             self.outstanding = outstanding
             self.wantsTorchPair = wantsTorchPair
+            self.wantsWideSibling = wantsWideSibling
         }
     }
 
@@ -1191,6 +1228,19 @@ final class CameraController: NSObject {
     }
 
     private func configureSession() throws {
+        /* ⛑ **Re-asserted before the early return, because it used to be unreachable after launch.**
+
+           `sessionPreset = .photo` below sits after this guard — and `stop()` never removes inputs
+           (`removeInput` appears once in this file, inside `swapLens`), while the controller is a
+           process-lifetime singleton. **So the preset was set once per app launch and a full
+           stop/start cycle could never restore it.** Harmless while nothing else moved it; a latent
+           trap now that ARKit does. */
+        if session.sessionPreset != .photo, session.canSetSessionPreset(.photo) {
+            session.beginConfiguration()
+            session.sessionPreset = .photo
+            session.commitConfiguration()
+            HSZoneLog.record("presetReasserted", ["preset": session.sessionPreset.rawValue])
+        }
         guard session.inputs.isEmpty else { return }
         guard let device = AVCaptureDevice.default(CameraLens.normal.deviceType, for: .video, position: .back) else {
             throw CameraError.noCamera
@@ -1286,9 +1336,62 @@ final class CameraController: NSObject {
            ⚑ **I made the outbound handover synchronous a day ago and left its twin behind.** A
            handover has two ends and only one of them was waiting. */
         sessionQueue.sync {
+            /*
+             ⛑ **ARKit hands the lens back on ITS format, and that is the whole regression.**
+
+             `HSZoneSession` sets `config.videoFormat` (:204, :223), which sets the shared
+             `AVCaptureDevice.activeFormat`. Once `activeFormat` is set directly, the session goes to
+             **`AVCaptureSessionPresetInputPriority` and `sessionPreset` stops being consulted at
+             all** — so every still taken after a position handover comes off ARKit's *video* format:
+             **640×480, 40 KB, visibly grainy**, measured on device 2026-08-30 across three legs and
+             three object captures.
+
+             ⚑ **This is where the fix belongs, and my first attempt at it belongs nowhere.** I put
+             the preset restoration in `swapLens`, where it logged `restored: true` **and changed
+             nothing** — the swap was never the cause, and the handover that was ran afterwards and
+             put the device straight back on ARKit's format. *A fix that reports success while
+             fixing nothing is worse than no fix*, because the log then argues against looking
+             further. Same class as every other one-ended operation in this file, with the extra
+             insult that the instrument agreed with it.
+
+             Setting `sessionPreset` is what takes a session back OUT of input priority, so it is set
+             here, on the way back in, inside a configuration block — and **read back afterwards**,
+             because the thing consulted must be the thing that governs.
+            */
             if !session.isRunning { session.startRunning() }
         }
         HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
+        /*
+         ⛑ **The restore is asynchronous, and that is a correction to yesterday's correction.**
+
+         Restoring the preset *inside* the synchronous reclaim was right about the cause and wrong
+         about the cost: **measured 9.3 s per handover on device 2026-08-30**, three times in one
+         run, against 0.45 s before. That is the freeze and the black screen the field reported —
+         *"froze up or lagged significantly when starting traverse, and then screen goes black."*
+         The preview is down for the whole of a `startRunning` that has to renegotiate the device
+         format ARKit left behind.
+
+         ⚑ **A nine-second black screen is a worse defect than a soft first frame**, and the two are
+         not close. So the reclaim returns immediately, the preview comes back, and the format
+         settles behind it — with the settle **timed and logged**, because I have now guessed twice
+         at this and a number is what ends that.
+        */
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let began = CACurrentMediaTime()
+            guard self.session.sessionPreset != .photo, self.session.canSetSessionPreset(.photo) else { return }
+            self.session.beginConfiguration()
+            self.session.sessionPreset = .photo
+            self.session.commitConfiguration()
+            HSZoneLog.record("presetRestored", [
+                "ms": (CACurrentMediaTime() - began) * 1000,
+                "preset": self.session.sessionPreset.rawValue,
+                // ⚑ Never assumed. If this reads false the stills are ARKit's video frames, and
+                // every texture score and grain complaint downstream follows from it.
+                "photoRestored": self.session.sessionPreset == .photo,
+                "dims": "\(self.device?.activeFormat.highResolutionStillImageDimensions.width ?? 0)x\(self.device?.activeFormat.highResolutionStillImageDimensions.height ?? 0)",
+            ])
+        }
     }
 
     func stop() {
@@ -1364,7 +1467,31 @@ final class CameraController: NSObject {
             return false
         }
         session.addInput(newInput)
+        /*
+         ⛑ **Re-assert the preset, because adding an input can move it and nothing puts it back.**
+
+         `sessionPreset` is set to `.photo` once at setup. AVFoundation is documented to change the
+         preset when an input is added that cannot support the current one — and it does not change
+         back when the original input returns. **Measured 2026-08-29:** after the sibling pair's
+         swap, the session sat at `vga640x480` and every subsequent capture came back **640×480,
+         49 KB** where the same code path had produced **2.5 MB** a fortnight earlier. The traverse
+         is what found it, because a traverse takes the next captures on that session.
+
+         ⚑ *A swap is an operation with two ends and this accounted for one of them* — the input was
+         restored, the format the input implied was not. Same class as the lens itself, one layer
+         down, in the change that fixed the lens. **The preset is re-asserted on every swap in both
+         directions, and the achieved value is recorded rather than assumed.**
+        */
+        if session.canSetSessionPreset(.photo) {
+            session.sessionPreset = .photo
+        }
         session.commitConfiguration()
+        HSZoneLog.record("lensSwap", [
+            "to": wanted.rawValue,
+            // Read back AFTER commit. The thing consulted must be the thing that governs.
+            "preset": session.sessionPreset.rawValue,
+            "restored": session.sessionPreset == .photo,
+        ])
 
         videoInput = newInput
         device = newDevice
@@ -1394,7 +1521,10 @@ final class CameraController: NSObject {
         // the concierge without discarding their choice — `requestedLens` holds what they asked
         // for and it is restored the moment they leave Text. Swapped before the device is read
         // below, because a swap replaces the very device this method goes on to configure.
-        let wantedLens = goal.lens(requested: requestedLens)
+        /* ⚑ The one thing that outranks the mode's lens policy, and it is deliberately narrow:
+           the second half of a sibling pair, for the length of one exposure. `requestedLens` is
+           untouched, so the concierge's standing choice survives the swap in both directions. */
+        let wantedLens = siblingLensOverride ?? goal.lens(requested: requestedLens)
         if wantedLens != lens { _ = swapLens(to: wantedLens) }
         if lens != wantedLens { unmet.append("lens") }
 
@@ -1975,15 +2105,19 @@ final class CameraController: NSObject {
 
     /// Capacitor dispatches plugin calls off the main queue; job bookkeeping lives on main, so the
     /// hop happens once here rather than at three places inside.
-    func capture(_ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+    func capture(wideSibling: Bool = false, _ completion: @escaping (Result<[String: Any], Error>) -> Void) {
         if Thread.isMainThread {
-            performCapture(completion)
+            performCapture(wideSibling: wideSibling, completion)
         } else {
-            DispatchQueue.main.async { [weak self] in self?.performCapture(completion) }
+            DispatchQueue.main.async { [weak self] in self?.performCapture(wideSibling: wideSibling, completion) }
         }
     }
 
-    private func performCapture(_ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+    private func performCapture(wideSibling: Bool,
+                                _ completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        // Same barrier as `startTraverse`, same reason: a still taken while the format restore is
+        // still in flight is ARKit's video frame wearing a photograph's filename.
+        sessionQueue.sync { }
         guard session.isRunning else {
             completion(.failure(CameraError.notRunning))
             return
@@ -1999,9 +2133,13 @@ final class CameraController: NSObject {
          than the model line **by luck**, and where it lands is positional — no threshold can
          move it. The unlit frame holds exactly the characters the lit one erased.
 
-         ⚑ And the pair is **two independent reads of one plate by construction**: wherever the
-         two transcriptions disagree, the disagreement localises the glare to those characters.
-         That is a property of taking the pair at all, not something anybody has to implement.
+         ⚑ And the pair is **one reader on two illuminations of one plate** — *not* two independent
+         readings. Wherever the two transcriptions disagree, the disagreement localises the glare to
+         those characters, which is a property of taking the pair at all. ⛑ **But the same Vision
+         revision reads both**, so a systematic error of that reader appears identically in each and
+         cancels out of the comparison. *Field 5's second independent reading is a second **reader**,
+         and it is not built.* Called two independent reads here until 2026-09-01, which would have
+         let a roadmap tick a box this does not fill.
 
          Paired only when the torch actually fires — one extra frame, on the minority of captures
          where there is anything to compare. Never during a traverse, where the torch is latched
@@ -2015,8 +2153,26 @@ final class CameraController: NSObject {
          */
         let wantsTorchPair = torchOn && !isTraversing
 
+        /* ⛑ **A mode that locks its lens refuses the sibling too, and it must.** Text is locked to
+           normal because a 120° lens bends straight lines near the frame edge and a plate is
+           straight lines — so a wide frame of a plate is not a second look at it, it is a worse
+           one. Refused here rather than at the door, so the rule lives with the policy it belongs
+           to instead of being restated in TypeScript. */
+        /* ⚑ **The sibling is THE OTHER GLASS, not "the wide one".**
+
+           The room shot already defaults to wide — `lensPolicyFor`, owner ruling 2026-08-16, *both
+           are "get the whole of it in"* — so a pair defined as "add the 120° frame" would have
+           refused itself on the one door that asks for it, and delivered a single frame that looked
+           entirely normal. ⛑ *A feature that declines on its only caller, silently, is the shape of
+           every rule-43 instance in this repo.*
+
+           Defined as the other glass it holds whichever way round the concierge is pointing: they
+           keep the framing they chose as the PRIMARY, and the frame they did not choose arrives
+           beside it. */
+        let wantsWide = wideSibling && !goal.lensLocked && !isTraversing
+
         if wantsTorchPair {
-            beginPairWithUnlitFrame(bracketed: wantsBracket, completion: completion)
+            beginPairWithUnlitFrame(bracketed: wantsBracket, wideSibling: wantsWide, completion: completion)
             return
         }
 
@@ -2043,7 +2199,8 @@ final class CameraController: NSObject {
             torchAtCapture: torchOn,
             lens: lens,
             outstanding: wantsBracket ? 3 : 1,
-            wantsTorchPair: wantsTorchPair
+            wantsTorchPair: wantsTorchPair,
+            wantsWideSibling: wantsWide
         )
         torchForRequest[id] = torchOn
 
@@ -2185,8 +2342,10 @@ final class CameraController: NSObject {
         }
     }
 
-    private func completeCaptureFrame(id: Int64, data: Data?, error: Error?) {
-        guard let job = jobs[id] else { return }
+    /// `forcedJob` is how a refused wide sibling re-enters the completion path with no delivery
+    /// of its own: there is no settings id to look up because no photo was ever requested.
+    private func completeCaptureFrame(id: Int64, data: Data?, error: Error?, forcedJob: CaptureJob? = nil) {
+        guard let job = forcedJob ?? jobs[id] else { return }
         let requestedWithTorch = torchForRequest[id] ?? false
 
         if let error {
@@ -2199,8 +2358,12 @@ final class CameraController: NSObject {
         // is which, stamped when the request was made rather than read off `torchOn` now — by now
         // the pair has already switched it.
         if let data {
-            let frame = CaptureJob.Frame(data: data, torch: requestedWithTorch)
-            if job.wantsTorchPair && !requestedWithTorch {
+            // `lens` is read HERE rather than off the job: during the wide stage the session is
+            // genuinely on the other glass, and that is the fact the frame is meant to carry.
+            let frame = CaptureJob.Frame(data: data, torch: requestedWithTorch, lens: lens)
+            if job.wideFired && job.wideFrame == nil {
+                job.wideFrame = frame
+            } else if job.wantsTorchPair && !requestedWithTorch {
                 job.companion = frame
             } else {
                 job.frames.append(frame)
@@ -2217,6 +2380,33 @@ final class CameraController: NSObject {
             fireLitHalf(for: job)
             return
         }
+
+        /*
+         ⚑ **The other glass, in the same tap** — the sibling pair (running list item 7).
+
+         *The lens is a substitute for stepping backwards*, and in a mechanical room there is often
+         nowhere to step. So a room shot takes both: a 1× frame that carries the measured position,
+         and a 120° frame beside it that inherits from its own sibling.
+
+         ⛑ **It cannot be one exposure.** World tracking is offered only the wide-angle format on
+         this iPad (`HSLensProbe`, 2026-08-24) — the physical ultra-wide exists and ARKit is not
+         given it — so a positioned 0.5× frame is not available at any price. Two frames, one press,
+         and the position lives on the one that can hold it.
+
+         Fired here, after the torch pair, for the same reason the lit half is: the concierge
+         pressed once and gets one result back.
+        */
+        if job.wantsWideSibling && !job.wideFired && job.wideRefused == nil {
+            job.wideFired = true
+            release(job)
+            fireWideSibling(for: job)
+            return
+        }
+
+        // ⚑ **The glass goes back before anything else happens.** A swap is an operation with two
+        // ends, and this project's recurring defect is accounting for one of them: the preview,
+        // the next capture and the next `takePosition` all inherit whatever is left here.
+        if job.wideFired { restoreLensAfterWideSibling() }
 
         release(job)
         // The lamp goes out behind the pair. Whether it comes back is `applyCompanionVerdict`'s
@@ -2245,6 +2435,65 @@ final class CameraController: NSObject {
         }
     }
 
+    /**
+     The 120° half of a sibling pair: swap the glass, take one frame, and hand the glass back.
+
+     ⚑ **A refusal completes the capture rather than failing it.** The 1× frame is already in hand
+     and it is the one carrying the position; losing a room shot because the second lens was busy
+     would trade the frame that matters for the frame that helps. The reason is recorded on the
+     result, because *an absence with no reason* is the signal nobody can act on.
+     */
+    private func fireWideSibling(for job: CaptureJob) {
+        let other: CameraLens = lens == .wide ? .normal : .wide
+        guard AVCaptureDevice.default(other.deviceType, for: .video, position: .back) != nil else {
+            job.wideRefused = "no \(other.rawValue) lens on this device"
+            completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
+            return
+        }
+        let started = CACurrentMediaTime()
+        siblingLensOverride = other
+        let achieved = apply(mode: mode)
+        guard lens == other else {
+            siblingLensOverride = nil
+            _ = apply(mode: mode)
+            job.wideRefused = achieved.unmet.contains("lens") ? "lens swap refused" : "swap did not take"
+            completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
+            return
+        }
+        job.lensSwapMs = (CACurrentMediaTime() - started) * 1000
+
+        // Exposure and focus were just re-asserted on a device that has never seen this scene.
+        // The same settle the torch pair gets, for the same reason: a frame taken mid-converge is
+        // a frame nobody can compare against the one beside it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
+            guard let self else { return }
+            guard self.session.isRunning else {
+                self.restoreLensAfterWideSibling()
+                job.wideRefused = "session stopped"
+                self.completeCaptureFrame(id: -1, data: nil, error: nil, forcedJob: job)
+                return
+            }
+            let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            settings.photoQualityPrioritization = .quality
+            let id = settings.uniqueID
+            job.outstanding = 1
+            self.jobs[id] = job
+            // ⛑ The torch is NOT fired for this frame. A 120° frame is a framing shot; a hotspot
+            // sized for a plate 300 mm away lights a fifth of it and blows that fifth out.
+            self.torchForRequest[id] = false
+            self.applyRotation(self.captureRotationAngle, to: self.photoOutput.connection(with: .video))
+            self.photoOutput.capturePhoto(with: settings, delegate: self)
+        }
+    }
+
+    /// Undo the override and re-run the mode's own policy. Never `requestLens` — that would write
+    /// the concierge's standing choice, and this swap was the app's decision, not theirs.
+    private func restoreLensAfterWideSibling() {
+        guard siblingLensOverride != nil else { return }
+        siblingLensOverride = nil
+        _ = apply(mode: mode)
+    }
+
     /// Every settings id pointing at this job — a torch pair registers two.
     private func release(_ job: CaptureJob) {
         for (key, value) in jobs where value === job {
@@ -2260,10 +2509,11 @@ final class CameraController: NSObject {
      answer rather than the lit frame's settings — which is what continuous AE gives it, once it has
      had `torchPairSettleSeconds` to converge.
      */
-    private func beginPairWithUnlitFrame(bracketed: Bool,
+    private func beginPairWithUnlitFrame(bracketed: Bool, wideSibling: Bool,
                                          completion: @escaping (Result<[String: Any], Error>) -> Void) {
         let job = CaptureJob(completion: completion, bracketed: bracketed, torchAtCapture: true,
-                             lens: lens, outstanding: 1, wantsTorchPair: true)
+                             lens: lens, outstanding: 1, wantsTorchPair: true,
+                             wantsWideSibling: wideSibling)
         setTorch(false)
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.torchPairSettleSeconds) { [weak self] in
             guard let self else { return }
@@ -2320,8 +2570,13 @@ final class CameraController: NSObject {
         // labels, the agreement comparison, the deskew and the top-level read all key off position.
         var outgoing = job.frames
         if let companion = job.companion { outgoing.append(companion) }
+        // ⚑ **After the companion**, so the array shape stays: primary, [bracket], [companion],
+        // [wide]. Every index-keyed reading downstream — the EV labels, the agreement comparison,
+        // the top-level read — was written against positions, and appending anywhere but the end
+        // moves all of them silently.
+        if let wide = job.wideFrame { outgoing.append(wide) }
         if wantsDeskew, let first = outgoing.first, let flattened = Self.flattenPage(jpeg: first.data) {
-            outgoing[0] = CaptureJob.Frame(data: flattened, torch: first.torch)
+            outgoing[0] = CaptureJob.Frame(data: flattened, torch: first.torch, lens: first.lens)
             deskewed = true
         }
 
@@ -2347,7 +2602,9 @@ final class CameraController: NSObject {
                 // A deskewed document frame is legitimately 1: the page was straightened
                 // into upright pixels, so there is nothing left for the tag to say.
                 "exifOrientation": Self.exifOrientation(of: frame.data),
-                "torch": frame.torch
+                "torch": frame.torch,
+                // Per frame, because in a sibling pair they differ — see `CaptureJob.Frame.lens`.
+                "lens": frame.lens.rawValue
             ]
             if let read { entry["ocr"] = read }
             written.append(entry)
@@ -2370,7 +2627,15 @@ final class CameraController: NSObject {
              shooting normal and simply could not step back far enough. Without this the two are
              indistinguishable and the wrong one gets acted on.
             */
+            /* ⛑ The lens the capture was TAKEN under — the 1× frame, the one carrying the
+               position. It is no longer a description of every frame: read `frames[i].lens` for
+               that. Kept under its own name rather than removed, because a manifest field that
+               changes meaning silently is worse than one that gains a neighbour. */
             "lens": job.lens.rawValue,
+            /// Whether a 120° sibling was asked for, whether one arrived, and what it cost.
+            "wideSibling": job.wideFrame != nil,
+            "wideRefused": job.wideRefused as Any,
+            "lensSwapMs": job.lensSwapMs as Any,
             "bracketed": job.bracketed,
             "torchPaired": job.pairFired,
             // Reported rather than assumed: a document capture where no page was found is a
@@ -2446,6 +2711,27 @@ final class CameraController: NSObject {
         // The top-level read stays frame 0's — the declared surface, unchanged. Stored by nobody,
         // because there is nowhere for it to land (#163).
         if let first = reads.first, let read = first { payload["ocr"] = read }
+        /*
+         ⛑ **A live line per capture, for the tethered console.** `print` rather than `NSLog`
+         because NSLog does not reach the stream `devicectl … --console` captures on modern iOS —
+         a fact that cost two probe runs on 2026-08-28 before it was noticed.
+
+         It says what the frames ARE, not that a capture happened: how many, which glass took each,
+         and what the wide sibling cost or why it was refused. ⚑ *Capture is the one act where the
+         record and the photograph can disagree and nothing downstream can tell*, so the line names
+         both halves.
+        */
+        let lensLine = outgoing.map { $0.lens.rawValue }.joined(separator: ",")
+        print("HS-CAP frames=\(written.count) lenses=[\(lensLine)] wideSibling=\(job.wideFrame != nil) "
+              + "wideRefused=\(job.wideRefused ?? "-") lensSwapMs=\(job.lensSwapMs.map { String(format: "%.0f", $0) } ?? "-") "
+              + "torchPaired=\(job.pairFired) bracketed=\(job.bracketed) mode=\(mode.rawValue)")
+        HSZoneLog.record("capture", [
+            "frames": written.count,
+            "lenses": lensLine,
+            "wideSibling": job.wideFrame != nil,
+            "wideRefused": job.wideRefused ?? "-",
+            "lensSwapMs": job.lensSwapMs ?? -1,
+        ])
         job.completion(.success(payload))
     }
 
@@ -2717,6 +3003,53 @@ final class CameraController: NSObject {
          the white balance lock the frames do not even colour-match, and a concierge looking at
          the result cannot tell that from a lighting change in the room.
          */
+        /*
+         ⛑ **Wait for the format before planning an exposure against it.**
+
+         `traverseExposurePlan` opens with `let format = device.activeFormat` and derives the ISO
+         ceiling and the shutter clamps from it. `lightScore()` reads it too, so the torch decision
+         inherits the same numbers. ⚑ **If the preset restore is still in flight, the whole leg's
+         exposure is planned against ARKit's binned video format** — which is how a lit room produced
+         grain, and it would have survived the fix that made the restore asynchronous.
+
+         `sessionQueue` is serial and the restore is already enqueued on it, so an empty `sync` is a
+         **barrier**: it returns exactly when the restore ahead of it has finished. Costs nothing
+         when there is nothing pending, which is the ordinary case.
+        */
+        sessionQueue.sync { }
+        /*
+         ⛑ **Let auto-exposure converge before metering it. This is the black viewfinder.**
+
+         `traverseExposurePlan` reads `device.exposureDuration` and `device.iso` **at the instant of
+         the call**, and since the leg anchors landed that instant is ~300 ms after the capture
+         session restarted from an ARKit handover. **Auto-exposure has not converged yet**, so
+         `light = duration × ISO` is computed from a reading of nothing: the plan then picks the
+         fastest shutter and the lowest ISO and *locks them for the whole leg*.
+
+         ⚑ **The field named it and the name was exact** — *"the exposure must be set on something
+         wild because the image in the viewfinder is SO dark it almost looks black."* It was: not a
+         black screen, a correctly-locked near-black exposure. And it explains the texture scores
+         that survived every other fix — **a near-black frame has no Laplacian energy**, which is
+         precisely what 1.0–3.2 against a threshold of 5 looks like.
+
+         ⛑ **Third variant of one class in three days**: the meter is right, the moment is wrong.
+         Before the leg anchors, `startTraverse` ran on a camera that had been settled for seconds.
+
+         `isAdjustingExposure` is the device's own signal that it has finished, so it is what is
+         waited on — never a sleep long enough to *probably* be enough. Bounded, and the wait is
+         **recorded**: a leg that starts on an unconverged meter must be visible afterwards rather
+         than inferred from a dark photograph.
+        */
+        var exposureWaitMs = 0.0
+        var exposureSettled = true
+        if let device {
+            let began = CACurrentMediaTime()
+            while device.isAdjustingExposure, CACurrentMediaTime() - began < 1.5 {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            exposureWaitMs = (CACurrentMediaTime() - began) * 1000
+            exposureSettled = !device.isAdjustingExposure
+        }
         var exposureRecord: [String: Any] = [:]
         if let device {
             do {
@@ -2768,6 +3101,23 @@ final class CameraController: NSObject {
             run.continuesFrom = continuesFrom
             self.traverse = run
             self.isTraversing = true
+            /* ⚑ **The traverse logged nothing, and it is the thing under test.** Finding out why a
+               leg produced one frame took pulling the app's temp directory off the device by hand.
+               A run now says it started, and says what the session was set to when it did — which
+               is the fact that would have named tonight's regression in one line. */
+            /* ⚑ The exposure the leg was actually locked to, and how long the meter took to
+               settle. The plan has always been computed and only ever reached JavaScript; the one
+               number that would have named this in a line was not in the file anybody pulls. */
+            var started: [String: Any] = [
+                "preset": self.session.sessionPreset.rawValue,
+                "lens": self.lens.rawValue,
+                "continuesFrom": continuesFrom ?? "-",
+                "unmet": unmet,
+                "exposureWaitMs": exposureWaitMs,
+                "exposureSettled": exposureSettled,
+            ]
+            for (k, v) in exposureRecord { started["exp_\(k)"] = v }
+            HSZoneLog.record("traverseStart", started)
             DispatchQueue.main.async {
                 completion(.success([
                     "exposure": exposureRecord,
@@ -2800,6 +3150,14 @@ final class CameraController: NSObject {
     }
 
     func stopTraverse(completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        /* ⚑ What the leg actually produced, said at the moment it ends. A leg that kept one frame
+           of nine is not a leg, and nothing in the app said so on 2026-08-29. */
+        if let r = traverse {
+            HSZoneLog.record("traverseStop", [
+                "kept": r.frames.count, "discarded": r.discarded, "pairs": r.pairs.count,
+                "preset": session.sessionPreset.rawValue,
+            ])
+        }
         visionQueue.async { [weak self] in
             guard let self else { return }
             guard let run = self.traverse else {
@@ -2965,6 +3323,14 @@ final class CameraController: NSObject {
                                                 droppedSteps: run.droppedAtRequest))
             }
             run.lastKeptBuffer = run.pendingBuffer
+            /* ⛑ **A discard is a decision and it was silent.** Eight of nine frames were dropped
+               for low texture in a dark room on 2026-08-29 and the concierge was told nothing — he
+               walked the leg believing it was recording. Logged with the score and the threshold so
+               *too dark to register* and *nothing was captured* stop looking identical. */
+            HSZoneLog.record("traverseDiscard", [
+                "index": index, "texture": texture, "keepAbove": Self.traverseKeepTexture,
+                "kept": run.frames.count, "discarded": run.discarded,
+            ])
             onTraverse?(["frames": run.frames.count, "pairs": run.pairs, "discarded": run.discarded])
             return
         }
@@ -3001,7 +3367,11 @@ final class CameraController: NSObject {
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
         // survive the bridge as a JS null, it survives as something the far side cannot read.
-        var progress: [String: Any] = ["frames": run.frames.count, "pairs": run.pairs]
+        // ⚑ `discarded` on EVERY progress event, including zero. Sending it only when something
+        // was dropped means the reader cannot tell *nothing discarded* from *this build does not
+        // report it* — and the screen would show a blank where the answer belongs.
+        var progress: [String: Any] = ["frames": run.frames.count, "pairs": run.pairs,
+                                       "discarded": run.discarded]
         if let last = run.pairs.last { progress["lastPair"] = last }
         onTraverse?(progress)
     }
@@ -3707,10 +4077,26 @@ final class CameraController: NSObject {
             total += Double(candidate.confidence)
         }
         guard !lines.isEmpty else { return nil }
+        let mean = total / Double(lines.count)
+        let characters = lines.reduce(0) { $0 + (($1["text"] as? String)?.count ?? 0) }
         return [
             "lines": lines,
             "text": lines.compactMap { $0["text"] as? String }.joined(separator: "\n"),
-            "meanConfidence": total / Double(lines.count),
+            "meanConfidence": mean,
+            /*
+             ⚑ **The verdict is computed HERE, against the one constant that defines it.**
+
+             `LiveRead.goodConfidence` is the single boundary between a read going well and one
+             that is not — used by the live retake trigger and the torch veto alike, and its own
+             comment says why: *two constants meaning the same thing is precisely how the two
+             rotation tables drifted apart.* A TypeScript threshold beside it would be a third.
+
+             ⛑ And `marginal` is **never "no text found"**. Most captures legitimately contain
+             none — a pipe, a stain, a wide shot — so a trigger that fires on nothing-read nags on
+             the majority case and is ignored by the time a plate needs it.
+            */
+            "characterCount": characters,
+            "marginal": characters >= LiveRead.worthReadingCharacters && mean < LiveRead.goodConfidence,
             // Named precisely, because a read is only comparable against another read from the
             // same recogniser on the same OS (Register #135). Nothing here persists it.
             "engine": "vision.VNRecognizeTextRequest.accurate.rev\(VNRecognizeTextRequest.currentRevision)",

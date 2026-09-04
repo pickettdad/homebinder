@@ -24,7 +24,7 @@ import { isNativePlatform } from "../app/platform";
 import { MediaThumb } from "./v2/shared";
 import type { MediaRef } from "../engine/v2/fold";
 import { db } from "../storage/db";
-import type { FrameReadMeta, FrameRoleMeta } from "../engine/schema/events";
+import type { FrameReadMeta, FrameRoleMeta, CapturePositionMeta } from "../engine/schema/events";
 import type { CaptureIntent } from "../engine/v2/events";
 import {
   captureTargetFor,
@@ -33,6 +33,7 @@ import {
   tapContainer,
   type OpenContainer,
 } from "../capture/objectContainer";
+import { useVoiceRecorder } from "../capture/useVoiceRecorder";
 import { ZoneStrip } from "./ZoneStrip";
 import { FloorPlanView } from "./FloorPlanView";
 import { zoneMeasures } from "../native/zone";
@@ -42,6 +43,9 @@ import {
   adjustCamera,
   cameraAvailable,
   captureFrames,
+  captureWantsRetake,
+  positionForSibling,
+  projectionFor,
   frameBlob,
   frameLabel,
   frameStateOf,
@@ -325,7 +329,7 @@ export function CameraScreen({
   startAction,
 }: {
   zoneId?: string;
-  startAction?: "floorplan" | "mesh" | "room-shot";
+  startAction?: "floorplan" | "mesh" | "room-shot" | "traverse" | "document";
 }) {
   const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
@@ -347,6 +351,32 @@ export function CameraScreen({
   const [pendingIntent, setPendingIntent] = useState<CaptureIntent | null>(null);
   /** How many legs of one walk have been recorded. Resets when a traverse starts unrelated. */
   const [legNumber, setLegNumber] = useState(1);
+  /* ⚑ The narration a trace is FOR. A concierge walking a pipe describing what it does will not
+     leave the viewfinder to say it, so the recorder lives here rather than on the zone screen. */
+  const recorder = useVoiceRecorder();
+  /** Where the current leg began. Taken before the exposure lock, held until the leg is filed. */
+  const startPosition = useRef<ZonePosition>({ positioned: false, why: "leg not started" });
+  /** The anchor the last leg ended on — handed to the next leg when they are chained. */
+  const lastEnd = useRef<ZonePosition | null>(null);
+  /* ⛑ **A note binds to its LEG, and the owner's reason is better than the one it replaces.**
+
+     I had it bind to the run, arguing that a narration spanning three legs describes all three.
+     True, and the wrong optimisation: *"if I narrated something specific to leg 6, the desk would
+     need to fish through all audio through all legs."* **A mechanical room is seven or eight legs**
+     — a run-long file makes every question a search, and a per-leg file makes it a lookup.
+
+     ⚑ So the note is *cycled* at each boundary instead: leg 6's narration is leg 6's file. The run
+     stays reachable by walking `frame.continuesFrom`, which costs the desk one hop and costs the
+     concierge nothing. See `cycleVoice`. */
+  /** The `captureId` of the leg currently being walked, or null. Set by `beginTraverse`. */
+  const legRef = useRef<string | null>(null);
+  /* ⚑ **The preview is genuinely black while ARKit holds the lens**, and it was unexplained.
+     `cameraYielded` stops the capture session, so there is nothing to draw for the 1–5 s ARKit
+     takes to relocalise. The field read that as a crash — *"screen goes black and stayed black"* —
+     which is what an unexplained black screen means to anyone. It is now labelled. */
+  const [measuring, setMeasuring] = useState(false);
+  /** The last leg-boundary audio gap, in ms. Shown so the requirement is answered by a number. */
+  const [voiceGapMs, setVoiceGapMs] = useState<number | null>(null);
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
   pendingIntentRef.current = pendingIntent;
   /** mediaId → the capture it came from, for this session only. See `shoot`. */
@@ -496,6 +526,19 @@ export function CameraScreen({
         if (startAction === "room-shot") {
           await applyIntentLens("room-shot");
           setPendingIntent("room-shot");
+        } else if (startAction === "traverse") {
+          /* ⛑ **Armed, not started.** The lens goes wide because that is what a traverse wants —
+             `lensPolicyFor` already rules it, and it MUST be applied before `startTraverse`, which
+             locks exposure, focus and white balance and refuses a swap mid-run. But the run itself
+             waits for the concierge to press: *a traverse that began the instant the screen opened
+             would record the walk to the pipe rather than the pipe.* */
+          await applyIntentLens("traverse");
+        } else if (startAction === "document") {
+          /* ⚑ The door that READS. Document mode finds the page, flattens it and runs accurate
+             recognition on the result — which is the whole reason this door now leads here instead
+             of to a flat photograph of a curled invoice. */
+          const achieved = await requestMode("document");
+          if (live && achieved.unmet.length) setZoneNote(`document: could not reach ${achieved.unmet.join(", ")}`);
         } else if (startAction === "floorplan") {
           const started = await startRoomPlan();
           if (live && started.started) {
@@ -616,6 +659,11 @@ export function CameraScreen({
   /** ⚑ Read inside the frame callback, which closes over its first render — a state value would be
    *  stale there and auto-capture would keep firing exactly as it did before the fix. */
   const reviewingRef = useRef(false);
+  /** ⚑ Containers that already carry at least one measured position. A SAMPLING record, not a
+   *  choice: the desk still ranks every position it receives, and a Text frame is always sampled
+   *  whatever this holds. Session-scoped and never persisted — a container positioned on a previous
+   *  visit is a different visit's fact. */
+  const positionedContainers = useRef<Set<string>>(new Set());
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
@@ -672,7 +720,37 @@ export function CameraScreen({
     busyRef.current = true;
     setBusy(true);
     try {
-      const result = await captureFrames();
+      /* ⚑ **The sibling pair, asked for by the door** (running list item 7).
+
+         A room shot is the one act whose job is *what is in this room* rather than *what is this
+         object*, and it is taken once per zone — so it is where a 120° frame is worth two input
+         swaps, and where paying for them forty times a room would not be. **The 1× frame carries
+         the measured position and the 120° one inherits from its own sibling**, because world
+         tracking is not offered the ultra-wide on this iPad (`HSLensProbe`, 2026-08-24) and a
+         positioned 0.5× frame is unavailable at any price.
+
+         A request, not an instruction: Text refuses it by policy and a device without the glass
+         refuses it by hardware. `result.wideRefused` says which. */
+      /*
+        ⛑ **The container is decided HERE, at the shutter, and it used to be decided at the write.**
+
+        Field 2026-08-30: *"I took a nameplate shot of one of the water treatment systems, then
+        immediately hit new object container, and since it took a while for the nameplate capture to
+        register, it ended up landing as the first object container picture instead of in the
+        previous object container as its nameplate."*
+
+        ⚑ `captureTargetFor(openRef.current, …)` ran **after** the frames came back — a window of
+        one to three seconds on a bracket — so a container opened during that window took ownership
+        of a photograph of the previous object. **A nameplate filed against the wrong equipment is
+        worse than a missing one**: it is a wrong answer that looks like a right one, and nothing
+        downstream can tell.
+
+        *The container that was open when the concierge pressed is the container that owns the
+        frame.* Same class as every other value read at the wrong moment in this file — and the
+        first one where the wrong value silently corrupts the record rather than the experience.
+      */
+      const targetAtShutter = openRef.current;
+      const result = await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
       /*
         ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
 
@@ -685,27 +763,46 @@ export function CameraScreen({
         `{positioned:false, why:"paused"}` says *this one could and did not, here is why* — and a
         container the desk cannot place is otherwise indistinguishable from one nobody meant to.
       */
-      /* ⛑ **Position everything; the desk ranks** (owner ruling 2026-08-23, and this is a deletion).
-       *
-       * This screen briefly anchored a container on its first capture and let the rest inherit —
-       * which put an *anchor concept* in the field, and choosing which frame represents an object is
-       * a judgement. ⚑ **The owner's objection is what killed it: the first shot of a fridge is the
-       * whole-object shot from six feet back, so "first" reliably picks the worst available anchor.**
-       *
-       * The field has no business ranking. Every positioned frame already carries
-       * `surface.distance` — the ray-cast hit in front of the lens — so *closest wins* is a rule the
-       * desk applies to what it was sent. **The field's job is to try every time and to be honest
-       * when it cannot.**
-       *
-       * ⛑ **The cost is real and is not hidden:** a position wakes ARKit, which re-establishes
-       * tracking because the capture session took the lens back, and that is 2–3 seconds. It is paid
-       * per capture again. **Removing it is decision one — stop handing the lens back and forth —
-       * and this is the evidence that decision needs rather than an argument against the ruling.**
-       */
-      const position = await takePosition().catch(
-        () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-      );
+      /*
+        ⚑ **Sampled, not chosen — and the distinction is the whole of this** (owner ruling
+        2026-08-23, restored 2026-08-28).
 
+        The field still does not pick which frame represents an object. That judgement stays at the
+        desk, which ranks by `surface.distance` — closest wins — over whatever it is sent. What
+        changes here is only **how often a position is sampled**, and that is a walkability decision
+        rather than a semantic one.
+
+        ⛑ **Positioning every frame cost 2–3 seconds per photograph**, because a position wakes ARKit
+        and it re-establishes tracking after the capture session takes the lens back. A real
+        multi-room walk under that is miserable, and this walk has to actually happen.
+
+        **First frame in a container, plus every Text frame.** ⚑ *The nameplate shot is therefore
+        always among the candidates* — which is the frame the desk most wants, because the concierge
+        stands 0.3–1 m from a plate and six feet back from a fridge. The owner's own objection to
+        "first wins" is answered by including Text rather than by the field choosing between them.
+
+        Captures outside a container still take one each: a zone concern has nothing to inherit from.
+
+        ⚑ **This is a sampling rate and it goes away entirely under decision one.** If ARKit holds the
+        lens for a zone there is no wake, no pause, and every frame can carry a position — which is
+        what the ruling asked for and what the handover currently prices out.
+      */
+      /* ⛑ **Through the refs, because `shoot` closes over its first render** — its deps are
+         `[capturePhotoV2]`, and the file already reads `openRef.current` two dozen lines below for
+         exactly this reason. Written as `open?.pinId` this would have been permanently null, so
+         every frame would have sampled a position and the change would have done nothing at all
+         while reading as though it had. ⚑ *A stale closure is the same shape as a stale ARFrame:
+         a value that is confidently the wrong one.* */
+      const containerId = openRef.current?.pinId ?? null;
+      const isPlate = statusRef.current?.mode === "text";
+      const needsPosition =
+        containerId === null || isPlate || !positionedContainers.current.has(containerId);
+      const position = needsPosition
+        ? await takePosition().catch(
+            () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+          )
+        : undefined;
+      if (containerId && position?.positioned) positionedContainers.current.add(containerId);
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);
@@ -732,10 +829,24 @@ export function CameraScreen({
         const captureId = result.at;
         const roleOf = (index: number): FrameRoleMeta => ({
           captureId,
-          role: index === 0 ? "primary" : result.frames[index]?.torch === false && result.torchPaired ? "evidence" : "insurance",
+          /* ⛑ The 120° sibling is `evidence`, and that is the retention rule rather than a
+             label: *evidence survives, insurance is spendable once the desk has resolved the
+             plate.* A room's wide frame answers "what was around this" — a question that is still
+             being asked in five years. Which frame is the wide one is read off `lens`, not here. */
+          role:
+            index === 0
+              ? "primary"
+              : result.frames[index]?.lens === "wide" && result.wideSibling
+                ? "evidence"
+                : result.frames[index]?.torch === false && result.torchPaired
+                  ? "evidence"
+                  : "insurance",
           torch: result.frames[index]?.torch,
           ev: result.bracketed && index < 3 ? [-1, 0, 1][index] : undefined,
-          lens: result.lens,
+          /* ⚑ Per FRAME. `result.lens` describes the capture and was right for every capture
+             built before the sibling pair; on a pair it is right about three frames out of four,
+             which is the worst kind of right. */
+          lens: result.frames[index]?.lens ?? result.lens,
         });
         const readOf = (index: number): FrameReadMeta | undefined => {
           const ocr = result.frames[index]?.ocr;
@@ -749,6 +860,10 @@ export function CameraScreen({
             mime: "image/jpeg",
             read: readOf(i + 1),
             frame: roleOf(i + 1),
+            /* ⚑ The doctrine lives in `positionForSibling`, not here — a rule inside a
+               component cannot be scanned or tested, which is the same reason `globalCameraApplies`
+               is a predicate. Read it there; it is the reason the wide frame refuses. */
+            position: positionForSibling(f, result.wideSibling === true),
           })),
         );
         /*
@@ -767,15 +882,38 @@ export function CameraScreen({
         */
         const declared = pendingIntentRef.current ?? undefined;
         const mediaId = await capturePhotoV2(
-          captureTargetFor(openRef.current, currentZone, declared), blob, "image/jpeg",
+          captureTargetFor(targetAtShutter, currentZone, declared), blob, "image/jpeg",
           undefined, declared,
           /* ⚑ On the PRIMARY only. Siblings inherit — the container's anchor is one frame, and a
              pose stamped on all three of a bracket would read as three positions of one object. */
-          { read: readOf(0), frame: roleOf(0), position, siblings },
+          {
+            read: readOf(0),
+            frame: roleOf(0),
+            /* ⚑ **The pose is the native side's; what it DESCRIBES is this side's.**
+               `takePosition` knows where the iPad was and nothing about which glass took the
+               photograph — that fact lives here, with the frames. See `projectionFor`: the room
+               shot's primary is the 120° frame the concierge framed (owner ruling 2026-08-16,
+               re-confirmed in the field), so its pose is honest and its matrix does not describe
+               it, and the record must say so rather than leave the desk to know it. */
+            position: position?.positioned ? { ...position, projection: projectionFor(result) } : position,
+            siblings,
+          },
         );
-        // One act, one capture: the door was for this shot, not for the rest of the room.
-        pendingIntentRef.current = null;
-        setPendingIntent(null);
+        /* ⛑ **A room shot stays armed; every other declared intent fires once.**
+
+           *"You take one shot and it exits the room-shot container, so you can't take follow-up
+           shots"* — field 2026-08-30, having taken **three** room shots to get three angles of a
+           mechanical room, one of which landed as an ordinary zone capture because the door had
+           already disarmed. The 2026-08-21 ruling that a room shot *"happens once, at the start of
+           a zone"* was written before anyone had photographed a room with equipment on four walls.
+
+           ⚑ A traverse or a document is one act by construction; **a room shot is one act per
+           angle**, and the concierge decides how many angles a room has. It disarms on leaving the
+           viewfinder, which is the act that ends it. */
+        if (pendingIntentRef.current !== "room-shot") {
+          pendingIntentRef.current = null;
+          setPendingIntent(null);
+        }
         /*
           ⚑ **The link back from the filed capture to the frames it came from**, and it exists to
           undo a regression this session caused.
@@ -794,6 +932,46 @@ export function CameraScreen({
           claims nothing about captures from an earlier visit.
         */
         sessionFrames.current.set(mediaId, result);
+
+        /*
+          ⚑ **The retake rule finally has a reader** (running list item 5).
+
+          `shouldOfferRetake` has existed, correct and tested, since the day the trigger was ruled
+          on — and **nothing in the app called it**, so in the field it fired on nobody. That is
+          rule 43 again: *a value being computed is not the same as a reader being able to reach
+          it*, and this is the seventh instance.
+
+          ⛑ **A toast, not a sheet.** This screen's contract is *Assume Use, never Retake* — the
+          filmstrip is the confirmation. So this is an offer that costs nothing to ignore: shoot
+          again or move on, and the capture is already filed either way. A gate here would trade
+          the whole no-confirm-sheet design for one marginal plate.
+
+          And it says something only when there is something to say: `characterCount > 0 AND
+          marginal`. Most captures legitimately hold no text at all, and a prompt that fired on
+          those would be background noise by the time a plate needed it.
+        */
+        /*
+          ⛑ **Wide is a choice for one shot, never a mode** (owner ruling 2026-09-01).
+
+          *"Wide should always revert back to normal unless it's in room shot; room shot defaults to
+          wide. But once you exit out of room shot, back to always normal."*
+
+          ⚑ The lens was **sticky**: `requestedLens` survives a mode change by design, so a wide
+          chosen once — or inherited from a room shot — stayed on every object photograph and every
+          plate afterwards, silently. On the 2026-08-30 walk that is how 18 of 19 room-shot entries
+          came back `projectable: false` and how wide frames reached rooms nobody framed wide.
+
+          *A setting the concierge cannot see is a setting they cannot correct*, and this one
+          changes what the desk can do with the photograph rather than only how it looks.
+        */
+        if (pendingIntentRef.current !== "room-shot" && statusRef.current?.lens === "wide") {
+          const back = await requestLens("normal").catch(() => null);
+          if (back && back.lens !== "normal") showToast(`lens stayed ${back.lens}`);
+        }
+
+        if (captureWantsRetake(result)) {
+          showToast("That plate read poorly — worth another, closer or with the light moved");
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -801,11 +979,18 @@ export function CameraScreen({
       busyRef.current = false;
       setBusy(false);
     }
-  }, [capturePhotoV2]);
+  }, [capturePhotoV2, showToast]);
 
   /**
    * The `+` at the top of the strip. Tapping it while inside a container closes that one and
    * opens a new one — one gesture, and the previous object needs no closing act of its own.
+   *
+   * ⛑ **It also returns the camera to `object` mode**, because the field found the alternative:
+   * *"I think I took the main object shot of the GSW hot water tank using the nameplate mode,
+   * because it was the last mode I was in when I switched object container."* ⚑ *A container opens
+   * on the whole thing* — that is what the first frame of a container is for — and inheriting the
+   * close-focus, spot-metered, lens-locked Text mode from the previous object's plate is a setting
+   * chosen for a different job, silently applied to the shot that identifies the equipment.
    *
    * ⚑ The container is created with no type and no label, and nothing here asks for one. It
    * declares *this is a thing and I am now photographing it*, never what the thing is.
@@ -818,11 +1003,58 @@ export function CameraScreen({
    * held the surface back because the traverse and the run trace may be one primitive, and a
    * door built tonight would harden around the narrower of the two.
    */
-  const beginTraverse = useCallback(async (continuesFrom?: string) => {
+  const beginTraverse = useCallback(async (continuesFrom?: string, carriedStart?: ZonePosition) => {
     setTraverseResult(null);
     setTraverseProgress(null);
     try {
-      // ⚑ Lens first, and it MUST be before `startTraverse`. A traverse locks exposure, white
+      /*
+        ⚑ **Where this leg BEGINS, in the world** (design ruling 2026-08-29).
+
+        A traverse registers frame to frame by image overlap — translation-only, image space — so
+        it recovers *order* and *shape* and knows nothing about where in the house it happened.
+        ⛑ **The order is the thing the desk cannot get any other way.** The owner's own mechanical
+        room has a water line that crosses the room, skips a unit and doubles back to it: a desk
+        reasoning from what sits near what does not merely fail, it *confidently produces the wrong
+        sequence.*
+
+        **Per-frame position is not available and this is not a tuning problem.** A traverse runs on
+        the `AVCaptureSession` with exposure, focus and white balance locked; ARKit cannot hold the
+        lens at the same time, and one position costs a full camera handover — **1.70 s, measured
+        on device 2026-08-28** (yield → `limited(initializing)` → `normal` → read → reclaim). A
+        handover mid-run would also break the exposure lock the whole registration model depends on,
+        which is why `swapLens` already refuses while traversing. Per-frame world position **is**
+        decision one, not an addition to this.
+
+        **So: an anchor at each end of each leg**, taken where the concierge has already stopped.
+        The chain between them carries the order; these two carry the room. ⚑ *And a run that
+        doubles back is walked as separate legs* — `continuesFrom` already exists for exactly that —
+        so the leg endpoints form a polyline of the route rather than a straight line through it.
+      */
+      /*
+        ⛑ **A chained leg inherits the anchor the previous leg just measured.**
+
+        `next leg` used to end leg N — a position — and immediately start leg N+1 — another
+        position. **Two five-second handovers back to back, measuring the same spot twice**, with
+        the preview black for eleven seconds in between. The field: *"once the handover finally
+        happens.. takes a while."*
+
+        ⚑ The end of leg N and the start of leg N+1 **are the same place at the same moment** by
+        construction — that is what chaining means. Measuring it twice was not redundancy, it was
+        the same one-ended-operation error inverted: paying twice for one fact.
+      */
+      if (carriedStart) {
+        startPosition.current = carriedStart;
+      } else {
+        setMeasuring(true);
+        startPosition.current = await takePosition()
+          .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
+          .finally(() => setMeasuring(false));
+      }
+      /* Painted before the await that follows, not after it. `startTraverse` locks exposure and
+         focus and can take a moment; leaving the bar reading "start trace" while frames are
+         already firing is the state the field called confusing, and it was. */
+      setTraversing(true);
+      // ⚑ Lens SECOND, and it MUST be before `startTraverse`. A traverse locks exposure, white
       // balance and focus on its first frame and refuses a lens swap mid-run — so a wide default
       // applied afterwards would be silently declined, and the run would be shot on normal while
       // the control said wide.
@@ -832,18 +1064,133 @@ export function CameraScreen({
           await requestLens(policy.default);
         }
       }
-      await startTraverse(continuesFrom);
+      const started = await startTraverse(continuesFrom);
+      /* ⚑ Held so a voice note taken DURING this leg can name it. See `toggleVoice`. */
+      legRef.current = started.startedAt;
       setLegNumber((n) => (continuesFrom ? n + 1 : 1));
-      setTraversing(true);
     } catch (err) {
+      setTraversing(false);
       setError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
-  const endTraverse = useCallback(async () => {
+  /** ⚑ Returns the finished leg, so the next one can declare itself its continuation. Without a
+   *  return there is no way to chain legs from the viewfinder, and legs are the whole route. */
+  /**
+   * Start or finish a spoken note without leaving the viewfinder.
+   *
+   * ⛑ **Files to the ZONE, never the open container** — the same rule the trace itself follows. A
+   * narration recorded while walking a run describes the run, and filing it inside whichever object
+   * happened to be open would assert the pipe belongs to that object.
+   */
+  const toggleVoice = useCallback(async () => {
+    const zone = zoneRef.current;
+    if (recorder.state === "recording") {
+      const rec = await recorder.stop();
+      if (rec && zone) {
+        /*
+          ⚑ **A note spoken during a leg names that leg** (owner question 2026-08-30: *"are the
+          voice notes carried to the manifest so they bind with the traverse leg?"*).
+
+          ⛑ **They were not.** The note filed to the zone with a timestamp and nothing else, so the
+          desk could only correlate it by clock — and *"whatever notes are in it are judged first
+          against that leg and its images"* was not something the record supported.
+
+          ⚑ **Bound through `frame.captureId`, which is the key that already means "these belong to
+          one act."** A leg's frames all carry it; the note now carries the same value, so the note
+          and the leg's images are one group by the mechanism that already exists rather than a new
+          one. *`role: "evidence"` because a narration survives — it is never a spare exposure.*
+
+          ⛑ **This is a proposal, not a ruling.** Baseline Service Design §8 item 2 gives the design
+          session note-binding, and `CaptureTarget` still has no media variant — so this binds a note
+          to a *capture group*, which is the thing a leg actually is, and stops short of inventing
+          note-to-media targeting. Outside a traverse nothing is stamped, because there is no act to
+          name and a captureId pointing at nothing is worse than none.
+        */
+        /* ⚑ The RUN's id, not the current leg's. A note opened in leg 1 and closed in leg 3
+           describes all three, and `runRootRef` is the only value that stays true for all of it —
+           `legRef` would name whichever leg happened to be running when the concierge stopped
+           talking, which is the least meaningful of the three. */
+        const leg = traversing ? legRef.current : null;
+        await capturePhotoV2(
+          { kind: "zone", id: zone },
+          rec.blob,
+          rec.mime,
+          rec.durationMs,
+          undefined,
+          leg ? { frame: { captureId: leg, role: "evidence" } } : undefined,
+        );
+      }
+      return;
+    }
+    if (recorder.state === "unsupported") {
+      showToast("This device will not record audio here");
+      return;
+    }
+    await recorder.start();
+  }, [recorder, capturePhotoV2, showToast, traversing]);
+
+  /**
+   * @param finishing `false` when this end is the first half of a `next leg`.
+   *
+   * ⛑ **The distinction is the whole of the owner's ruling** and the first cut lost it: stopping
+   * the trace stops the narration, **but a leg change is not stopping the trace.** *That is one
+   * continuous run and the narration belongs to all of it* — it was cut at every boundary because
+   * `next leg` reaches this function too, and nothing here knew which of the two acts it was
+   * serving. A parameter, because a function that cannot tell its callers apart will keep guessing.
+   */
+  /**
+   * Close the note on this leg and open one on the next, without letting go of the microphone.
+   *
+   * ⚑ **Only when a note is actually running** (owner clarification 2026-08-30). If the concierge
+   * stopped talking during leg 6, leg 7 must not start recording on its own — *"concierge already
+   * stopped the audio in that string."* The trigger is the live state, never the act of changing legs.
+   *
+   * ⛑ **Restart first, file afterwards.** The gap the concierge hears is `stop` → `start` and
+   * nothing else; writing a blob to storage takes as long as it takes and happens behind them. And
+   * the microphone stays open across the cycle — `getUserMedia` was the expensive half and it used
+   * to run every time.
+   *
+   * The gap is **measured and logged**, not hoped for: the requirement was *a fraction of a second
+   * would be fine*, and a requirement stated as a number deserves an answer as one.
+   */
+  const cycleVoice = useCallback(async () => {
+    if (recorder.state !== "recording") return;
+    const zone = zoneRef.current;
+    const closingLeg = legRef.current;
+    const began = performance.now();
+    const rec = await recorder.stop({ keepStream: true });
+    await recorder.start();
+    const gapMs = performance.now() - began;
+    setVoiceGapMs(Math.round(gapMs));
+    if (rec && zone) {
+      // Filed behind the restart, deliberately — see above.
+      void capturePhotoV2(
+        { kind: "zone", id: zone },
+        rec.blob,
+        rec.mime,
+        rec.durationMs,
+        undefined,
+        closingLeg ? { frame: { captureId: closingLeg, role: "evidence" } } : undefined,
+      );
+    }
+  }, [recorder, capturePhotoV2]);
+
+  const endTraverse = useCallback(async (finishing = true): Promise<TraverseResult | null> => {
     try {
+      // The concierge who pressed *stop trace* has every reason to believe the recording stopped.
+      // ⚑ A LEG change is not that act — it cycles instead, so each leg gets its own file.
+      if (finishing && recorder.state === "recording") await toggleVoice();
+      else if (!finishing) await cycleVoice();
       const result = await stopTraverse();
       setTraverseResult(result);
+      /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
+         a traverse — the two anchors bracket it rather than interrupt it. */
+      setMeasuring(true);
+      const endPosition = await takePosition()
+        .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
+        .finally(() => setMeasuring(false));
+      lastEnd.current = endPosition;
 
       /*
         ⚑ **A traverse filed nothing at all, and nobody noticed because the numbers arrived.**
@@ -884,11 +1231,27 @@ export function CameraScreen({
           continuesFrom: result.continuesFrom ?? undefined,
         });
         const blobFor = async (path: string) => (await fetch(frameUrl(path))).blob();
+        /*
+          ⚑ **The two anchors ride the first and last frames**, which is where they were taken and
+          the only honest place to put them. Every frame between carries none — its role is not
+          `primary`, so the manifest's own rule already says the pose is on the primary of this
+          `captureId`, and the desk reads the leg rather than the frame.
+
+          ⛑ *A traverse is shot WIDE* (`lensPolicyFor`, and the run locks the lens for its whole
+          length), so both anchors are honest poses whose matrix does not describe their image —
+          and there is **no 1× frame anywhere in a traverse**, so `projectableFrame` is `null`.
+          *That is the case the field exists for: a real pose and nothing to project at all.*
+        */
+        const traverseProjection = { frames: [{ lens: statusRef.current?.lens }], at: result.startedAt };
+        const withProjection = (p: ZonePosition): CapturePositionMeta =>
+          p.positioned ? { ...p, projection: projectionFor(traverseProjection) } : p;
+        const lastIndex = rest.length - 1;
         const siblings = await Promise.all(
           rest.map(async (f, i) => ({
             blob: await blobFor(f.path),
             mime: "image/jpeg",
             frame: roleFor(i + 1),
+            position: i === lastIndex ? withProjection(endPosition) : undefined,
           })),
         );
         await capturePhotoV2(
@@ -899,15 +1262,17 @@ export function CameraScreen({
           "image/jpeg",
           undefined,
           "pan",
-          { frame: roleFor(0), siblings },
+          { frame: roleFor(0), position: withProjection(startPosition.current), siblings },
         );
       }
+      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       setTraversing(false);
     }
-  }, [capturePhotoV2]);
+  }, [capturePhotoV2, recorder.state, toggleVoice, cycleVoice]);
 
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;
@@ -915,6 +1280,14 @@ export function CameraScreen({
     try {
       const pinId = await createPin(currentZone);
       setOpen({ pinId, zoneId: currentZone });
+      /* ⚑ Back to `object`. See this function's header: a container opens on the whole thing, and
+         Text mode inherited from the previous object's plate is close-focused, spot-metered and
+         lens-locked — settings chosen for a job this frame is not doing. Painted from the return,
+         as everything on this screen must be. */
+      if (statusRef.current && statusRef.current.mode !== "object") {
+        const achieved = await requestMode("object").catch(() => null);
+        if (achieved && achieved.mode !== "object") showToast(`mode stayed ${achieved.mode}`);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not start an object here");
     }
@@ -1175,22 +1548,55 @@ export function CameraScreen({
     }
   };
 
-  const chooseLens = async (lens: CameraLens) => {
+  /** ⚑ Returns the lens ACHIEVED, so a caller can paint from the return rather than the ask. It
+   *  used to return nothing, which left every caller with only the request to go on. */
+  const chooseLens = async (lens: CameraLens): Promise<CameraLens | null> => {
     try {
       const achieved = await requestLens(lens);
       if (achieved.lens !== lens) showToast(`lens stayed ${achieved.lens}`);
+      return achieved.lens;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     }
   };
 
   /** The mode's default lens for a door, applied when that door is opened. The concierge can still
    *  change it afterwards — this is a default, never a lock. */
+  /**
+   * ⚑ **Waits for the status, and says so when it never comes.**
+   *
+   * The room-shot effect fires the moment the zone opens. `modeStatus` is an event from the native
+   * side and has usually **not arrived yet** — so the previous version read `status` (the state,
+   * out of its own render's closure), found `null`, and **returned silently**. The room shot then
+   * opened on NORMAL while the ruling of 2026-08-16 says wide, and the field found it before any
+   * test did: *"in a tight room, without viewing through wide angle, it's hard to know if I am
+   * getting the shot I need."*
+   *
+   * ⛑ Two defects, one line. It read the **state** where the traverse path twenty lines above
+   * correctly reads `statusRef.current` — the third instance of that class in this file today. And
+   * it treated *not ready yet* as *nothing to do*, which is the silent-no-op shape this repo keeps
+   * paying for. It now waits, and if the status never comes it **reports** rather than shrugging.
+   */
   const applyIntentLens = async (intent: LensIntent) => {
-    if (!status?.lensAvailable) return;
-    const policy = lensPolicyFor(status.mode, intent);
-    if (policy.locked || status.lens === policy.default) return;
-    await chooseLens(policy.default);
+    const deadline = Date.now() + 2500;
+    while (!statusRef.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const live = statusRef.current;
+    if (!live) {
+      setZoneNote("camera never reported its state — lens left as found");
+      return;
+    }
+    if (!live.lensAvailable) return;
+    const policy = lensPolicyFor(live.mode, intent);
+    if (policy.locked || live.lens === policy.default) return;
+    const achieved = await chooseLens(policy.default);
+    /* Painted from the return, never from the ask. A control that claims a field of view the
+       photograph does not have is the failure this whole contract exists to prevent. */
+    if (achieved && achieved !== policy.default) {
+      setZoneNote(`lens stayed ${achieved} — wanted ${policy.default}`);
+    }
   };
 
   const diagnosis = traverseResult ? traverseDiagnosis(traverseResult) : null;
@@ -1268,6 +1674,16 @@ export function CameraScreen({
         to scale with the lengths on it, the concierge checks it against the room they are standing
         in, which is the only moment a wrong answer is cheap to fix.
       */}
+      {/* ⛑ **The black screen, named.** While ARKit holds the lens the capture session is stopped
+          and there is nothing to draw — 1 s on a fresh session, up to 5 s relocalising. Unlabelled,
+          that is indistinguishable from a crash, and the field read it as one twice. */}
+      {measuring && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70">
+          <p className="rounded-lg bg-slate-900/90 px-4 py-3 text-sm text-slate-200 ring-1 ring-slate-600">
+            measuring position — the preview is off while the sensor has the lens
+          </p>
+        </div>
+      )}
       {zoneId && plan && (scanning || !traversing) && (
         <div className="pointer-events-none absolute right-3 top-14 w-40">
           <div className="pointer-events-auto rounded-lg bg-slate-950/85 p-1 ring-1 ring-slate-700">
@@ -1908,6 +2324,99 @@ export function CameraScreen({
                 )}
               </button>
             ))}
+          </div>
+        )}
+
+        {/*
+          ⚑ **The traverse, promoted from instrument to control** (owner ruling 2026-08-29).
+
+          It has lived inside the collapsed instruments panel, in monospace, *"nothing a concierge
+          would ever find"* — deliberately, because the capture kind was held back while the run
+          trace's costing was open: **a surface built then would have hardened around a kind whose
+          job might double.** ⛑ *That costing closed today.* The run-trace video is retired and the
+          traverse takes its job, so the reason to hide it is gone and the field found the hole the
+          same hour: **"there's nothing there that is for the traverse."**
+
+          ⚑ **`Next leg` is the load-bearing button, not `Stop`.** A run that doubles back must be
+          walked as separate legs or the desk gets a straight line through a route that is not
+          straight — and that is exactly the wrong answer the traverse exists to prevent. Burying
+          the chaining behind *stop, leave, re-enter, start* would leave it unused, which is how
+          this control got hidden in the first place.
+
+          The voice button is here because **a trace is where narration is actually spoken** — the
+          concierge is walking a pipe describing what it does — and sending them back to the zone
+          screen to say it means it does not get said.
+        */}
+        {(startAction === "traverse" || traversing || traverseResult) && (
+          <div className="mb-2 flex items-center gap-2 rounded-xl bg-slate-950/85 p-2 ring-1 ring-slate-700">
+            {/*
+              ⛑ **Keeping N of M, where the concierge is looking** (2026-08-30).
+
+              Four legs were walked across two nights that kept **nothing** — `kept: 0` every time —
+              and the app said so only in a log file pulled off the device over a cable afterwards.
+              *The count existed the whole time*: `onTraverse` has always carried `frames` and
+              `discarded`, and the screen showed `frames` alone, inside the collapsed instruments
+              panel. **A leg that is throwing everything away is visible in two seconds or it is
+              visible in a post-mortem**, and this project has now done the post-mortem four times.
+
+              ⚑ Amber only when frames are being taken and none are being kept — *a verdict before
+              the prose*. Nothing to say on a leg that is going fine.
+            */}
+            <span
+              className={`shrink-0 px-1 text-xs ${
+                traversing && traverseProgress && traverseProgress.frames === 0 && (traverseProgress.discarded ?? 0) > 0
+                  ? "text-amber-400"
+                  : "text-slate-400"
+              }`}
+            >
+              {measuring
+                ? "measuring…"
+                : traversing && traverseProgress
+                  ? `leg ${legNumber} · keeping ${traverseProgress.frames}/${traverseProgress.frames + (traverseProgress.discarded ?? 0)}`
+                  : traversing
+                    ? `leg ${legNumber}`
+                    : legNumber > 0
+                      ? `${legNumber} done`
+                      : "trace"}
+            </span>
+            <button
+              type="button"
+              onClick={() => void (traversing ? endTraverse() : beginTraverse())}
+              className={`h-12 flex-1 rounded-lg text-sm font-medium ring-1 ${
+                traversing
+                  ? "bg-brass-500 text-slate-950 ring-brass-400"
+                  : "bg-slate-900 text-slate-200 ring-slate-600"
+              }`}
+            >
+              {traversing ? "stop trace" : "start trace"}
+            </button>
+            {traversing && (
+              <button
+                type="button"
+                onClick={() =>
+                  void endTraverse(false).then((r) =>
+                    r ? beginTraverse(r.startedAt, lastEnd.current ?? undefined) : undefined,
+                  )
+                }
+                className="h-12 flex-1 rounded-lg bg-slate-900 text-sm font-medium text-slate-200 ring-1 ring-slate-600"
+              >
+                next leg ↩
+              </button>
+            )}
+            <button
+              type="button"
+              aria-label={recorder.state === "recording" ? "Stop the voice note" : "Voice note"}
+              onClick={() => void toggleVoice()}
+              className={`h-12 w-16 rounded-lg text-lg ring-1 ${
+                recorder.state === "recording"
+                  ? "bg-red-500 text-white ring-red-400"
+                  : "bg-slate-900 text-slate-200 ring-slate-600"
+              }`}
+            >
+              {recorder.state === "recording"
+                ? `${Math.round(recorder.elapsedMs / 1000)}s${voiceGapMs !== null ? ` ·${voiceGapMs}ms` : ""}`
+                : "🎙"}
+            </button>
           </div>
         )}
 

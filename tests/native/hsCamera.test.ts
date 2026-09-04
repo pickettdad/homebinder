@@ -16,12 +16,16 @@ import {
   glareSuspected,
   lensPolicyFor,
   shouldOfferRetake,
+  captureWantsRetake,
+  positionForSibling,
+  projectionFor,
   storedFrameLabel,
   traverseDiagnosis,
   traverseVerdict,
   type TraverseFrame,
   type TraversePair,
 } from "../../src/native/hsCamera";
+import type { CameraLens } from "../../src/native/hsCamera";
 
 const running = (mode: (typeof CAMERA_MODES)[number], unmet: string[] = []) => ({
   mode,
@@ -72,6 +76,45 @@ describe("the retake trigger", () => {
 
   it("stays silent on a confident read", () => {
     expect(shouldOfferRetake({ characterCount: 14, marginal: false })).toBe(false);
+  });
+
+  /**
+   * ⚑ The rule asked of a photograph rather than of the live loop — the form that has a reader.
+   * It reads the PRIMARY frame, because that is the one that counts and the only one any count
+   * sees; a bracket exposure reading badly is what a bracket is for.
+   */
+  describe("asked of a capture", () => {
+    const frame = (ocr?: { characterCount: number; marginal: boolean }) => ({
+      path: "/tmp/f.jpg",
+      bytes: 1,
+      index: 0,
+      exifOrientation: 1,
+      torch: false,
+      ocr: ocr
+        ? { lines: [], text: "x", meanConfidence: 0.4, engine: "e", osVersion: "26", ...ocr }
+        : undefined,
+    });
+
+    it("says nothing about a capture that read nothing, which is most captures", () => {
+      expect(captureWantsRetake({ frames: [frame()] })).toBe(false);
+    });
+
+    it("offers a retake when the primary frame held characters and read them badly", () => {
+      expect(captureWantsRetake({ frames: [frame({ characterCount: 22, marginal: true })] })).toBe(true);
+    });
+
+    it("judges the primary, not whichever frame happens to have read worst", () => {
+      // A bracket exposure reading badly is the bracket working. The primary is the photograph.
+      expect(
+        captureWantsRetake({
+          frames: [frame({ characterCount: 22, marginal: false }), frame({ characterCount: 4, marginal: true })],
+        }),
+      ).toBe(false);
+    });
+
+    it("does not fire on a capture with no frames at all", () => {
+      expect(captureWantsRetake({ frames: [] })).toBe(false);
+    });
   });
 });
 
@@ -299,9 +342,30 @@ describe("which lens a door opens on", () => {
     }
   });
 
-  it("defaults wide for the doors whose job is fitting the whole of something in", () => {
+  it("defaults wide for the one door whose job is fitting the whole of something in", () => {
+    // A room shot is ONE framed photograph and needs no registration at all, so the widest view
+    // that fits the room is simply the better photograph.
     expect(lensPolicyFor("object", "room-shot").default).toBe("wide");
-    expect(lensPolicyFor("object", "traverse").default).toBe("wide");
+  });
+
+  /**
+   * ⛑ **A capture that REGISTERS must keep the detail it registers on** (field 2026-08-30).
+   *
+   * The traverse was ruled wide alongside the room shot on 2026-08-16, on the reasoning that both
+   * are *"get the whole of it in"*. ⚑ **That half was never in force** — `applyIntentLens` read
+   * React state instead of its ref and returned before the camera had reported, so every successful
+   * traverse this project has run was shot on normal. Fixing that bug applied the default for the
+   * first time and the traverse collapsed: **texture 1.1–1.99 across 31 frames in three lit rooms,
+   * every one discarded**, against 6.2–18.1 on the walks that worked.
+   *
+   * *A 120° frame spreads the same wall over a fifth of the pixels*, and the traverse registers by
+   * detail — so wide does not reduce quality, it removes the signal the mechanism runs on. The
+   * invariant is that one, not the value: **framing wants width, registration wants detail.**
+   */
+  it("does not default a registering capture to the lens that removes its signal", () => {
+    expect(lensPolicyFor("object", "traverse").default).not.toBe("wide");
+    // Still the concierge's to change — this is a default, never a lock.
+    expect(lensPolicyFor("object", "traverse").locked).toBe(false);
   });
 
   it("leaves the choice open wherever it is the concierge's to make", () => {
@@ -434,5 +498,88 @@ describe("framesTurnedFromStamp", () => {
   it("takes its baseline from the first frame that has one, not from a constant", () => {
     // A leg begun in landscape must not report every one of its own frames as turned.
     expect(framesTurnedFromStamp({ frames: [frame(0, 0), frame(1, 0), frame(2, 0)] })).toEqual([]);
+  });
+});
+
+/**
+ * ⚑ **The wide frame of a sibling pair refuses a position; it does not quietly lack one.**
+ *
+ * This is the doctrine's own test case. The ultra-wide is not offered to world tracking on this
+ * iPad (`HSLensProbe`, 2026-08-24) — a hardware fact **no reader can derive from an absence** — and
+ * a room shot files to the zone, where an absent position already means *nobody knows*. Without the
+ * refusal the record would say *nobody knows* about the one frame whose reason is known exactly.
+ *
+ * ⛑ And only that frame gets it: stamping a refusal on every bracket exposure would make
+ * `positioned: false` the majority case and drown the refusals worth reading.
+ */
+describe("the sibling pair's record", () => {
+  const frame = (lens: CameraLens) => ({
+    path: `/tmp/${lens}.jpg`,
+    bytes: 1,
+    index: 0,
+    exifOrientation: 1,
+    torch: false,
+    lens,
+  });
+
+  it("refuses on the wide frame, with a reason a person can act on", () => {
+    const refusal = positionForSibling(frame("wide"), true);
+    expect(refusal?.positioned).toBe(false);
+    // The reason must name the hardware fact, not merely restate the absence.
+    expect(refusal && "why" in refusal ? refusal.why : "").toMatch(/world tracking/);
+  });
+
+  it("stays silent on an ordinary sibling, so refusals keep meaning something", () => {
+    expect(positionForSibling(frame("normal"), true)).toBeUndefined();
+  });
+
+  it("stays silent when no pair was taken, whatever a frame calls its lens", () => {
+    // A capture the concierge shot on wide by hand is not a sibling pair, and its frames are
+    // ordinary captures that inherit the usual way.
+    expect(positionForSibling(frame("wide"), false)).toBeUndefined();
+  });
+});
+
+/**
+ * ⚑ **A pose and a camera model are two facts in one object** (owner ruling 2026-08-28).
+ *
+ * `x/y/z` is where the concierge stood and survives any lens. `transform` additionally describes
+ * ARKit's own 1× camera — the ultra-wide is not offered to world tracking — so a 120° image cannot
+ * be projected through it. ⛑ The invariant under test is **not** which lens is which: it is that
+ * *every positioned frame answers the question*, and that a frame which cannot be projected
+ * **names the frame that can, or says plainly that there is none.**
+ */
+describe("whether a pose describes the image it is stamped on", () => {
+  const f = (lens?: CameraLens) => ({ path: "/tmp/x.jpg", bytes: 1, index: 0, exifOrientation: 1, torch: false, lens });
+  const at = "2026-08-28T22:53:00Z";
+
+  it("says yes for an ordinary capture, on the lens ARKit models", () => {
+    expect(projectionFor({ frames: [f("normal")], at })).toEqual({ projectable: true });
+  });
+
+  it("says no for a wide primary, and names the sibling the matrix does describe", () => {
+    const p = projectionFor({ frames: [f("wide"), f("normal")], at });
+    expect(p.projectable).toBe(false);
+    // The pointer is captureId + lens — both already on every frame, so no join has to be invented.
+    expect(p.projectable === false && p.projectableFrame).toEqual({ captureId: at, lens: "normal" });
+  });
+
+  it("says no AND null when the pair was refused, because there is nothing to point at", () => {
+    // ⛑ A wide room shot whose sibling was refused has a real pose and no projectable frame at
+    // all. That is a different sentence from "look next door" and must not read as the same one.
+    const p = projectionFor({ frames: [f("wide")], at });
+    expect(p.projectable === false && p.projectableFrame).toBeNull();
+  });
+
+  it("gives a reason naming the lens, not a symptom", () => {
+    const p = projectionFor({ frames: [f("wide"), f("normal")], at });
+    expect(p.projectable === false && p.why).toMatch(/wide/);
+    expect(p.projectable === false && p.why).toMatch(/transform/);
+  });
+
+  it("treats a capture written before the field existed as projectable, not unknown", () => {
+    // Every such capture was taken on the lens ARKit models, so yes is the honest answer and
+    // `unknown` would be a fabricated doubt about frames nobody can re-examine.
+    expect(projectionFor({ frames: [f(undefined)], at })).toEqual({ projectable: true });
   });
 });

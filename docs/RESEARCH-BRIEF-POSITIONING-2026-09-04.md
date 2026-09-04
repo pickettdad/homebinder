@@ -39,6 +39,12 @@ limitation.* **Do not spend effort on house-scale registration.**
 **Accuracy target: "marker-accurate."** *"2.3 m from the panel"* must be defensible. *"2,438 mm"*
 must not. **Metres of error are useless; 10–20 cm is fine.**
 
+⚑ **And it must hold for the whole session. A pose at minute 150 must be as usable as a pose at
+minute 2.** *An approach whose accuracy is a function of elapsed time has not solved this*, however
+good its first ten minutes are. **This is the requirement, not an aspiration**: downstream, a
+machine places every capture on its room's plan with **no human in the loop**, so there is nothing
+downstream that can absorb a bad pose.
+
 ### What the receiving process actually does with it
 
 *Quoted from the desk process specification, so you can see what the number is for.*
@@ -50,15 +56,18 @@ must not. **Metres of error are useless; 10–20 cm is fine.**
 - ⚑ **Two named gates on using the mesh for position:** *"The mesh has to carry its geometry rather
   than a count of it"* — **now met** — *"and the mesh, the plan and the poses have to be in a
   declared common frame."* **That second gate is the open one and it is per-room.**
-- ⛑ **The desk already models degradation:** *"Tracking accumulates error over a long session. A pose
-  taken late in a zone is not as good as one taken early, and nothing else reports this."* We now
-  report it. **But a confidence signal cannot rescue three metres** — it can only mark it unusable.
-- **Correction is a first-class desk act**, not a failure path: *"Correction is proposed, not
-  authored"* — the desk proposes from the photographs, a person accepts. ⚑ **So an approach that
-  produces provisional positions refined afterwards is architecturally acceptable**, provided the
-  refinement is real and not a guess.
-- **A room with no plan still ships** — it *"carries forward unplaced"*. Nothing here is
-  all-or-nothing.
+- ⚑ **The machine places. A person confirms what the service *says*, never where things *are*.**
+  Placement runs in a machine stage **before** any human sees it, and the confirmation stage exists
+  for the desk's proposals *about the house* — a missed window, a proposed identity — **not to
+  repair the app's measurements.** *If every position needs confirming, the machine cannot place
+  anything and the stage collapses.*
+- ⛑ **A pose must therefore be right at capture. Not provisional, not refined later, not
+  reconciled.** Desk-side correction of *positions* is not a fallback that exists — treating it as
+  one would move work onto the desk, which is the opposite of the goal.
+- ⛑ **And the degradation signal in that specification is a SYMPTOM, not a permission.** *"A pose
+  taken late in a zone is not as good as one taken early"* is documented **because our positioning
+  fails**, and the specification itself was written against the very export this brief exists to
+  replace. ⚑ **A successful answer makes that sentence unnecessary.** Do not design to it.
 
 ### The hard part
 
@@ -187,9 +196,11 @@ answer is a fourth thing, say so.**
 3. **Can `ARWorldMap` serialisation help?** We save one and have never loaded it. Does
    `initialWorldMap` + a genuine relocalisation give a resumed session a real map to correct
    against, or is relocalisation into a sparse map unreliable enough not to bother?
-4. ⛑ **Is there a way to make poses correctable after the fact rather than right at capture?**
-   (`ARAnchor` transforms update on loop closure — but our session is asleep 98% of the time, so
-   nothing ever closes a loop. Would a continuously-mapping session make anchors worth it?)
+4. **Would a continuously-mapping session make `ARAnchor` worth it?** Anchor transforms update on
+   loop closure — but ours is asleep 98% of the time so nothing ever closes a loop. ⛑ *Note this is
+   asked as a way to be right **by** capture-time-plus-the-session, not as a way to defer the
+   problem:* the export is produced at the end of the visit, so a correction that lands before the
+   export is fine. **A correction that requires a person is not.**
 5. **Is per-room the right unit?** We reset tracking per room today. Would one continuous session
    across a whole house be better (more map, more loop closure) or worse (more drift, more thermal)?
 6. **What should we be measuring that we are not?** We now record world-mapping status, feature
@@ -248,6 +259,13 @@ day, and its shape — 17 discrete steps, error tracking travel rather than time
 **We can get a pose per photograph today, cheaply, and it is accurate standing still and useless
 after half an hour of walking — because the tracking system is only awake 2% of the time and never
 builds a map. Waking it more costs battery, thermal and 5 seconds a shot. We need per-photograph
-position good to ~15 cm across a 2–3 hour session on an iPad Pro with LiDAR, alongside a RoomPlan
-floorplan and a scene mesh, without degrading 12 MP photographs. Tell us how — including if the
-answer is that our architecture is wrong.**
+position good to ~15 cm, holding for a 2–3 hour session, on an iPad Pro with LiDAR, alongside a
+RoomPlan floorplan and a scene mesh, without degrading 12 MP photographs — and it has to be right
+when it is written, because a machine places every capture with no human in the loop. Tell us how —
+including if the answer is that our architecture is wrong.**
+
+⛑ **One framing that matters.** Everything downstream of this is automated up to a single human
+confirmation, and that confirmation is for what the service *concludes about a house*, not for
+repairing measurements. **Every metre of error here becomes minutes of human work per room, in a
+process whose whole point is not to need them.** *Aim at not needing the desk to think about
+position at all.*

@@ -161,9 +161,8 @@ feature points, is granted `.normal` optimistically, and is put back to sleep. W
   With ARKit holding the lens, `configurableCaptureDeviceForPrimaryCamera` allows near-focus
   restriction, focus point, spot metering, continuous auto-exposure and torch — **all six take and
   still hold 2.5 s later**, and the torch reaches full state in **6 ms**.
-- ⛑ **What we have NOT tested** is whether `captureHighResolutionFrame(using:)` — taking the
-  photograph from ARKit's own session — produces a photograph of acceptable quality *and* honours
-  those device settings. **This is the obvious alternative architecture and it is unmeasured.**
+- **Untested:** whether a still taken from ARKit's own session is of acceptable quality, and whether
+  it honours those device settings. *Stated as a gap in our knowledge, not as a recommendation.*
 - **RoomPlan runs on the same ARKit session** we already own, so floorplan and mesh already share
   the tracking frame. Only the photographs are outside it.
 - **A format change on a running ARKit session costs ~700 ms to the new resolution and ~1.5 s to
@@ -181,34 +180,45 @@ feature points, is granted `.normal` optimistically, and is put back to sleep. W
 
 ---
 
-## 7 · The questions we want answered
+## 7 · The question
 
-**Ordered by what would change the build. We are not asking you to pick from a menu — if the right
-answer is a fourth thing, say so.**
+**One question. We are deliberately not offering a menu of directions, because the shortlist we
+would write is the shortlist of things we already thought of.**
 
-1. ⚑ **Is there an architecture that gives a per-photograph pose accurate to ~10–20 cm across 2–3
-   hours, on this hardware, without the photographs degrading?** State what it costs in battery,
-   thermal, and concierge time.
-2. **If ARKit must hold the camera continuously to stay mapped — what is the real thermal and power
-   envelope on an A12Z/M1-class iPad over 2–3 hours, and what mitigations exist?** (Lower frame
-   rate? Lower video format? Dropping scene reconstruction between rooms? Thermal-state-driven
-   degradation?)
-3. **Can `ARWorldMap` serialisation help?** We save one and have never loaded it. Does
-   `initialWorldMap` + a genuine relocalisation give a resumed session a real map to correct
-   against, or is relocalisation into a sparse map unreliable enough not to bother?
-4. **Would a continuously-mapping session make `ARAnchor` worth it?** Anchor transforms update on
-   loop closure — but ours is asleep 98% of the time so nothing ever closes a loop. ⛑ *Note this is
-   asked as a way to be right **by** capture-time-plus-the-session, not as a way to defer the
-   problem:* the export is produced at the end of the visit, so a correction that lands before the
-   export is fine. **A correction that requires a person is not.**
-5. **Is per-room the right unit?** We reset tracking per room today. Would one continuous session
-   across a whole house be better (more map, more loop closure) or worse (more drift, more thermal)?
-6. **What should we be measuring that we are not?** We now record world-mapping status, feature
-   count, re-initialisation count, time-since-init, and pose jump across sleep. *What else would a
-   person debugging this want?*
-7. **Is there a non-ARKit or hybrid answer worth considering?** LiDAR depth directly, visual-inertial
-   odometry we run ourselves, fiducial markers placed by the concierge, photogrammetry from the
-   photographs at the desk, or something we have not thought of.
+> ⚑ **Design an architecture that delivers, on the hardware in §3: a floorplan and a scene mesh per
+> room, and for every one of ~400 photographs per room a device pose and a ray-cast surface point,
+> accurate to ~15 cm, with accuracy that does not degrade across a 2–3 hour session — while the
+> photographs remain 12 MP stills of full quality, and with no human repairing any of it afterwards.**
+
+### What a sufficient answer contains
+
+**An answer that does not do all six of these is not yet an answer, and we would rather have one
+that does than three that do not.**
+
+1. **A named mechanism**, not a list of techniques. *Why* does your approach hold accuracy at
+   minute 150 when ours does not hold it at minute 40?
+2. ⛑ **An explanation of why your proposal is not one of the six in §5.** Each of those was
+   believed by someone competent, built or measured, and killed. **If yours resembles one, say how
+   it differs and why that difference matters.**
+3. **Its cost, in numbers you are willing to defend** — battery over three hours, thermal state
+   over three hours, seconds added per photograph, seconds added per room. ⚑ *"Should be fine" is
+   not a cost.* If you do not know, say you do not know and say what would tell you.
+4. ⚑ **Your proposal's own failure mode.** What does it do badly? Under what conditions does it
+   break? **Every architecture we have built failed in a way its author did not anticipate, and the
+   ones that did not name a failure mode failed hardest.**
+5. **A falsifying measurement.** One number, obtainable in under an hour on the device, that would
+   tell us your approach is wrong before we build it.
+6. **What we should be recording that we are not.** We currently record world-mapping status, tracked
+   feature count, re-initialisation count, time since initialisation, and pose displacement across
+   sleep.
+
+### Where we will not help you
+
+**We are not going to tell you which Apple frameworks we think are relevant, whether the answer is
+inside ARKit or outside it, or which of our constraints we secretly believe is soft.** ⛑ *Every time
+we have narrowed this problem for someone, including for ourselves, we narrowed it toward the answer
+we already had — and it was wrong three times running.* The measurements in §3–§5 are complete and
+honest; the conclusions are yours to draw.
 
 ---
 
@@ -226,7 +236,12 @@ answer is a fourth thing, say so.**
 - **Do not optimise for one room.** The failure appears at 20–40 minutes and the target is 2–3 hours.
   ⚑ *An approach that is excellent for five minutes and unmeasured at two hours is the thing we
   already have.*
-- **We are not committed to ARKit.** It is what we built on, not a requirement.
+- **We are not committed to ARKit, to Apple's frameworks, or to any part of the current design.** It
+  is what we built, not a requirement. ⚑ *If the correct answer is that the architecture is wrong,
+  that is the most useful answer you can give us and we will not argue with it.*
+- ⛑ **Do not give us a survey.** A ranked list of six approaches with two paragraphs each is worth
+  less to us than one approach argued properly against §7's six demands. **We can generate the
+  survey ourselves; that is the problem.**
 
 ---
 

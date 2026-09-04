@@ -32,8 +32,33 @@ For each **room** (a bounded capture unit; the app calls it a *zone*):
 
 **All three must be in one coordinate frame per room**, or carry a declared transform between them.
 
+⚑ **They do NOT need to share a frame across rooms.** The desk arranges rooms from walk order, door
+counts and room shapes — not from coordinates. *Each room having its own origin is the design, not a
+limitation.* **Do not spend effort on house-scale registration.**
+
 **Accuracy target: "marker-accurate."** *"2.3 m from the panel"* must be defensible. *"2,438 mm"*
 must not. **Metres of error are useless; 10–20 cm is fine.**
+
+### What the receiving process actually does with it
+
+*Quoted from the desk process specification, so you can see what the number is for.*
+
+- *"Position and the raycast surface put every capture on its plan."*
+- *"Once the container says which, the mesh is the better source of where. A raycast gives a point on
+  a surface; a mesh gives the surface … it is the only instrument that gives clearance between two
+  things rather than the location of each."*
+- ⚑ **Two named gates on using the mesh for position:** *"The mesh has to carry its geometry rather
+  than a count of it"* — **now met** — *"and the mesh, the plan and the poses have to be in a
+  declared common frame."* **That second gate is the open one and it is per-room.**
+- ⛑ **The desk already models degradation:** *"Tracking accumulates error over a long session. A pose
+  taken late in a zone is not as good as one taken early, and nothing else reports this."* We now
+  report it. **But a confidence signal cannot rescue three metres** — it can only mark it unusable.
+- **Correction is a first-class desk act**, not a failure path: *"Correction is proposed, not
+  authored"* — the desk proposes from the photographs, a person accepts. ⚑ **So an approach that
+  produces provisional positions refined afterwards is architecturally acceptable**, provided the
+  refinement is real and not a guess.
+- **A room with no plan still ships** — it *"carries forward unplaced"*. Nothing here is
+  all-or-nothing.
 
 ### The hard part
 
@@ -136,6 +161,14 @@ feature points, is granted `.normal` optimistically, and is put back to sleep. W
   `.normal`, and does not scale with resolution** (1452 ms for 720p, 1452 ms for 4K).
 - **Thermal and battery are real limits**, but we do not yet know the ceiling: 17% for 45 minutes was
   measured with ARKit awake ~2% of the time. **Continuous ARKit for 2–3 hours is unmeasured.**
+- **The iPad runs continuously for the whole visit** — it is not pocketed or backgrounded between
+  rooms. **An external battery pack is available if it helps**; note that charging adds heat, so it
+  answers battery and not thermal.
+- ⚑ **One lever we hold and have not used: the viewfinder does not have to be drawn.** The camera
+  preview and the screen are a real share of GPU and power, and **they are separable from tracking**
+  — ARKit needs camera frames, not a rendered preview. *A dark or minimal screen between deliberate
+  captures, with tracking still running, is available to any proposal that wants it.* We have not
+  measured what it saves.
 
 ---
 
@@ -174,15 +207,41 @@ answer is a fourth thing, say so.**
   photograph is not acceptable — a room is 400 photographs.
 - **Do not assume we can change the photographs.** 12 MP stills are the product. If an approach
   costs photograph quality, say so explicitly and let us judge it.
-- **Do not assume the concierge will do bookkeeping.** They are working. A deliberate act is
-  affordable **once or twice a room** — walking a boundary, standing still for a moment, touching a
-  known point. Forty times a room is not.
+- ⚑ **On what the concierge can be asked to do — do not guess the budget, propose one.** The owner's
+  position: *open to reasonable asks that will achieve the goal.* **Propose the act and its cost in
+  seconds and attention, and it will be judged on whether it works** — a perimeter walk, a still
+  moment, a touched reference point, a deliberate re-anchor between rooms. What is not affordable is
+  a per-photograph ritual: **a room is 400 photographs.**
 - **Do not optimise for one room.** The failure appears at 20–40 minutes and the target is 2–3 hours.
   ⚑ *An approach that is excellent for five minutes and unmeasured at two hours is the thing we
   already have.*
 - **We are not committed to ARKit.** It is what we built on, not a requirement.
 
 ---
+
+## 8b · Appendix: the controlled test, verbatim
+
+*Ten poses, one fixed mark, 5.8 minutes, iPad stationary and rested. This is the whole of the
+decisive run — nothing selected, nothing omitted.*
+
+    min      y       dy     mapping        featurePoints  resumeJumpM  sleepSec  sinceInit
+    0.00   +0.013  +0.000   notAvailable        0           0.00024      116.4      1.41
+    0.59   +0.016  +0.002   limited             7           0.00758       35.2      ~1.4
+    1.06   +0.013  -0.002   limited             2           0.00247       28.4      ~1.4
+    1.39   +0.016  +0.002   limited             4           0.00547       19.8      ~1.4
+    1.73   +0.014  -0.002   limited             9           0.00160       20.6      ~1.4
+    2.21   +0.017  +0.003   limited             2           0.01213       28.5      ~1.4
+    2.54   +0.014  -0.002   limited             4           0.00239       19.8      ~1.4
+    2.99   +0.013  -0.001   limited             5           0.00304       27.2      ~1.4
+    3.48   +0.012  -0.002   limited             4           0.00190       29.5      ~1.4
+    5.80   +0.016  +0.004   limited             5           0.00218       26.1      ~1.4
+
+⚑ **Read the `mapping` and `featurePoints` columns together.** Never past `limited`; never more than
+nine tracked points; and `trackingState` reported `normal` on all ten, including the row with zero.
+
+*The 42-minute walk's 77-pose table is deliberately not reproduced.* It describes one room on one
+day, and its shape — 17 discrete steps, error tracking travel rather than time — is stated in §4.
+**We would rather you reason from the mechanism than fit a curve to that room.**
 
 ## 9 · Summary in five lines
 

@@ -91,6 +91,11 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        if CommandLine.arguments.contains("--hs-gate1"), #available(iOS 16.0, *) {
+            let g = HSGateOne()
+            gateOne = g
+            g.run { _ in self.gateOne = nil }
+        }
         if CommandLine.arguments.contains("--hs-gate0"), #available(iOS 16.0, *) {
             let g = HSGateZero()
             gateZero = g
@@ -313,6 +318,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var lensProbe: AnyObject?
     private var controlProbe: AnyObject?
     private var gateZero: AnyObject?
+    private var gateOne: AnyObject?
 
     /// The zone session — see `HSZoneSession`. One per zone, three bounded modes, one origin.
     private var zoneStore: AnyObject?

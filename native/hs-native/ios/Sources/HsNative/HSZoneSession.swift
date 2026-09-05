@@ -123,6 +123,20 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private var lastPreviewAt = Date.distantPast
     private var lastPlanAt = Date.distantPast
     var hideArPreview: (() -> Void)?
+    /**
+     ⚑ **ARKit's frames, handed to the one analysis pipeline the app has.**
+
+     Live text recognition and the motion window were fed by the `AVCaptureSession`. ⛑ **The moment
+     this session began holding the camera for the life of a zone, that made nameplate auto-capture
+     dead inside every room** — no text, no stability signal, no shutter — and the field found it
+     the same evening.
+
+     *A second source of frames, never a second implementation.* The thresholds, the character
+     floor, the marginal verdict and the emitted payload stay in one place, because **two
+     implementations of "is this plate readable" is a defect this project has already paid for
+     twice.**
+     */
+    var onAnalysisFrame: ((CVPixelBuffer) -> Void)?
 
     /// ⚑ A session can DIE. `sensorFailed` is transient often enough that a retry is a real answer,
     /// so this is recorded, reported, and cleared by rebuilding rather than by restarting the app.
@@ -1051,6 +1065,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     // MARK: - ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        /* ⚑ Every frame, because the pipeline does its own cadence gate — it counts frames and
+           analyses every Nth, and it must do that counting once rather than once per source. */
+        onAnalysisFrame?(frame.capturedImage)
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
         guard onPreviewFrame != nil, mode == .mesh || mode == .roomplan else { return }

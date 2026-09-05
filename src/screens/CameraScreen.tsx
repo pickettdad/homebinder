@@ -45,6 +45,7 @@ import {
   cameraAvailable,
   captureFrames,
   captureStill,
+  retryZoneSession,
   captureWantsRetake,
   positionForSibling,
   projectionFor,
@@ -61,7 +62,6 @@ import {
   framesTurnedFromStamp,
   takePosition,
   openZone,
-  closeZone,
   onZone,
   pauseZone,
   resumeZone,
@@ -673,19 +673,31 @@ export function CameraScreen({
     if (!zoneId) return;
     setZoneFailure(null);
     setZoneNote("restarting positioning…");
-    await closeZone().catch(() => {});
-    try {
-      const out = await openZone(zoneId);
+    /*
+      ⛑ **Re-run in place. This used to close and reopen the zone, and that was data loss.**
+
+      `openZone` mints a fresh ARKit origin, so every pose already taken in the room would be
+      silently re-based against a different one — *the record keeps them, they look fine, and they
+      are measured from somewhere else.* **A recovery that corrupts what it recovers is worse than
+      the failure it recovers from.**
+
+      The native side re-runs the existing session without touching the camera, because a
+      `sensorFailed` inside a zone is contention that has usually cleared by the time anyone reacts.
+    */
+    const retried: { ok: boolean; mode?: string; why?: string } = await retryZoneSession().catch(
+      () => ({ ok: false, why: "retry failed" }),
+    );
+    if (retried.ok) {
       setZoneOpen(true);
-      setZoneMode(out.mode);
-      setZonePaused(true);
+      if (retried.mode) setZoneMode(retried.mode as ZoneMode);
+      setZonePaused(false);
       setZoneNote(null);
-    } catch (e) {
-      // ⚑ Clear the "restarting…" line on the way out. It stayed on screen forever when the retry
-      // failed, which reads as *still trying* — the one thing it was not doing.
-      setZoneNote(null);
-      setZoneFailure(e instanceof Error ? e.message : "positioning unavailable");
+      return;
     }
+    // ⚑ Clear the "restarting…" line either way. It stayed on screen forever when the retry failed,
+    // which reads as *still trying* — the one thing it was not doing.
+    setZoneNote(null);
+    setZoneFailure(retried.why ?? "positioning unavailable");
   }, [zoneId]);
 
   const togglePause = useCallback(async () => {

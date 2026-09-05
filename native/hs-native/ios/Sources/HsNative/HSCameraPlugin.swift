@@ -58,6 +58,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "captureStill", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "retryZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "zoneLog", returnType: CAPPluginReturnPromise)
@@ -648,6 +649,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self?.controller?.takeCameraForZone()
             }
             made.releaseCamera = { [weak self] in self?.controller?.giveCameraBackFromZone() }
+            /* ⚑ ARKit's frames go to the SAME analysis the capture session feeds. See
+               `CameraController.analyse` and `HSZoneSession.onAnalysisFrame`: one pipeline, one set
+               of thresholds, two sources. */
+            made.onAnalysisFrame = { [weak self] buffer in self?.controller?.analyse(buffer) }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
             made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
@@ -693,6 +698,15 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
      See `HSZoneSession.captureStill`. Falls back to nothing: a caller that gets `ok: false` should
      use the ordinary shutter and will get no pose, which is the honest outcome.
      */
+    /** ⚑ Re-run the session in place. See `HSZoneSession.retry` — never a close-and-reopen, which
+     *  would mint a new origin and silently invalidate every pose already taken in this zone. */
+    @objc func retryZone(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let z = zone else {
+            call.resolve(["ok": false, "why": "no zone open"]); return
+        }
+        call.resolve(js(z.retry()))
+    }
+
     @objc func captureStill(_ call: CAPPluginCall) {
         guard #available(iOS 17.0, *), let z = zone else {
             call.resolve(["ok": false, "why": "no zone open"]); return
@@ -1920,7 +1934,15 @@ final class CameraController: NSObject {
         var payload: [String: Any] = [
             "mode": mode.rawValue,
             "unmet": unmet,
-            "sessionRunning": sessionRunning,
+            /* ⛑ **The camera can be running without OUR session running, and the field read the
+               difference as a fault.** Inside a zone ARKit holds the lens for the life of the room,
+               so `session.isRunning` is false while the camera is very much on — and a viewfinder
+               that says *stopped* over a live preview is a lie told confidently.
+
+               ⚑ *The question this field answers is "is the camera live", not "is my object
+               running."* Ownership is the other half of the answer and it ships beside it. */
+            "sessionRunning": sessionRunning || zoneOwnsCamera,
+            "cameraHeldByZone": zoneOwnsCamera,
             "torchOn": torchOn,
             "torchOverridden": torchOverride != nil,
             "lightScore": lightScore(),
@@ -1954,9 +1976,17 @@ final class CameraController: NSObject {
             // The glass in use, what this mode defaults to, and whether the concierge may change
             // it. All three, because "wide is off" and "wide is not allowed here" are different
             // sentences and a single boolean would say neither.
-            "lens": lens.rawValue,
-            "lensLocked": goal.lensLocked,
-            "lensAvailable": AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,
+            /* ⛑ **Inside a zone the lens cannot change, and saying otherwise is how a photograph
+               came back "wide" after a room shot.** World tracking is offered only the wide-angle
+               device on this iPad — thirteen formats, zero ultra-wide (`HSLensProbe`, 2026-08-24) —
+               so while the zone holds the camera there is exactly one piece of glass and no choice
+               to report. **A control offering a lens the photograph cannot have is worse than no
+               control.** */
+            "lensLocked": zoneOwnsCamera || goal.lensLocked,
+            "lens": zoneOwnsCamera ? CameraLens.normal.rawValue : lens.rawValue,
+            "lensAvailable": zoneOwnsCamera
+                ? false
+                : AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,
             // ⚑ Whether the per-frame instruments are being measured at all. During a traverse the
             // frame callback belongs to the accumulator, so motion is not sampled — and a stale
             // number sitting there unlabelled is what the 2026-08-16 panels showed.
@@ -4203,6 +4233,24 @@ final class CameraController: NSObject {
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        analyse(pixelBuffer)
+    }
+
+    /**
+     ⚑ **One analysis pipeline, two possible sources of frames.**
+
+     This used to live inside `captureOutput` and be reachable only from the `AVCaptureSession`.
+     ⛑ **The moment ARKit began holding the camera for the life of a zone, that made live text
+     recognition dead inside every room** — the nameplate mode's auto-capture had nothing to read,
+     and the field found it the same evening.
+
+     *The fix is a second caller, not a second implementation.* `HSZoneSession` feeds ARKit's own
+     `capturedImage` here at the same cadence, so the motion window, the stillness threshold, the
+     character floor, the marginal-read verdict and the emitted payload are **one set of numbers**
+     rather than two that drift. **Two implementations of "is this plate readable" is exactly the
+     defect this file has paid for twice.**
+     */
+    func analyse(_ pixelBuffer: CVPixelBuffer) {
         frameCounter += 1
 
         /*

@@ -171,6 +171,9 @@ export interface ModeStatusEvent {
   lensLocked: boolean;
   /** Whether this iPad has an ultra-wide at all. */
   lensAvailable: boolean;
+  /** ⚑ ARKit holds the lens for the life of the zone. `sessionRunning` is true and the capture
+   *  session's own is not — see the native comment: the question is *is the camera live*. */
+  cameraHeldByZone?: boolean;
   /** ⚑ Whether `motion` is being sampled at all. False during a traverse, where the frame callback
    *  belongs to the accumulator — and a stale number sitting there unlabelled is exactly what the
    *  2026-08-16 panels showed for nineteen minutes. */
@@ -652,6 +655,7 @@ interface NativeCamera {
   }): Promise<void>;
   capture(options?: { wideSibling?: boolean }): Promise<CaptureResult>;
   captureStill(options: { text: boolean }): Promise<ZoneStillResult>;
+  retryZone(): Promise<{ ok: boolean; mode?: string; unmet?: string[]; why?: string }>;
   startTraverse(options: { continuesFrom?: string }): Promise<TraverseStarted>;
   stopTraverse(): Promise<TraverseResult>;
   /** The device bench — see `src/dev/deviceBench.ts`. Dev-bench only; it takes the camera to
@@ -843,6 +847,16 @@ export const captureFrames = (options?: { wideSibling?: boolean }) =>
  * pose, *which is the honest outcome rather than a fabricated one.*
  */
 export const captureStill = (options: { text: boolean }) => requireCamera().captureStill(options);
+
+/**
+ * ⚑ **Re-run the zone session in place, keeping its origin.**
+ *
+ * ⛑ The retry used to be a close-and-reopen. **That mints a new world origin, so every pose already
+ * taken in the room is silently re-based against a different one** — the record keeps them, they
+ * look fine, and they are measured from somewhere else. *A recovery that corrupts what it recovers
+ * is worse than the failure.*
+ */
+export const retryZoneSession = () => requireCamera().retryZone();
 
 /**
  * Ask for a mode; get back the mode ACHIEVED and what could not be reached.

@@ -73,6 +73,22 @@ export type ZonePosition =
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */
       featurePoints?: number;
+      /**
+       * ⚑ **The camera model, row-major 3×3 `[fx, 0, cx, 0, fy, cy, 0, 0, 1]`, in pixels of
+       * `imageWidth` × `imageHeight`.**
+       *
+       * The pose gives extrinsics — where the camera was. This gives what it saw with, and
+       * **placing a marker on a photograph needs both.** ⛑ Without it the desk carries a
+       * hand-maintained device-to-sensor table keyed on the EXIF model string, *which goes stale on
+       * every new iPad and produces plausibly-wrong placements rather than errors.*
+       *
+       * ⚑ **Read it with `projection`.** A pose whose `projectable` is false has intrinsics that
+       * describe ARKit's camera and **not the photograph they are stamped on.**
+       */
+      intrinsics?: number[];
+      /** The frame the intrinsics are measured in. Focal length in pixels is meaningless without it. */
+      imageWidth?: number;
+      imageHeight?: number;
     }
   | { positioned: false; why: string; tracking?: string };
 

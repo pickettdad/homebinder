@@ -52,6 +52,44 @@ export function ProgressBar({ value, max }: { value: number; max: number }) {
   );
 }
 
+/**
+ * ⛑ **The confirmation for a destructive act, as a component rather than `window.confirm`.**
+ *
+ * Five destructive confirmations in this app call the browser's blocking `window.confirm`, each with
+ * its own hand-written sentence. That is the wrong pattern to extend to the camera screen for a
+ * reason specific to this build: ⚑ **the viewfinder renders over a TRANSPARENT WKWebView with a
+ * native ARKit preview behind it**, and a synchronous system alert there is untested against the
+ * native preview and the auto-capture loop — which already needs a ref to stop firing behind an
+ * overlay.
+ *
+ * **It names what will be destroyed rather than asking a generic question.** *"Delete this
+ * photograph?"* is answerable without knowing what happens to the other three frames of the
+ * bracket; `detail` is where that goes.
+ */
+export function ConfirmSheet(props: {
+  open: boolean;
+  title: string;
+  detail: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Sheet open={props.open} onClose={props.onCancel} title={props.title}>
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-slate-300">{props.detail}</p>
+        <BigButton variant="danger" onClick={props.onConfirm}>
+          {props.confirmLabel}
+        </BigButton>
+        {/* Cancel is the larger target and the one a mis-tap lands on. */}
+        <BigButton variant="secondary" onClick={props.onCancel}>
+          Keep it
+        </BigButton>
+      </div>
+    </Sheet>
+  );
+}
+
 export function Sheet(props: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   if (!props.open) return null;
   return (

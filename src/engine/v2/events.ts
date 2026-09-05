@@ -119,6 +119,16 @@ export type VisitKind = "discovery" | "inspection" | "monthly";
  *
  * `pan` is kept because ids are never renamed — the word retired, the id did not.
  */
+/**
+ * How a concierge arrived in a zone. ⚑ Three positive answers and one absence, and they are four
+ * different facts — *absent* is "not declared", which is not "outside".
+ */
+export type EnteredFrom =
+  | { kind: "zone"; zoneId: string }
+  /** A space walked through and never captured. ⛑ An escalation item, not a gap in the record. */
+  | { kind: "uncaptured"; label?: string }
+  | { kind: "outside" };
+
 export type CaptureIntent =
   | "room-shot"
   | "pan"
@@ -202,6 +212,33 @@ export type V2SessionEvent =
       attributes: Record<string, boolean>;
       /** Storey grouping for the walk list: "basement" | "main" | "second" | … | "exterior". */
       level?: string;
+      /**
+       * ⚑ **Where the concierge walked in from** — the one adjacency fact geometry cannot recover.
+       *
+       * Every zone mints its own ARKit origin, so *two plans are never in a common frame* and which
+       * rooms touch **cannot be derived from position**. The desk currently proposes it from walk
+       * order, door counts and room shapes — a guess it then asks a person to confirm. **A person
+       * standing in a doorway already knows.**
+       *
+       * ⛑ **Asked as *which room did you come from*, never *which rooms are adjacent*.** The first is
+       * answerable with certainty by someone who just walked through a door; the second asks them to
+       * hold a house in their head. *That is this project's own test — can it be executed correctly
+       * by someone who does not know what they are looking at — applied to a question about rooms.*
+       *
+       * ⚑ **`uncaptured` is not a fallback, it is a finding.** A hall walked through and never
+       * scanned is a room nobody captured, which is an escalation item — *and an edge pointing at
+       * nothing is more useful than no edge*, because the alternative is the concierge choosing the
+       * nearest wrong room or skipping and losing the adjacency entirely.
+       *
+       * ⛑ **This is adjacency, NOT door identity.** It says the kitchen touches the hall; it does
+       * not say which of the kitchen's three doors is the hall one. *It collapses door matching to
+       * within a declared pair — and most pairs share one door, so it resolves in practice — but it
+       * does not resolve it in principle, and nobody should read adjacency shipped as door identity
+       * shipped.*
+       *
+       * Absent means **not declared**, which is different from `outside`.
+       */
+      enteredFrom?: EnteredFrom;
     })
   | (EventBase & { type: "ZoneRenamed"; zoneId: string; label: string })
   | (EventBase & { type: "ZoneRetyped"; zoneId: string; zoneType: string })
@@ -266,6 +303,36 @@ export type V2SessionEvent =
       siblings?: CaptureMediaMeta[];
     })
   | (EventBase & { type: "VoiceNoteAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
+  /**
+   * ⚑ **The app could not do a thing it was asked to do.**
+   *
+   * *§5.1 of the desk process asks an arrival report three questions; the third is what the app
+   * refused and the reason it gave, and nothing in the export answered it.* Floorplan refused, no
+   * RoomPlan on this device, mesh produced nothing, lens swap declined, position unavailable —
+   * every one of them lived in a React state variable, was shown once, and died there.
+   *
+   * ⛑ **A refusal is the app failing. A deletion is a person choosing. They must never land in the
+   * same bucket**, because they route differently: *a refusal becomes a gap and goes to Escalate as
+   * a targeted item for the next visit; a deletion goes to the Decision record as something
+   * somebody decided.* If both arrive as **this isn't here**, the desk cannot tell a hole from a
+   * judgement — so this is its own event, its own array, and its own word.
+   *
+   * `recoverable` is the field that makes a refusal actionable rather than merely recorded: *hold
+   * still and look at something with detail* is a different instruction from *this iPad has no
+   * RoomPlan.*
+   */
+  | (EventBase & {
+      type: "AppRefused";
+      /** The act, not the symptom. `position` covers a pose that could not be taken at all. */
+      act: "floorplan" | "mesh" | "position" | "lens" | "traverse" | "capture" | "zone-session";
+      zoneId?: string;
+      /** The container it happened inside, where there was one. */
+      pinId?: string;
+      /** The reason the app gave, verbatim — never a rewrite of it. */
+      why: string;
+      /** Whether trying again in the room could work. */
+      recoverable: boolean;
+    })
   | (EventBase & { type: "MediaDiscarded"; mediaId: string })
   | (EventBase & { type: "MediaReassigned"; mediaId: string; target: CaptureTarget })
   /** Short context caption on a capture ("panel, before dead-front photo") — travels with it. */

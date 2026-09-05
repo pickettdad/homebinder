@@ -18,6 +18,7 @@ import type {
   FrameRoleMeta,
   Source,
 } from "../schema/events";
+import type { EnteredFrom } from "../v2/events";
 import type { CaptureIntent, PinFlag, PinTypeRef, V2SessionEvent, VisitKind } from "../v2/events";
 import type {
   AnchorState,
@@ -25,6 +26,8 @@ import type {
   LifecycleEntry,
   MediaRef,
   NoteState,
+  RefusalEntry,
+  ZoneLifecycleEntry,
   ResolutionState,
   SessionStateV2,
 } from "../v2/fold";
@@ -182,6 +185,26 @@ export interface ManifestV3<TConfig = unknown> {
     label: string;
     level?: string;
     attributes: Record<string, boolean>;
+    /**
+     * ⚑ **Where the concierge walked in from — declared by a person, because it cannot be derived.**
+     *
+     * Every zone mints its own ARKit origin, so two plans are never in a common frame and *which
+     * rooms touch cannot come from position.* This is the concierge answering **"which room did you
+     * come from?"** while standing in the doorway.
+     *
+     * ⛑ **Adjacency, NOT door identity.** It says the kitchen touches the hall; it does not say
+     * which of the kitchen's doors is the hall one. *It collapses door matching to within a declared
+     * pair — most pairs share one door, so it resolves in practice — but not in principle.*
+     *
+     * ⚑ **`{kind:"uncaptured"}` is a finding, not a fallback**: a space walked through and never
+     * scanned is a room nobody captured. *An edge pointing at nothing is more useful than no edge.*
+     *
+     * **Absent means not declared, and that is not `{kind:"outside"}`.**
+     */
+    enteredFrom?: EnteredFrom;
+    /** ⚑ Every close and reopen in order. The current-state fields below say *is it closed now*;
+     *  this says *how long was it actually open*, which is what weights a placement. */
+    lifecycle: ZoneLifecycleEntry[];
     closedAt?: string;
     closeNote?: string;
     /**
@@ -223,6 +246,16 @@ export interface ManifestV3<TConfig = unknown> {
   chats: { threadId: string; target: { kind: "pin" | "zone"; id: string }; messages: ChatMessage[] }[];
   /** Every recorded checklist attestation (zone/pin/session scope) — the audit substrate. */
   resolutions: ResolutionState[];
+  /**
+   * ⚑ **Everything the app could not do, and why** — the third question §5.1's arrival report asks
+   * and the one nothing answered. Each entry: the act, when, the zone and container where there was
+   * one, the reason **verbatim**, and whether trying again in the room could work.
+   *
+   * ⛑ **Never mixed with deletions.** *A refusal is a gap; a deletion is a judgement*, and they
+   * route to different places — Escalate versus the Decision record. A deleted container appears as
+   * `pins[].retired`, and it is not here.
+   */
+  refusals: RefusalEntry[];
   media: MediaFileEntryV3[];
   totals: {
     zones: number;
@@ -354,6 +387,8 @@ export function buildManifestV3<TConfig = unknown>(args: {
       zoneId: z.zoneId,
       type: z.zoneType,
       label: z.label,
+      enteredFrom: z.enteredFrom,
+      lifecycle: z.lifecycle,
       level: z.level,
       attributes: z.attributes,
       closedAt: z.closedAt,
@@ -385,6 +420,7 @@ export function buildManifestV3<TConfig = unknown>(args: {
     notes: [...state.notes.values()],
     chats: [...state.chats.values()].map((t) => ({ threadId: t.threadId, target: t.target, messages: t.messages })),
     resolutions: [...state.resolutions.values()],
+    refusals: state.refusals,
     media,
     totals: {
       zones: state.zones.length,

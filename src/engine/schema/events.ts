@@ -54,6 +54,17 @@ export interface FrameReadMeta {
   engine: string;
   confidence: number;
   osVersion?: string;
+  /**
+   * ⚑ **Each recognised line, with where it sat on the frame.**
+   *
+   * `text` is every line joined, which is right for a plate and **wrong for a photograph holding
+   * two** — and the two-plate case is exactly the one the one-plate-per-frame rule exists for, so
+   * the desk had no way to pair its own reading region by region against the device's.
+   *
+   * Normalised **top-left origin**, matching the live text boxes: `x`/`y` is the corner, `w`/`h` the
+   * size, all 0…1 of the frame. *One convention for one idea — two is how a reader mirrors a plate.*
+   */
+  regions?: { text: string; confidence: number; x: number; y: number; w: number; h: number }[];
 }
 
 /**
@@ -193,6 +204,22 @@ export type CapturePositionMeta =
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */
       featurePoints?: number;
+      /**
+       * ⚑ **The camera model, row-major 3×3 `[fx, 0, cx, 0, fy, cy, 0, 0, 1]`, in pixels of
+       * `imageWidth` × `imageHeight`.**
+       *
+       * The pose gives extrinsics — where the camera was. This gives what it saw with, and
+       * **placing a marker on a photograph needs both.** ⛑ Without it the desk carries a
+       * hand-maintained device-to-sensor table keyed on the EXIF model string, *which goes stale on
+       * every new iPad and produces plausibly-wrong placements rather than errors.*
+       *
+       * ⚑ **Read it with `projection`.** A pose whose `projectable` is false has intrinsics that
+       * describe ARKit's camera and **not the photograph they are stamped on.**
+       */
+      intrinsics?: number[];
+      /** The frame the intrinsics are measured in. Focal length in pixels is meaningless without it. */
+      imageWidth?: number;
+      imageHeight?: number;
       /** ⚑ Whether `transform` describes the camera that took this image. See `PositionProjection`
        *  — required, so it is answered rather than assumed. */
       projection: PositionProjection;

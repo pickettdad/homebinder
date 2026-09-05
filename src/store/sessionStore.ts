@@ -26,6 +26,7 @@ import type { ChecklistConfig } from "../engine/schema/checklistConfig";
 import type {
   CaptureIntent, CaptureTarget, ItemResolution, ItemScope, PinFlag, PinTypeRef, V2EventPayload, V2SessionEvent,
   VisitKind,
+  EnteredFrom,
 } from "../engine/v2/events";
 import { foldV2, type SessionStateV2 } from "../engine/v2/fold";
 import { auditSnapshot, deriveZoneAudit } from "../engine/v2/checklist";
@@ -142,7 +143,7 @@ interface AppStore {
   // ---- v2 actions (the pin model). All dispatch through the same atomic append path.
   startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string; visitKind: VisitKind }): Promise<void>;
   dispatchV2(payloads: V2EventPayload[], media?: MediaRow[]): Promise<V2SessionEvent[]>;
-  createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string): Promise<string>;
+  createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string, enteredFrom?: EnteredFrom): Promise<string>;
   /** Set a zone's attributes AFTER creation. Capture mode does not ask them (they are
    *  classification), so without this a capture-created zone could never have them set. */
   setZoneAttributes(zoneId: string, attributes: Record<string, boolean>): Promise<void>;
@@ -189,6 +190,14 @@ interface AppStore {
   ): Promise<string>;
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
   discardMediaV2(mediaId: string): Promise<void>;
+  /** ⚑ Record something the app could not do. See `AppRefused` — never used for a deletion. */
+  recordRefusal(refusal: {
+    act: "floorplan" | "mesh" | "position" | "lens" | "traverse" | "capture" | "zone-session";
+    zoneId?: string;
+    pinId?: string;
+    why: string;
+    recoverable: boolean;
+  }): Promise<void>;
   reassignMedia(mediaId: string, target: CaptureTarget): Promise<void>;
   captionMedia(mediaId: string, text: string): Promise<void>;
   addNote(target: CaptureTarget, text: string): Promise<string>;
@@ -238,6 +247,26 @@ function acquireSessionLock(sessionId: string): void {
     }
     return new Promise<void>(() => {}); // hold until tab closes
   });
+}
+
+/**
+ * Every media ref in a session, primaries only — siblings hang off these.
+ *
+ * ⚑ A local walk rather than an export from `foldV2`: the fold's own `findMedia` is a closure over
+ * the state it is building, and lifting it out would give one function two homes. This reads the
+ * finished state, which is the only thing a caller here has.
+ */
+function findMediaRef(session: SessionStateV2, mediaId: string) {
+  const lists = [
+    session.inbox,
+    ...session.zones.flatMap((z) => [z.photos, z.voiceNotes]),
+    ...session.pins.flatMap((p) => [p.photos, p.voiceNotes]),
+  ];
+  for (const list of lists) {
+    const hit = list.find((m) => m.mediaId === mediaId);
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -370,9 +399,9 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "ZoneAttributesSet", zoneId, attributes }]);
   },
 
-  async createZone(zoneType, label, attributes, level) {
+  async createZone(zoneType, label, attributes, level, enteredFrom) {
     const zoneId = uuidv7();
-    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes, level }]);
+    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes, level, enteredFrom }]);
     return zoneId;
   },
 
@@ -537,9 +566,44 @@ export const useApp = create<AppStore>((set, get) => ({
     );
   },
 
+  /**
+   * ⛑ **Deletes the frame AND the frames that came with it.**
+   *
+   * A bracketed plate is four rows in the media table and one ref in the log. Discarding used to
+   * delete **one** row: the fold correctly dropped the whole ref including its siblings, so nothing
+   * broke visibly — *and the other three blobs stayed in IndexedDB with no reference anywhere, on a
+   * device whose storage budget is the reason media has its own table.* **A silent leak, on the one
+   * act whose entire purpose is to reclaim space.**
+   *
+   * ⚑ **And it refuses on a completed session.** `reassignMedia` above already asserts this — its
+   * comment calls filing into a closed zone *"the back door"* — while discard did not, so a third
+   * delete gesture would have been free to remove evidence from a finished inspection. *The
+   * asymmetry was never a decision; it was an omission that two screens happened to cover.*
+   */
+  /**
+   * ⛑ **Never throws and never blocks the act it is describing.**
+   *
+   * A refusal is recorded *because something already went wrong*; a recorder that can fail on top of
+   * that turns one gap into two, and the concierge is mid-room. *The worst outcome of a swallowed
+   * error here is the same outcome we had before this existed.*
+   */
+  async recordRefusal(refusal) {
+    try {
+      await get().dispatchV2([{ type: "AppRefused", ...refusal }]);
+    } catch {
+      /* deliberately swallowed — see above */
+    }
+  },
+
   async discardMediaV2(mediaId) {
+    const session = get().v2Session;
+    assertEditable(session, undefined);
+    // Read the ref BEFORE dispatching: the fold detaches it, and afterwards there is nothing to
+    // ask which frames belonged to it.
+    const ref = session ? findMediaRef(session, mediaId) : undefined;
+    const ids = [mediaId, ...(ref?.siblings ?? []).map((s) => s.mediaId)];
     await get().dispatchV2([{ type: "MediaDiscarded", mediaId }]);
-    await deleteMedia([mediaId]);
+    await deleteMedia(ids);
   },
 
   async reassignMedia(mediaId, target) {

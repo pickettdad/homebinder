@@ -547,6 +547,22 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "sinceInitSec": Date().timeIntervalSince(lastInitAt),
             "featurePoints": frame.rawFeaturePoints?.points.count ?? 0,
             /*
+             ⚑ **The camera model, beside the pose** (design ruling 2026-09-04). Placing a marker on
+             a photograph means projecting a 3D point into it, and **the pose gives extrinsics while
+             nothing gave intrinsics** — EXIF carries no `FocalPlaneResolution` on these frames.
+
+             ⛑ The alternative the desk would otherwise carry is *a hand-maintained device-to-sensor
+             table keyed on the EXIF model string*, which goes stale on every new iPad and produces
+             **plausibly-wrong placements rather than errors.** ARKit hands this over free at capture.
+
+             Row-major 3×3: `[fx, 0, cx, 0, fy, cy, 0, 0, 1]`, in pixels of `imageResolution`, which
+             is carried beside it because focal length in pixels is meaningless without the frame it
+             was measured in.
+            */
+            "intrinsics": (0..<3).flatMap { r in (0..<3).map { c in Double(frame.camera.intrinsics[c][r]) } },
+            "imageWidth": Int(frame.camera.imageResolution.width),
+            "imageHeight": Int(frame.camera.imageResolution.height),
+            /*
              ⚑ **The one measurement that observes the failure directly, at the instant it happens.**
 
              *Where the session went to sleep, against where it thinks it woke up.* Everything else

@@ -91,6 +91,21 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        if CommandLine.arguments.contains("--hs-plate"), #available(iOS 16.0, *) {
+            let p = HSPlateAB()
+            plateAB = p
+            p.run { _ in self.plateAB = nil }
+        }
+        if CommandLine.arguments.contains("--hs-gate1"), #available(iOS 16.0, *) {
+            let g = HSGateOne()
+            gateOne = g
+            g.run { _ in self.gateOne = nil }
+        }
+        if CommandLine.arguments.contains("--hs-gate0"), #available(iOS 16.0, *) {
+            let g = HSGateZero()
+            gateZero = g
+            g.run { _ in self.gateZero = nil }
+        }
         if CommandLine.arguments.contains("--hs-control-probe"), #available(iOS 16.0, *) {
             let probe = HSControlProbe()
             controlProbe = probe
@@ -307,6 +322,9 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var bench: HSBench?
     private var lensProbe: AnyObject?
     private var controlProbe: AnyObject?
+    private var gateZero: AnyObject?
+    private var gateOne: AnyObject?
+    private var plateAB: AnyObject?
 
     /// The zone session — see `HSZoneSession`. One per zone, three bounded modes, one origin.
     private var zoneStore: AnyObject?
@@ -4057,7 +4075,11 @@ final class CameraController: NSObject {
         return context.jpegRepresentation(of: flattened, colorSpace: colourSpace, options: [:])
     }
 
-    private static func readAccurately(jpeg: Data) -> [String: Any]? {
+    /* ⛑ `internal`, not `private`, so the plate A/B probe reads both paths with **the same
+       recogniser and the same settings**. *Duplicating this function to give a probe access would
+       have compared two readers and called it a comparison of two cameras* — the exact
+       two-homes-for-one-fact failure this file has paid for twice. */
+    static func readAccurately(jpeg: Data) -> [String: Any]? {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
@@ -4073,7 +4095,28 @@ final class CameraController: NSObject {
         var total = 0.0
         for observation in results {
             guard let candidate = observation.topCandidates(1).first else { continue }
-            lines.append(["text": candidate.string, "confidence": Double(candidate.confidence)])
+            /*
+             ⚑ **Where on the plate, not just what it said** (design ask, 2026-09-04).
+
+             `read.text` was one block per photograph, so **a frame holding two plates could not be
+             paired region by region against the desk's own reading** — and the two-plate case is
+             precisely the one that motivated the one-plate-per-frame rule, so the workaround failed
+             on the only case it existed for.
+
+             ⛑ The box was always there and was thrown on the floor: `observation.boundingBox` sat
+             beside the string this loop already took. *Flipped to a top-left origin here, matching
+             the live loop's own flip, because two coordinate conventions for one idea is how a
+             reader ends up mirroring a plate.*
+            */
+            let b = observation.boundingBox
+            lines.append([
+                "text": candidate.string,
+                "confidence": Double(candidate.confidence),
+                "x": Double(b.origin.x),
+                "y": Double(1 - b.origin.y - b.height),
+                "w": Double(b.width),
+                "h": Double(b.height),
+            ])
             total += Double(candidate.confidence)
         }
         guard !lines.isEmpty else { return nil }

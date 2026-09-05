@@ -166,6 +166,37 @@ that string."*
 **What the desk gets:** for each leg, its frames, its two position anchors, and the narration spoken
 over exactly that leg — bound by one `captureId`, with `continuesFrom` linking the legs into the run.
 
+### ⚑ How a traverse is ordered — three mechanisms, declared, with what each guarantees
+
+**Ruled 2026-09-04.** *The ordering already ships; the contract did not.* ⛑ **The desk is about to
+depend on all three, and if any changes semantics, run traces and placement break silently — no
+error, just wrong answers.** Counts below are from the 2026-08-30 export: 301 `pan` media, 12 legs.
+
+**1 · `events[].seq` orders the legs.** Runs 1…205, and **exactly 12 `pan` frames carry a
+`PhotoAdded` event** — one per leg, the primary. *Guarantee: every leg has exactly one event, and
+event order is leg order.*
+
+**2 · `frame.continuesFrom` separates runs from legs.** On **185 media, all `pan`**, pointing at the
+previous leg's `captureId`. **8 of the 12 legs carry one; the 4 that do not are run starts.**
+⚑ *Guarantee: absence marks the head of a run.* Without it, four separate run traces read as one
+twelve-leg run.
+
+**3 · `position.at` marks the measurements — and is NOT distinct per leg.**
+
+⛑ **The design session's proposed clause said `position.at` is distinct on each leg's two positioned
+frames. It is not: 24 positioned `pan` frames carry 16 distinct values.** The eight duplicates are
+the eight chained boundaries — *`next leg` carries the end anchor of leg N forward as the start of
+leg N+1, timestamp included, because they are one measurement of one place at one moment.*
+
+⚑ **So a repeated `position.at` is information, not an error: it says these two frames share a
+boundary anchor.** *Guarantee: `position.at` identifies a measurement, never a frame.* **A desk that
+assumed distinctness would have split one anchor into two and mis-ordered exactly the boundaries the
+route depends on** — which is the failure the clause was written to prevent, in the clause itself.
+
+**And the interior frames have no order, no pose, and no reader.** 277 of the 301 carry neither a
+position nor a `primary` role. *Stated so nobody builds an ordering for them: nothing in the desk
+process reads them, and inventing a `seq` would be a field with no consumer.*
+
 ### ⚑ Why not a position per frame, said plainly so nobody asks for it as a small change
 
 **It is not a tuning problem, it is decision one.** A traverse runs on the `AVCaptureSession` with
@@ -240,6 +271,31 @@ comparable, which is exactly what the `engine` stamp exists to let a reader noti
 about 94 px. Text smaller than that is not attempted. *The walk's numbers suggest it is not
 currently costing us serials, and lowering it is untested — recorded as a known lever, not as a
 defect.*
+
+## 1c · What a deletion looks like in the export — two acts, two shapes
+
+**Shipped 2026-09-04.** The concierge can now delete a capture and delete an object container. ⚑
+**Neither removes anything silently, and the two behave differently on purpose.**
+
+| act | event | in the export |
+|---|---|---|
+| **Delete a capture** | `MediaDiscarded` | ⛑ **The media entry is GONE**, along with every sibling frame of that capture. Its only trace is the verbatim `MediaDiscarded` in `events[]` |
+| **Delete an object** | `PinRetired` | ⚑ **The container and every photograph of it STAY**, with `pins[].retired = { at, note }`. *A record that a thing was removed is worth more than the absence of the thing* |
+
+⛑ **So a retired container's media is fully present in `media[]` and fully packed in the zip**, and
+`totals.pins` and `totals.photos` count it. **The binder must join `media[].owner.pinId` back to
+`pins[].retired` to know.** *That join was possible and undeclared; it is declared now.* The note
+reads `"deleted in the room"`.
+
+**Why the asymmetry.** A discarded capture is usually a misfire — a frame of the floor, a frame of
+nothing — and there is no question a desk could ask about it. A deleted **object** is different: the
+concierge photographed a thing and then decided it was wrong, and *that decision is information the
+desk may want to see.* **The photographs are what makes the decision reviewable.**
+
+⚑ **And a sibling can be deleted on its own.** A bracket's extra frames are nested under their
+primary; deleting one splices it out of `siblings[]` and the primary survives. *Until 2026-09-04 that
+orphaned the event while the blob was already destroyed, and the export threw on the first bracketed
+plate anyone deleted — found by audit before the gesture shipped, not by a failed export.*
 
 ## 2 · Two new `intent` values — `floorplan` and `mesh`
 

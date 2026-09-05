@@ -57,6 +57,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "pauseZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "captureStill", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "zoneLog", returnType: CAPPluginReturnPromise)
@@ -685,6 +686,21 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 17.0, *) { withZone(c) { $0.pause() } } } }
     @objc func resumeZone(_ call: CAPPluginCall) { requireZone(call) { c in
         if #available(iOS 17.0, *) { withZone(c) { $0.resume() } } } }
+    /**
+     ⚑ **A photograph taken through the tracking session**, with the pose of the frame it came from.
+     See `HSZoneSession.captureStill`. Falls back to nothing: a caller that gets `ok: false` should
+     use the ordinary shutter and will get no pose, which is the honest outcome.
+     */
+    @objc func captureStill(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let z = zone else {
+            call.resolve(["ok": false, "why": "no zone open"]); return
+        }
+        z.captureStill(text: call.getBool("text") ?? false) { [weak self] out in
+            guard let self else { return }
+            call.resolve(self.js(out))
+        }
+    }
+
     @objc func takePosition(_ call: CAPPluginCall) { requireZone(call) { c in
         if #available(iOS 17.0, *) { withZone(c) { $0.position() } } } }
     @objc func startRoomPlan(_ call: CAPPluginCall) { requireZone(call) { c in
@@ -2333,7 +2349,10 @@ final class CameraController: NSObject {
      decidable from two JPEGs, so the number is now in the capture payload and the next run
      answers it by showing rather than by argument. Absent tag means 1 by specification.
      */
-    private static func exifOrientation(of jpeg: Data) -> Int {
+    /* ⛑  so the zone session can stamp the SAME orientation on a still it took itself.
+       Two implementations of "which way up is this JPEG" is how a frame ends up sideways in one
+       path and upright in the other, with nothing saying which is right. */
+    static func exifOrientation(of jpeg: Data) -> Int {
         guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let value = properties[kCGImagePropertyOrientation] as? Int

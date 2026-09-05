@@ -44,6 +44,7 @@ import {
   adjustCamera,
   cameraAvailable,
   captureFrames,
+  captureStill,
   captureWantsRetake,
   positionForSibling,
   projectionFor,
@@ -91,6 +92,7 @@ import {
   type TextBoxesEvent,
   type TraverseProgressEvent,
   type TraverseResult,
+  type ZoneStillResult,
 } from "../native/hsCamera";
 
 const MODE_BUTTONS: { mode: CameraMode; glyph: string; hint: string }[] = [
@@ -791,7 +793,53 @@ export function CameraScreen({
         first one where the wrong value silently corrupts the record rather than the experience.
       */
       const targetAtShutter = openRef.current;
-      const result = await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
+      /*
+        ⚑ **Inside a zone, the photograph comes out of the tracking session.**
+
+        This is the whole positioning rebuild at its point of use. The ordinary shutter is an
+        AVFoundation capture and ARKit cannot hold the lens at the same time, so every in-zone
+        photograph used to cost a handover — **6.3 s, of which 4.9 s was ARKit re-establishing
+        tracking** — and the pose it produced was dead-reckoned, because 1.4 s awake against 20–116 s
+        asleep never builds a map. *The 2026-08-30 export showed where that ends: poses three metres
+        below the floor.*
+
+        Measured continuously with the full load: **6.0 cm of return-to-reference error over 46
+        minutes, and it stops growing.** Shutter latency **p50 78 ms** against 6.3 s.
+
+        ⛑ **A refusal falls back to the ordinary shutter rather than failing the capture.** Tracking
+        limited, no frame yet, a capture already in flight — *the concierge gets their photograph and
+        the record gets an honest refusal instead of a fabricated pose.* The refusal is evented, so
+        the desk sees a gap rather than an absence.
+      */
+      const zoneStill = zoneRef.current
+        ? await captureStill({ text: statusRef.current?.mode === "text" }).catch(
+            () => ({ ok: false, why: "capture failed" }) as ZoneStillResult,
+          )
+        : null;
+      if (zoneStill && !zoneStill.ok) {
+        void recordRefusal({
+          act: "capture",
+          zoneId: zoneRef.current ?? undefined,
+          pinId: targetAtShutter?.pinId,
+          why: zoneStill.why ?? "still refused",
+          recoverable: zoneStill.recoverable ?? true,
+        });
+      }
+      const result: CaptureResult =
+        zoneStill?.ok && zoneStill.frames?.length
+          ? {
+              frames: zoneStill.frames,
+              mode: (statusRef.current?.mode ?? "object") as CameraMode,
+              torchUsed: false,
+              bracketed: false,
+              deskewed: false,
+              torchPaired: false,
+              lens: "normal" as const,
+              rotationAngle: 0,
+              at: new Date().toISOString(),
+              position: zoneStill.position,
+            }
+          : await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
       /*
         ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
 

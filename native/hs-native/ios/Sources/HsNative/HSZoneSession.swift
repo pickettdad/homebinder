@@ -77,6 +77,23 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      ⛑ **A pose at minute 40 is not the same measurement as a pose at minute 2, and nothing in the
      export said so.** This is the count that says it.
     */
+    /**
+     ⛑ **The streaming format decides the still's aspect ratio, and that is a measured finding.**
+
+     `recommendedVideoFormatForHighResolutionFrameCapturing` returned a **16:9** format on this
+     device, and every one of 179 high-resolution captures came back **4224×2376 — 10.0 MP** rather
+     than 4032×3024. *Choose the streaming format for the photograph you want, not for the frame
+     rate you like.* 4:3 first, then the lowest frame rate within it.
+     */
+    static func stillFormat() -> ARConfiguration.VideoFormat? {
+        let capable = ARWorldTrackingConfiguration.supportedVideoFormats
+            .filter { $0.isRecommendedForHighResolutionFrameCapturing }
+        let fourThree = capable.filter {
+            abs($0.imageResolution.width / $0.imageResolution.height - 4.0 / 3.0) < 0.02
+        }
+        return (fourThree.isEmpty ? capable : fourThree).min { $0.framesPerSecond < $1.framesPerSecond }
+    }
+
     private(set) var reinitCount = 0
     /// Seconds since the last re-establishment — the other half of *how old is this frame's frame*.
     private var lastInitAt = Date()
@@ -231,15 +248,27 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                the concierge stood* and *what they were standing in front of***, and the second is
                the one a measurement needs.
 
-               Reconstruction stays off: that is the expensive half, and it is the mesh mode's job.
-               Plane detection is the cheap half and it is what makes a pose worth taking. */
+               ⛑ **Reconstruction is now ON here, and that reverses the note this comment used to
+               carry.** It said reconstruction was *the expensive half and the mesh mode's job* —
+               measured on 2026-09-04 and it is not: a full 46-minute run with reconstruction, a
+               high-resolution format and a still every fifteen seconds held `thermalState` at
+               **`nominal` for all 5,520 samples**, never dropped a frame from 24 fps, and used
+               **9% of the battery against the sleeping build's 17%.**
+
+               ⚑ **And the mesh is what the ray-cast should hit.** A plane is a guess at a surface;
+               the mesh *is* the surface, and the desk's own process says so — *"where a mesh covers a
+               confirmed container, prefer it for position and extent."* */
             config.planeDetection = [.horizontal, .vertical]
-            config.sceneReconstruction = []
-            config.environmentTexturing = .none
-            if #available(iOS 16.0, *),
-               let hi = ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing {
-                config.videoFormat = hi
+            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                config.sceneReconstruction = .mesh
+            } else {
+                unmet.append("mesh")
             }
+            config.environmentTexturing = .none
+            if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+                config.frameSemantics.insert(.sceneDepth)
+            }
+            config.videoFormat = Self.stillFormat() ?? config.videoFormat
         }
         /* ⚑ A dead session cannot be revived by `run(config)` — that is what made every mode after
            a failure inherit the corpse and need an app restart. If it has failed, the delegate has
@@ -272,9 +301,13 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                as the frames are for a traverse, so it comes back on the way out. */
             let harvested = mode == .mesh ? harvestMesh() : [:]
             hideArPreview?()
+            /* ⛑ **No sleep on the way out of a scan mode either.** Leaving mesh or RoomPlan used to
+               hand the lens back and pause; positioning is now the same continuously-mapped session
+               those modes were, minus the concierge deliberately scanning. *The mode is a UI
+               contract about what the person is doing, not a different configuration.* */
             let unmet = enter(.positioning)
-            sleepSession()
-            var out: [String: Any] = ["mode": next.rawValue, "unmet": unmet, "paused": true]
+            showArPreview?(session)
+            var out: [String: Any] = ["mode": next.rawValue, "unmet": unmet, "paused": false]
             if !harvested.isEmpty { out["mesh"] = harvested }
             return out
         }
@@ -283,7 +316,13 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         if next == .mesh { meshMarks.append(mark("mesh-on")) }
         if mode == .mesh, next != .mesh { meshMarks.append(mark("mesh-off")) }
         let unmet = enter(next)
-        if next == .mesh { showArPreview?(session) }
+        /* ⚑ **The preview comes from ARKit in every mode now, because ARKit holds the lens in every
+           mode now.** It used to be mesh-only: positioning slept and handed the camera back, so the
+           AVFoundation preview drew the viewfinder. A continuously-mapped session cannot give the
+           lens back, so the frames a person sees have to be the frames the tracker is using —
+           *which is also the honest arrangement: the viewfinder now shows what the pose is measured
+           from.* */
+        showArPreview?(session)
         return ["mode": next.rawValue, "unmet": unmet, "paused": false, "failed": failure ?? ""]
     }
 
@@ -439,6 +478,146 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         return ["paused": false, "mode": mode.rawValue, "armed": true]
     }
 
+    // MARK: - taking a photograph THROUGH the tracking session
+
+    private var stillInFlight = false
+    private let encodeQueue = DispatchQueue(label: "hs.zone.encode", qos: .userInitiated)
+
+    /**
+     **A 12 MP still taken through the tracking session, with the pose of the frame it came from.**
+
+     ⚑ **This is the whole architecture in one method.** ARKit and an `AVCaptureSession` cannot share
+     the rear camera, so every photograph used to be a handover: stop the photo session, wake ARKit,
+     read a pose, sleep ARKit, restart the photo session, take the picture. **6.3 s per photograph,
+     of which 4.9 s was ARKit re-establishing tracking — and the pose it produced was dead-reckoned
+     because the session was never awake long enough to build a map.**
+
+     `captureHighResolutionFrame` is delivered **out-of-band**: the tracking stream is not
+     interrupted, the returned `ARFrame` carries the native full-resolution still **and the camera
+     transform of the instant it was taken.** Measured on device 2026-09-04: **p50 78 ms, p95 278 ms**,
+     4032×3024, and on the hardest plate in the house it read a serial the AVFoundation path dropped
+     the first character of, three times out of three.
+
+     ⛑ **The pose is the returned frame's own `camera.transform`, written once and never rewritten.**
+     That is the measurement contract: an anchor's later correction is telemetry about the walk, never
+     a revision of a photograph.
+
+     **The shutter refuses rather than producing a pose nobody can use.** Under the sleeping build a
+     tracking check was a restatement of a filter; here it means something, because tracking can
+     genuinely be limited while the session runs.
+     */
+    func captureStill(text wantsText: Bool, completion: @escaping ([String: Any]) -> Void) {
+        guard mode != nil else { completion(["ok": false, "why": "no zone open"]); return }
+        if let failure { completion(["ok": false, "why": failure]); return }
+        /* ⛑ One request at a time — `ARErrorCodeHighResolutionFrameCaptureInProgress` is 106, and a
+           burst that queues is honest where a dropped frame is not. */
+        guard !stillInFlight else { completion(["ok": false, "why": "a capture is already in flight"]); return }
+
+        guard let live = session.currentFrame else {
+            completion(["ok": false, "why": "no frame yet"]); return
+        }
+        guard case .normal = live.camera.trackingState else {
+            completion(["ok": false, "why": "tracking \(HSArProbe.describe(live.camera.trackingState))",
+                        "recoverable": true]); return
+        }
+
+        stillInFlight = true
+        let asked = CACurrentMediaTime()
+        session.captureHighResolutionFrame { [weak self] frame, error in
+            guard let self else { return }
+            defer { self.stillInFlight = false }
+            let ms = (CACurrentMediaTime() - asked) * 1000
+            guard let f = frame, error == nil else {
+                completion(["ok": false, "why": error?.localizedDescription ?? "capture failed",
+                            "recoverable": true])
+                return
+            }
+            let t = f.camera.transform
+            let p = t.columns.3
+            let mapping = self.mappingWord(f)
+            let tracking = HSArProbe.describe(f.camera.trackingState)
+
+            /* ⚑ On-axis ray from THIS frame's transform. The optical axis is the one ray that needs
+               no pixel-to-sensor mapping, so it is immune to the intrinsics misregistration reported
+               between the stream and the high-resolution frame on some iPad generations. */
+            let origin = SIMD3<Float>(p.x, p.y, p.z)
+            let dir = SIMD3<Float>(-t.columns.2.x, -t.columns.2.y, -t.columns.2.z)
+            var surface: [String: Any]? = nil
+            if let hit = self.session.raycast(
+                ARRaycastQuery(origin: origin, direction: dir, allowing: .estimatedPlane, alignment: .any)
+            ).first {
+                let q = hit.worldTransform.columns.3
+                surface = ["x": Double(q.x), "y": Double(q.y), "z": Double(q.z),
+                           "distance": Double(simd_distance(origin, SIMD3<Float>(q.x, q.y, q.z)))]
+            }
+
+            var position: [String: Any] = [
+                "positioned": true, "zoneId": self.zoneId, "tracking": tracking,
+                "at": ISO8601DateFormatter().string(from: Date()),
+                "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
+                "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(t[c][r]) } },
+                "mapping": mapping, "reinits": self.reinitCount,
+                "sinceInitSec": Date().timeIntervalSince(self.lastInitAt),
+                "featurePoints": f.rawFeaturePoints?.points.count ?? 0,
+                /* ⚑ The camera model of the photograph itself, not of the tracking stream — the two
+                   can differ, and placing a marker on this image needs THIS one. */
+                "intrinsics": (0..<3).flatMap { r in (0..<3).map { c in Double(f.camera.intrinsics[c][r]) } },
+                "imageWidth": Int(f.camera.imageResolution.width),
+                "imageHeight": Int(f.camera.imageResolution.height),
+                /* ⛑ **The still came out of the tracking session, so the matrix DOES describe it.**
+                   This is the case `projection` was built for and it is now the ordinary one. */
+                "projection": ["projectable": true],
+            ]
+            if let surface { position["surface"] = surface }
+
+            // ⚑ Off the tracking thread. Encoding a 12 MP frame on the delegate queue is frames the
+            // tracker does not get, and the tracker is the thing this whole design exists to keep fed.
+            self.encodeQueue.async {
+                let ci = CIImage(cvPixelBuffer: f.capturedImage)
+                guard let jpeg = CIContext().jpegRepresentation(
+                    of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(),
+                    options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95]
+                ) else {
+                    DispatchQueue.main.async { completion(["ok": false, "why": "could not encode the frame"]) }
+                    return
+                }
+                let name = "hs-zone-still-\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+                guard (try? jpeg.write(to: url, options: .atomic)) != nil else {
+                    DispatchQueue.main.async { completion(["ok": false, "why": "could not write the frame"]) }
+                    return
+                }
+                var entry: [String: Any] = [
+                    "path": url.path, "bytes": jpeg.count, "index": 0,
+                    "exifOrientation": CameraController.exifOrientation(of: jpeg),
+                    "torch": false, "lens": "normal",
+                ]
+                if wantsText, let read = CameraController.readAccurately(jpeg: jpeg) { entry["ocr"] = read }
+                HSZoneLog.record("stillThroughArkit", [
+                    "ms": ms, "bytes": jpeg.count, "mapping": mapping, "tracking": tracking,
+                    "w": Int(f.camera.imageResolution.width), "h": Int(f.camera.imageResolution.height),
+                    "surface": surface != nil,
+                ])
+                DispatchQueue.main.async {
+                    completion([
+                        "ok": true, "latencyMs": ms, "frames": [entry],
+                        "position": position, "mode": self.mode?.rawValue ?? "positioning",
+                    ])
+                }
+            }
+        }
+    }
+
+    private func mappingWord(_ f: ARFrame) -> String {
+        switch f.worldMappingStatus {
+        case .notAvailable: return "notAvailable"
+        case .limited: return "limited"
+        case .extending: return "extending"
+        case .mapped: return "mapped"
+        @unknown default: return "unknown"
+        }
+    }
+
     // MARK: - taking a position
 
     /**
@@ -480,9 +659,29 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
 
            `defer` rather than a call before each `return`, because the reason this happened is that
            one of four exits was easy to miss, and a fifth exit added later would miss it too. */
+        /*
+         ⛑ **The session no longer sleeps, and that deletes the defect this whole comment block was
+         written about.**
+
+         Positioning was a duty cycle: wake, read a pose, sleep. The 2026-08-30 export showed where
+         that ends — poses walking **3 m below the floor** over 42 minutes. The instrumented cause,
+         measured 2026-09-02: ARKit awake **~1.4 s per capture against 20–116 s asleep**, roughly
+         **2% of the session**, `worldMappingStatus` never past `limited`, **0–9 tracked feature
+         points.** ⚑ *It never built a map, so there was no loop closure and every pose was
+         dead-reckoned from the one before.* Standing still that is perfect — 5 mm over six minutes.
+         Walking, it accumulates.
+
+         **Running continuously, measured over 46 minutes with the full load: 6.0 cm of return-to-
+         reference error, and it stops growing** — 3.0 → 4.3 → 4.9 → 5.3 → 5.2 → 4.5 → 4.5 → 6.0.
+         *Bounded error rather than drift*, `mapped` for 68% of the session, **median 229 feature
+         points**, and ARKit revising its own origin anchor 71 times. **That is loop closure, which
+         the sleeping build achieved zero times in its life.**
+
+         *The lens-handover paragraphs this replaced described putting the camera back on every exit
+         path. There is no longer an exit path that takes it.*
+        */
         let wasAsleep = paused
         if paused { wake() }
-        defer { if mode == .positioning { sleepSession() } }
         /* A cold wake has to establish tracking from nothing, which the log shows going
            initializing → normal → insufficientFeatures → normal before it settles. Three seconds was
            inside that, so a perfectly healthy wake reported `settling`. A warm one resumes into the
@@ -624,6 +823,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private var sleptAt: SIMD3<Float>?
     private var sleptWhen: Date?
 
+    /**
+     ⛑ **Only `pause()` and `closeZone()` reach this now.**
+     *A zone that is open keeps its session running* — see `position()` for the measurements that
+     made that the design rather than an option.
+     */
     private func sleepSession() {
         if let c = session.currentFrame?.camera.transform.columns.3 {
             sleptAt = SIMD3<Float>(c.x, c.y, c.z)
@@ -721,8 +925,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            The waiter below is resolved by the delegate; the timeout is a backstop that says so. */
         HSZoneLog.record("roomPlanStopping")
         roomWaiter = { [weak self] out in
+            /* ⚑ The preview goes; the SESSION stays. `stop(pauseARSession: false)` is what makes
+               RoomPlan hand the live session back rather than end it, and pausing here would throw
+               away the map it just spent ninety seconds building — which is the map every pose
+               afterwards is corrected against. */
             self?.hideArPreview?()
-            self?.sleepSession()
             completion(out)
         }
         stopRoomCapture(keepSession: true)

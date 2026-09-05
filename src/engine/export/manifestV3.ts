@@ -25,6 +25,7 @@ import type {
   LifecycleEntry,
   MediaRef,
   NoteState,
+  RefusalEntry,
   ResolutionState,
   SessionStateV2,
 } from "../v2/fold";
@@ -223,6 +224,16 @@ export interface ManifestV3<TConfig = unknown> {
   chats: { threadId: string; target: { kind: "pin" | "zone"; id: string }; messages: ChatMessage[] }[];
   /** Every recorded checklist attestation (zone/pin/session scope) — the audit substrate. */
   resolutions: ResolutionState[];
+  /**
+   * ⚑ **Everything the app could not do, and why** — the third question §5.1's arrival report asks
+   * and the one nothing answered. Each entry: the act, when, the zone and container where there was
+   * one, the reason **verbatim**, and whether trying again in the room could work.
+   *
+   * ⛑ **Never mixed with deletions.** *A refusal is a gap; a deletion is a judgement*, and they
+   * route to different places — Escalate versus the Decision record. A deleted container appears as
+   * `pins[].retired`, and it is not here.
+   */
+  refusals: RefusalEntry[];
   media: MediaFileEntryV3[];
   totals: {
     zones: number;
@@ -385,6 +396,7 @@ export function buildManifestV3<TConfig = unknown>(args: {
     notes: [...state.notes.values()],
     chats: [...state.chats.values()].map((t) => ({ threadId: t.threadId, target: t.target, messages: t.messages })),
     resolutions: [...state.resolutions.values()],
+    refusals: state.refusals,
     media,
     totals: {
       zones: state.zones.length,

@@ -189,6 +189,14 @@ interface AppStore {
   ): Promise<string>;
   attachVoiceV2(target: CaptureTarget, blob: Blob, mime: string, durationMs?: number): Promise<void>;
   discardMediaV2(mediaId: string): Promise<void>;
+  /** ⚑ Record something the app could not do. See `AppRefused` — never used for a deletion. */
+  recordRefusal(refusal: {
+    act: "floorplan" | "mesh" | "position" | "lens" | "traverse" | "capture" | "zone-session";
+    zoneId?: string;
+    pinId?: string;
+    why: string;
+    recoverable: boolean;
+  }): Promise<void>;
   reassignMedia(mediaId: string, target: CaptureTarget): Promise<void>;
   captionMedia(mediaId: string, text: string): Promise<void>;
   addNote(target: CaptureTarget, text: string): Promise<string>;
@@ -571,6 +579,21 @@ export const useApp = create<AppStore>((set, get) => ({
    * delete gesture would have been free to remove evidence from a finished inspection. *The
    * asymmetry was never a decision; it was an omission that two screens happened to cover.*
    */
+  /**
+   * ⛑ **Never throws and never blocks the act it is describing.**
+   *
+   * A refusal is recorded *because something already went wrong*; a recorder that can fail on top of
+   * that turns one gap into two, and the concierge is mid-room. *The worst outcome of a swallowed
+   * error here is the same outcome we had before this existed.*
+   */
+  async recordRefusal(refusal) {
+    try {
+      await get().dispatchV2([{ type: "AppRefused", ...refusal }]);
+    } catch {
+      /* deliberately swallowed — see above */
+    }
+  },
+
   async discardMediaV2(mediaId) {
     const session = get().v2Session;
     assertEditable(session, undefined);

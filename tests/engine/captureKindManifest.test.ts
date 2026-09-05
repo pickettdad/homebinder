@@ -53,6 +53,8 @@ const stateWith = (media: ReturnType<typeof mediaRef>[]): SessionStateV2 =>
     notes: new Map(),
     chats: new Map(),
     resolutions: new Map(),
+    refusals: [],
+    lifecycle: [],
   }) as unknown as SessionStateV2;
 
 const manifestOf = (media: ReturnType<typeof mediaRef>[]) =>
@@ -135,5 +137,53 @@ describe("geometry", () => {
     expect(m.totals.unknown).toBe(1);
     // And it is still a file, with its hash — trust root first, vocabulary second.
     expect(m.totals.mediaFiles).toBe(1);
+  });
+});
+
+/**
+ * ⛑ **A refusal is the app failing. A deletion is a person choosing.**
+ *
+ * They route to different places at the desk — *a refusal becomes a gap and goes to Escalate as a
+ * targeted item for the next visit; a deletion goes to the Decision record.* ⚑ **If both arrived as
+ * "this isn't here", the desk could not tell a hole from a judgement**, and the invariant under test
+ * is exactly that separation: **the two never share an array.**
+ */
+describe("what the app refused, and what a person deleted", () => {
+  const refused = (act: string, why: string, recoverable: boolean) => ({
+    act, why, recoverable, at: "2026-09-04T00:00:00Z", zoneId: "z",
+  });
+
+  it("carries refusals in their own array, never mixed into the session's lifecycle", () => {
+    const state = {
+      ...(stateWith([]) as unknown as Record<string, unknown>),
+      refusals: [refused("floorplan", "RoomPlan not supported on this device", false)],
+    } as unknown as SessionStateV2;
+    const m = buildManifestV3({
+      state, events: [], configSnapshot: {}, exportedAt: "t", appVersion: "t",
+    });
+    expect(m.refusals).toHaveLength(1);
+    // The session's own completed/reopened history must not have absorbed it.
+    expect(m.session.lifecycle).toEqual([]);
+  });
+
+  it("keeps the reason verbatim and says whether the room can fix it", () => {
+    // ⚑ `recoverable` is what makes a refusal actionable rather than merely recorded: "hold still"
+    // is a different instruction from "this iPad has no RoomPlan".
+    const state = {
+      ...(stateWith([]) as unknown as Record<string, unknown>),
+      refusals: [refused("mesh", "unmet sceneReconstruction", true), refused("floorplan", "no RoomPlan", false)],
+    } as unknown as SessionStateV2;
+    const m = buildManifestV3({ state, events: [], configSnapshot: {}, exportedAt: "t", appVersion: "t" });
+    expect(m.refusals.map((r) => r.recoverable)).toEqual([true, false]);
+    expect(m.refusals[0]!.why).toBe("unmet sceneReconstruction");
+  });
+
+  it("does not deduplicate — three refusals of one act is a different fact from one", () => {
+    const state = {
+      ...(stateWith([]) as unknown as Record<string, unknown>),
+      refusals: [refused("position", "settling", true), refused("position", "settling", true)],
+    } as unknown as SessionStateV2;
+    const m = buildManifestV3({ state, events: [], configSnapshot: {}, exportedAt: "t", appVersion: "t" });
+    expect(m.refusals).toHaveLength(2);
   });
 });

@@ -350,7 +350,7 @@ export function CameraScreen({
   zoneId?: string;
   startAction?: "floorplan" | "mesh" | "room-shot" | "traverse" | "document";
 }) {
-  const { navigate, showToast, v2Session, createPin, capturePhotoV2, discardMediaV2, retirePin } = useApp();
+  const { navigate, showToast, v2Session, createPin, capturePhotoV2, discardMediaV2, retirePin, recordRefusal } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
   /** The latest status, readable from callbacks that must not re-subscribe when it changes —
    *  `beginTraverse` needs the lens state and is deliberately stable. */
@@ -497,10 +497,18 @@ export function CameraScreen({
         setZonePaused(false);
         if (!out.roomPlanSupported && startAction === "floorplan") {
           setZoneNote("No floorplan on this device");
+          /* ⚑ Evented, not merely shown. Until 2026-09-04 every one of these lived in a React
+             state variable, was displayed once, and died there — so the desk's arrival report
+             could not answer its own third question. */
+          void recordRefusal({ act: "floorplan", zoneId, why: "RoomPlan not supported on this device", recoverable: false });
           return;
         }
       } catch (e) {
-        if (live) setZoneFailure(e instanceof Error ? e.message : "Zone session unavailable");
+        if (live) {
+          const why = e instanceof Error ? e.message : "Zone session unavailable";
+          setZoneFailure(why);
+          void recordRefusal({ act: "zone-session", zoneId, why, recoverable: false });
+        }
       }
     })();
     return () => {
@@ -567,17 +575,27 @@ export function CameraScreen({
           if (live && started.started) {
             setScanning(true);
             setZoneMode("roomplan");
-          } else if (live) setZoneNote(started.why ?? "floorplan refused");
+          } else if (live) {
+          setZoneNote(started.why ?? "floorplan refused");
+          void recordRefusal({ act: "floorplan", zoneId, why: started.why ?? "floorplan refused", recoverable: true });
+        }
         } else if (startAction === "mesh") {
           const r = await setZoneModeNative("mesh");
           if (live) {
             setMeshing(true);
             setZoneMode("mesh");
-            if (r.unmet.length) setZoneNote(`unmet ${r.unmet.join(", ")}`);
+            if (r.unmet.length) {
+              setZoneNote(`unmet ${r.unmet.join(", ")}`);
+              void recordRefusal({ act: "mesh", zoneId, why: `unmet ${r.unmet.join(", ")}`, recoverable: true });
+            }
           }
         }
       } catch (e) {
-        if (live) setZoneFailure(e instanceof Error ? e.message : "action failed");
+        if (live) {
+          const why = e instanceof Error ? e.message : "action failed";
+          setZoneFailure(why);
+          void recordRefusal({ act: "zone-session", zoneId, why, recoverable: true });
+        }
       }
     })();
     return () => {

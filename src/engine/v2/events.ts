@@ -266,6 +266,36 @@ export type V2SessionEvent =
       siblings?: CaptureMediaMeta[];
     })
   | (EventBase & { type: "VoiceNoteAdded"; media: CaptureMediaMeta; target: CaptureTarget; durationMs?: number })
+  /**
+   * ⚑ **The app could not do a thing it was asked to do.**
+   *
+   * *§5.1 of the desk process asks an arrival report three questions; the third is what the app
+   * refused and the reason it gave, and nothing in the export answered it.* Floorplan refused, no
+   * RoomPlan on this device, mesh produced nothing, lens swap declined, position unavailable —
+   * every one of them lived in a React state variable, was shown once, and died there.
+   *
+   * ⛑ **A refusal is the app failing. A deletion is a person choosing. They must never land in the
+   * same bucket**, because they route differently: *a refusal becomes a gap and goes to Escalate as
+   * a targeted item for the next visit; a deletion goes to the Decision record as something
+   * somebody decided.* If both arrive as **this isn't here**, the desk cannot tell a hole from a
+   * judgement — so this is its own event, its own array, and its own word.
+   *
+   * `recoverable` is the field that makes a refusal actionable rather than merely recorded: *hold
+   * still and look at something with detail* is a different instruction from *this iPad has no
+   * RoomPlan.*
+   */
+  | (EventBase & {
+      type: "AppRefused";
+      /** The act, not the symptom. `position` covers a pose that could not be taken at all. */
+      act: "floorplan" | "mesh" | "position" | "lens" | "traverse" | "capture" | "zone-session";
+      zoneId?: string;
+      /** The container it happened inside, where there was one. */
+      pinId?: string;
+      /** The reason the app gave, verbatim — never a rewrite of it. */
+      why: string;
+      /** Whether trying again in the room could work. */
+      recoverable: boolean;
+    })
   | (EventBase & { type: "MediaDiscarded"; mediaId: string })
   | (EventBase & { type: "MediaReassigned"; mediaId: string; target: CaptureTarget })
   /** Short context caption on a capture ("panel, before dead-front photo") — travels with it. */

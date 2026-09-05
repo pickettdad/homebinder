@@ -84,6 +84,10 @@ export interface ZoneStateV2 {
   closeNote?: string;
   /** A Table C reason id (`naReasons`), when the zone closed with nothing captured. */
   closeReasonId?: string;
+  /** ⚑ Every close and reopen, in order. See `ZoneLifecycleEntry` — the current-state fields above
+   *  answer *is it closed now*; this answers *how long was it actually open*, which is the question
+   *  a placement's confidence depends on. */
+  lifecycle: ZoneLifecycleEntry[];
   audit?: ZoneAuditSnapshot;
   canvases: CanvasState[];
   photos: MediaRef[];
@@ -148,6 +152,50 @@ export interface LifecycleEntry {
   reason?: string;
 }
 
+/**
+ * ⚑ **One entry in a ZONE's open/close history — append-only, because a fold cannot express one.**
+ *
+ * `closedAt` / `closeNote` are current state, and `ZoneReopened` used to set them to `undefined`.
+ * ⛑ **So a zone closed and reopened was indistinguishable from one never closed, and the close note
+ * was destroyed rather than merely unexported.**
+ *
+ * **What the desk needs is not the event, it is the interval.** Elapsed-time-in-zone is one of three
+ * signals weighting a placement, and computed from `ZoneCreated.at` it is right for a zone entered
+ * once and **wrong for one re-entered — it charges a pose from the second visit with the age of the
+ * first, silently, and in the direction that makes a good pose look bad.**
+ *
+ * *Same shape as `LifecycleEntry` deliberately: the pattern already existed and a second one would
+ * be a second mechanism for one idea.*
+ */
+/**
+ * ⚑ **One thing the app could not do, and why.**
+ *
+ * ⛑ **A refusal is the app failing. A deletion is a person choosing.** They route differently at
+ * the desk — *a refusal becomes a gap and goes to Escalate as a targeted item for the next visit; a
+ * deletion goes to the Decision record as something somebody decided.* If both arrived as **this
+ * isn't here**, the desk could not tell a hole from a judgement.
+ *
+ * *And this is deliberately NOT folded into `lifecycle`*, which is the session's own
+ * completed/reopened history. **A refusal is neither a session lifecycle event nor a person's
+ * decision, and a third thing in a two-thing array is how a bucket stops meaning anything.**
+ */
+export interface RefusalEntry {
+  act: string;
+  at: string;
+  zoneId?: string;
+  pinId?: string;
+  why: string;
+  recoverable: boolean;
+}
+
+export interface ZoneLifecycleEntry {
+  type: "closed" | "reopened";
+  at: string;
+  note?: string;
+  /** A Table C reason id, on a close that had one. */
+  reasonId?: string;
+}
+
 /** A recorded export — the visit's data written out of the app (manifest + media files). */
 export interface ExportRecord {
   at: string;
@@ -181,6 +229,10 @@ export interface SessionStateV2 {
   completedAt?: string;
   /** Full complete/reopen history in order — the audit trail the owner asked to see. */
   lifecycle: LifecycleEntry[];
+  /** ⚑ Everything the app could not do, oldest first. See `RefusalEntry` — deliberately its own
+   *  array and NOT mixed into `lifecycle`, which is the session's own completed/reopened history.
+   *  *A refusal is neither a session lifecycle event nor a person's decision.* */
+  refusals: RefusalEntry[];
   /** Every export recorded for this visit, oldest first. */
   exports: ExportRecord[];
   lastEventSeq: number;
@@ -245,6 +297,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
     resolutions: new Map(),
     startedAt: init.at,
     lifecycle: [],
+    refusals: [],
     exports: [],
     lastEventSeq: 0,
     lastPinNumber: 0,
@@ -360,6 +413,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
           label: e.label,
           level: e.level,
           attributes: { ...e.attributes },
+          lifecycle: [],
           canvases: [],
           photos: [],
           voiceNotes: [],
@@ -399,6 +453,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
           z.closeNote = e.note;
           z.closeReasonId = e.reasonId;
           z.audit = e.audit;
+          z.lifecycle.push({ type: "closed", at: e.at, note: e.note, reasonId: e.reasonId });
         }
         break;
       }
@@ -406,6 +461,8 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
         const z = zone(e.zoneId);
         if (!z) orphan(e);
         else {
+          // ⛑ Recorded BEFORE the current-state fields are cleared. The note used to die here.
+          z.lifecycle.push({ type: "reopened", at: e.at, note: e.note });
           z.closedAt = undefined;
           z.closeNote = undefined;
           z.closeReasonId = undefined;
@@ -531,6 +588,15 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
       case "VoiceNoteAdded":
         if (!attachMedia(mediaRef(e.media, e.at, e.source, e.durationMs), e.target, true)) orphan(e);
         break;
+      case "AppRefused": {
+        /* Append-only and never deduplicated. Three refusals of the same act in one zone is a
+           different fact from one, and the desk's arrival report counts them. */
+        state.refusals.push({
+          act: e.act, at: e.at, zoneId: e.zoneId, pinId: e.pinId,
+          why: e.why, recoverable: e.recoverable,
+        });
+        break;
+      }
       case "MediaDiscarded":
         if (!detachMedia(e.mediaId)) orphan(e);
         break;

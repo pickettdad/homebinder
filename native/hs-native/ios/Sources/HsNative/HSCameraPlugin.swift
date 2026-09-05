@@ -91,6 +91,11 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        if CommandLine.arguments.contains("--hs-plate"), #available(iOS 16.0, *) {
+            let p = HSPlateAB()
+            plateAB = p
+            p.run { _ in self.plateAB = nil }
+        }
         if CommandLine.arguments.contains("--hs-gate1"), #available(iOS 16.0, *) {
             let g = HSGateOne()
             gateOne = g
@@ -319,6 +324,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var controlProbe: AnyObject?
     private var gateZero: AnyObject?
     private var gateOne: AnyObject?
+    private var plateAB: AnyObject?
 
     /// The zone session — see `HSZoneSession`. One per zone, three bounded modes, one origin.
     private var zoneStore: AnyObject?
@@ -4069,7 +4075,11 @@ final class CameraController: NSObject {
         return context.jpegRepresentation(of: flattened, colorSpace: colourSpace, options: [:])
     }
 
-    private static func readAccurately(jpeg: Data) -> [String: Any]? {
+    /* ⛑ `internal`, not `private`, so the plate A/B probe reads both paths with **the same
+       recogniser and the same settings**. *Duplicating this function to give a probe access would
+       have compared two readers and called it a comparison of two cameras* — the exact
+       two-homes-for-one-fact failure this file has paid for twice. */
+    static func readAccurately(jpeg: Data) -> [String: Any]? {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false

@@ -342,6 +342,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// black screen the field reported. The scan modes get a view fed by the session that actually
     /// owns the camera.
     private var arPreview: UIView?
+    private let previewQueue = DispatchQueue(label: "ca.housesteady.camera.preview", qos: .userInteractive)
+    /// ⛑ One draw at a time; a frame arriving mid-draw is dropped rather than queued. See
+    /// `drawArPreview` — a preview is about *now*, and a backlog only makes the picture later.
+    private var previewBusy = false
     /// Only restored if we were the ones who made it transparent — see `attachArPreview`.
     private var restoreOpaqueForAr = false
 
@@ -424,7 +428,26 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
      **a dense enough dusting shows a gap just as well as every point would, and leaves the room
      visible underneath it, which matters because the concierge is also navigating by this.**
      */
+    /**
+     ⛑ **Never on the caller's thread.** `ARSession`'s delegate is the MAIN thread, and this method
+     builds a `CGImage` from a 12 MP-class buffer and rasterises up to 5,500 mesh triangles over it.
+     ⚑ *Doing that on main at 20 Hz is the same defect that froze the app through `analyse` — the
+     delegate cannot fire again while it runs, so the session stops delivering frames and the screen
+     stops updating, which reads as a crash.*
+
+     A frame arriving while one is drawing is **dropped**, not queued: a preview is about *now*, and
+     a backlog only makes the picture later.
+     */
     private func drawArPreview(_ frame: ARFrame) {
+        guard arPreview != nil, !previewBusy else { return }
+        previewBusy = true
+        previewQueue.async { [weak self] in
+            self?.renderArPreview(frame)
+            self?.previewBusy = false
+        }
+    }
+
+    private func renderArPreview(_ frame: ARFrame) {
         guard arPreview != nil else { return }
         let ci = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
         guard let base = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
@@ -652,7 +675,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             /* ⚑ ARKit's frames go to the SAME analysis the capture session feeds. See
                `CameraController.analyse` and `HSZoneSession.onAnalysisFrame`: one pipeline, one set
                of thresholds, two sources. */
-            made.onAnalysisFrame = { [weak self] buffer in self?.controller?.analyse(buffer) }
+            made.onAnalysisFrame = { [weak self] buffer in self?.controller?.analyseAsync(buffer) }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
             made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
@@ -961,6 +984,10 @@ final class CameraController: NSObject {
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "ca.housesteady.camera.session")
     private let visionQueue = DispatchQueue(label: "ca.housesteady.camera.vision")
+    /// ⛑ One analysis at a time; a frame arriving while one runs is DROPPED, never queued. See
+    /// `analyseAsync` — a backlog of stale frames would fire the shutter for a plate the concierge
+    /// has already walked away from.
+    fileprivate var analysisBusy = false
     /// Deskew, JPEG writes and the accurate OCR pass. Off main because a 12 MP read is most of a
     /// second, and off `visionQueue` because that one is feeding the live loop.
     private let processingQueue = DispatchQueue(label: "ca.housesteady.camera.processing")
@@ -4254,6 +4281,33 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
      rather than two that drift. **Two implementations of "is this plate readable" is exactly the
      defect this file has paid for twice.**
      */
+    /**
+     ⛑ **OFF the caller's thread, and getting that wrong froze the app on its first frame.**
+
+     `analyse` runs `VNImageRequestHandler.perform` **synchronously**. Under the capture session that
+     was fine: the sample-buffer delegate already runs on a background queue. ⚑ **`ARSession`'s
+     delegate runs on the MAIN thread** — so feeding ARKit's frames straight in put a full Vision
+     text recognition on the main thread at frame rate, and the first one blocked it hard enough
+     that `didUpdate` could never fire again. *Field 2026-09-05: frozen after one capture, and the
+     zone log simply stops mid-sentence at the first position.*
+
+     **A frame is dropped rather than queued when one is already in flight.** *A backlog of stale
+     frames is worse than a gap:* the motion window and the stability trigger are about **now**, and
+     analysing a frame from four seconds ago would fire the shutter for a plate the concierge has
+     already walked away from.
+
+     `busy` is written from two queues and deliberately not locked — the worst case is one extra or
+     one missed frame at 5 Hz, and a lock on the main thread to protect a boolean is the disease.
+     */
+    func analyseAsync(_ pixelBuffer: CVPixelBuffer) {
+        guard !analysisBusy else { return }
+        analysisBusy = true
+        visionQueue.async { [weak self] in
+            self?.analyse(pixelBuffer)
+            self?.analysisBusy = false
+        }
+    }
+
     func analyse(_ pixelBuffer: CVPixelBuffer) {
         frameCounter += 1
 

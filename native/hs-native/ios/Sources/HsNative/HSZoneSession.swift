@@ -1070,7 +1070,14 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         onAnalysisFrame?(frame.capturedImage)
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
-        guard onPreviewFrame != nil, mode == .mesh || mode == .roomplan else { return }
+        /* ⛑ **Positioning gets preview frames too, and its absence was the black viewfinder.**
+
+           This gate was written when positioning slept between poses — there was nothing to draw
+           because the session was not running, and the AVFoundation preview held the screen. ⚑ The
+           session now runs for the life of the zone and the capture session does not, **so the only
+           frames in existence are these**, and a mode excluded from the gate is a mode with a black
+           screen. *The field spent two smoke tests looking at one.* */
+        guard onPreviewFrame != nil else { return }
         // ~20 fps is a live picture to a walking person and a third of the drawing work.
         guard Date().timeIntervalSince(lastPreviewAt) > 0.05 else { return }
         lastPreviewAt = Date()

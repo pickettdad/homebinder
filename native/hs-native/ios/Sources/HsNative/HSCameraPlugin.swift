@@ -4095,7 +4095,28 @@ final class CameraController: NSObject {
         var total = 0.0
         for observation in results {
             guard let candidate = observation.topCandidates(1).first else { continue }
-            lines.append(["text": candidate.string, "confidence": Double(candidate.confidence)])
+            /*
+             ⚑ **Where on the plate, not just what it said** (design ask, 2026-09-04).
+
+             `read.text` was one block per photograph, so **a frame holding two plates could not be
+             paired region by region against the desk's own reading** — and the two-plate case is
+             precisely the one that motivated the one-plate-per-frame rule, so the workaround failed
+             on the only case it existed for.
+
+             ⛑ The box was always there and was thrown on the floor: `observation.boundingBox` sat
+             beside the string this loop already took. *Flipped to a top-left origin here, matching
+             the live loop's own flip, because two coordinate conventions for one idea is how a
+             reader ends up mirroring a plate.*
+            */
+            let b = observation.boundingBox
+            lines.append([
+                "text": candidate.string,
+                "confidence": Double(candidate.confidence),
+                "x": Double(b.origin.x),
+                "y": Double(1 - b.origin.y - b.height),
+                "w": Double(b.width),
+                "h": Double(b.height),
+            ])
             total += Double(candidate.confidence)
         }
         guard !lines.isEmpty else { return nil }

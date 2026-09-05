@@ -54,6 +54,17 @@ export interface FrameReadMeta {
   engine: string;
   confidence: number;
   osVersion?: string;
+  /**
+   * ⚑ **Each recognised line, with where it sat on the frame.**
+   *
+   * `text` is every line joined, which is right for a plate and **wrong for a photograph holding
+   * two** — and the two-plate case is exactly the one the one-plate-per-frame rule exists for, so
+   * the desk had no way to pair its own reading region by region against the device's.
+   *
+   * Normalised **top-left origin**, matching the live text boxes: `x`/`y` is the corner, `w`/`h` the
+   * size, all 0…1 of the frame. *One convention for one idea — two is how a reader mirrors a plate.*
+   */
+  regions?: { text: string; confidence: number; x: number; y: number; w: number; h: number }[];
 }
 
 /**

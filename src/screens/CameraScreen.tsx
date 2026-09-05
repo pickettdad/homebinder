@@ -892,7 +892,22 @@ export function CameraScreen({
         const readOf = (index: number): FrameReadMeta | undefined => {
           const ocr = result.frames[index]?.ocr;
           return ocr
-            ? { text: ocr.text, engine: ocr.engine, confidence: ocr.meanConfidence, osVersion: ocr.osVersion }
+            ? {
+                text: ocr.text,
+                engine: ocr.engine,
+                confidence: ocr.meanConfidence,
+                osVersion: ocr.osVersion,
+                /* ⛑ The per-line array was built natively and thrown away here, because the field
+                   shape could not hold it. It can now — see `FrameReadMeta.regions`. */
+                regions: ocr.lines?.map((l) => ({
+                  text: l.text,
+                  confidence: l.confidence,
+                  x: l.x ?? 0,
+                  y: l.y ?? 0,
+                  w: l.w ?? 0,
+                  h: l.h ?? 0,
+                })),
+              }
             : undefined;
         };
         const siblings = await Promise.all(

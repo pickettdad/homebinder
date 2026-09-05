@@ -54,7 +54,6 @@ const stateWith = (media: ReturnType<typeof mediaRef>[]): SessionStateV2 =>
     chats: new Map(),
     resolutions: new Map(),
     refusals: [],
-    lifecycle: [],
   }) as unknown as SessionStateV2;
 
 const manifestOf = (media: ReturnType<typeof mediaRef>[]) =>

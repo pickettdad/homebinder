@@ -186,7 +186,8 @@ export interface ModeStatusEvent {
 }
 
 export interface FrameRead {
-  lines: { text: string; confidence: number }[];
+  /** ⚑ Each line with its box, normalised top-left. See `FrameReadMeta.regions` for why. */
+  lines: { text: string; confidence: number; x?: number; y?: number; w?: number; h?: number }[];
   text: string;
   meanConfidence: number;
   engine: string;

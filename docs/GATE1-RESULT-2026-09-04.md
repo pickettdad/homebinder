@@ -62,8 +62,41 @@ selected **3840×2160@24**, a 16:9 streaming format — **and the high-resolutio
 stream's aspect ratio.**
 
 *Corrected in the probe: prefer a 4:3 high-res-capable format, then the lowest frame rate within it
-— 1920×1440@30 on this device.* **Unverified until a re-run, and the re-run is ten minutes, not
-forty-six** — the question is only what dimensions come back.
+— 1920×1440@30 on this device.*
+
+### ✓ Re-run, same evening, 11.6 minutes — **fixed**
+
+**41 captures, every one 4032×3024.** Latency p50 80 ms / p95 278 ms / max 347 ms. Ray-cast hit 40
+of 41. Thermal `nominal` throughout, 30.0 fps flat, mapping `mapped` for 66% of the run, feature
+points median 203. **Images 2.8–3.8 MB.**
+
+⚑ **The stream format determines the still's aspect ratio, and that is the transferable finding.**
+Choose the streaming format for the photograph you want, not for the frame rate you like.
+
+## ⛑ Three things these runs do NOT establish, said before the good numbers harden
+
+**1 · Photograph quality is unverified.** The probe fires on a 15-second timer regardless of motion,
+so a third of these frames were taken mid-stride and are motion-blurred. *That is the timer, not the
+capture path* — but it means **legibility has not been tested.** The response's own Gate 1 minutes
+55–60 — the same plate in the worst light in the building, one frame each way, judged by the desk —
+**is still owed and nothing here substitutes for it.**
+
+**2 · The battery figures are approximate, and the owner caught this.** He observed 92% at the start
+of the second run where the probe logged 90%. `UIDevice.batteryLevel` is coarse and
+`isBatteryMonitoringEnabled` is set *inside* `run()`, so the first reads can be stale or rounded.
+⚑ **The 46-minute figure (100 → 91) is the trustworthy one** — a longer window and a bigger delta.
+*The 11.6-minute "0%" should not be quoted at all.*
+
+**3 · The load is incomplete and the owner named it.** These runs had **no viewfinder drawn, no
+RoomPlan, no mesh harvest, no traverse.** ⛑ **9% per 46 minutes is a floor, not the number** — the
+current build's 17% per 45 may well survive once everything is on. *What the runs do establish is
+narrower and still worth having: continuous tracking is not the budget-buster everyone assumed, and
+is cheaper than waking it four hundred times.*
+
+⚑ **And the viewfinder is a lever nobody has measured.** It cannot be dark while the concierge is
+composing — *"we need to see what we are capturing"* — but **preview resolution and capture
+resolution are independent.** A small, low-rate preview while composing and nothing between shots is
+available and unquantified.
 
 ## What Gate 1 still did not test
 

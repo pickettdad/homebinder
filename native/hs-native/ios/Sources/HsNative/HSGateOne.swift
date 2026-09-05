@@ -50,12 +50,22 @@ final class HSGateOne: NSObject, ARSessionDelegate {
     private var inFlight = false
     private var shotIndex = 0
     private var frameStamps: [TimeInterval] = []
-    private let runFor: TimeInterval = 46 * 60
+    /* ⛑ **Settable, because "just stop walking and plug in" is not a stop.** The first two runs of
+       this probe were told to end when the operator finished; the probe did not know that and kept
+       shooting every fifteen seconds for the rest of its forty-six minutes. *An instrument whose
+       stop condition lives in a human's head does not have a stop condition.* Pass
+       `--hs-gate1-minutes N`. */
+    private var runFor: TimeInterval = 46 * 60
     private let shutterEvery: TimeInterval = 15
 
     func run(completion: @escaping ([String: Any]) -> Void) {
+        if let i = CommandLine.arguments.firstIndex(of: "--hs-gate1-minutes"),
+           i + 1 < CommandLine.arguments.count, let m = Double(CommandLine.arguments[i + 1]) {
+            runFor = m * 60
+        }
         var head: [String] = []
         func say(_ s: String) { print("HS-GATE1 \(s)"); head.append(s) }
+        say("will run \(Int(runFor / 60)) minutes")
         say("device \(UIDevice.current.model) iPadOS \(UIDevice.current.systemVersion)")
 
         let config = ARWorldTrackingConfiguration()

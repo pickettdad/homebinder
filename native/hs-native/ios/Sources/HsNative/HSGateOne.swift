@@ -74,9 +74,22 @@ final class HSGateOne: NSObject, ARSessionDelegate {
         /* ⛑ **The lowest frame rate among the high-res-capable formats**, per the response: do not
            choose 4K streaming because it exists. Gate 0 measured 7 of this device's 13 formats as
            recommended for high-resolution capture. */
-        let hi = ARWorldTrackingConfiguration.supportedVideoFormats
+        /* ⛑ **4:3 FIRST, and this is a finding from the first Gate 1 run.**
+
+           "Lowest fps among the high-res-capable formats" selected **3840×2160@24** — a 16:9
+           streaming format — and the high-resolution still **inherited its aspect ratio**: every
+           one of 179 captures came back **4224×2376 (10.0 MP)** rather than 4032×3024 (12.2 MP).
+           ⚑ *The response's Gate 1 says "kill if not 12 MP", and this would have failed that check
+           — for a reason that is our configuration and not the platform.*
+
+           So: prefer a **4:3** high-res-capable format, then the lowest frame rate within it. On
+           this device that is 1920×1440@30. */
+        let capable = ARWorldTrackingConfiguration.supportedVideoFormats
             .filter { $0.isRecommendedForHighResolutionFrameCapturing }
-            .min { $0.framesPerSecond < $1.framesPerSecond }
+        let fourThree = capable.filter {
+            abs($0.imageResolution.width / $0.imageResolution.height - 4.0 / 3.0) < 0.02
+        }
+        let hi = (fourThree.isEmpty ? capable : fourThree).min { $0.framesPerSecond < $1.framesPerSecond }
         if let hi {
             config.videoFormat = hi
             say("format \(Int(hi.imageResolution.width))x\(Int(hi.imageResolution.height))@\(hi.framesPerSecond)")

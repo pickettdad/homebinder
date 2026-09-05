@@ -119,6 +119,16 @@ export type VisitKind = "discovery" | "inspection" | "monthly";
  *
  * `pan` is kept because ids are never renamed — the word retired, the id did not.
  */
+/**
+ * How a concierge arrived in a zone. ⚑ Three positive answers and one absence, and they are four
+ * different facts — *absent* is "not declared", which is not "outside".
+ */
+export type EnteredFrom =
+  | { kind: "zone"; zoneId: string }
+  /** A space walked through and never captured. ⛑ An escalation item, not a gap in the record. */
+  | { kind: "uncaptured"; label?: string }
+  | { kind: "outside" };
+
 export type CaptureIntent =
   | "room-shot"
   | "pan"
@@ -202,6 +212,33 @@ export type V2SessionEvent =
       attributes: Record<string, boolean>;
       /** Storey grouping for the walk list: "basement" | "main" | "second" | … | "exterior". */
       level?: string;
+      /**
+       * ⚑ **Where the concierge walked in from** — the one adjacency fact geometry cannot recover.
+       *
+       * Every zone mints its own ARKit origin, so *two plans are never in a common frame* and which
+       * rooms touch **cannot be derived from position**. The desk currently proposes it from walk
+       * order, door counts and room shapes — a guess it then asks a person to confirm. **A person
+       * standing in a doorway already knows.**
+       *
+       * ⛑ **Asked as *which room did you come from*, never *which rooms are adjacent*.** The first is
+       * answerable with certainty by someone who just walked through a door; the second asks them to
+       * hold a house in their head. *That is this project's own test — can it be executed correctly
+       * by someone who does not know what they are looking at — applied to a question about rooms.*
+       *
+       * ⚑ **`uncaptured` is not a fallback, it is a finding.** A hall walked through and never
+       * scanned is a room nobody captured, which is an escalation item — *and an edge pointing at
+       * nothing is more useful than no edge*, because the alternative is the concierge choosing the
+       * nearest wrong room or skipping and losing the adjacency entirely.
+       *
+       * ⛑ **This is adjacency, NOT door identity.** It says the kitchen touches the hall; it does
+       * not say which of the kitchen's three doors is the hall one. *It collapses door matching to
+       * within a declared pair — and most pairs share one door, so it resolves in practice — but it
+       * does not resolve it in principle, and nobody should read adjacency shipped as door identity
+       * shipped.*
+       *
+       * Absent means **not declared**, which is different from `outside`.
+       */
+      enteredFrom?: EnteredFrom;
     })
   | (EventBase & { type: "ZoneRenamed"; zoneId: string; label: string })
   | (EventBase & { type: "ZoneRetyped"; zoneId: string; zoneType: string })

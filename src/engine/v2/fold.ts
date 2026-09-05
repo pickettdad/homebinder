@@ -28,6 +28,7 @@ import type {
   V2SessionEvent,
   ZoneAuditSnapshot,
   VisitKind,
+  EnteredFrom,
 } from "./events";
 import { itemScopeKey } from "./events";
 
@@ -80,6 +81,9 @@ export interface ZoneStateV2 {
   /** Storey grouping for the walk list; absent on pre-level zones. */
   level?: string;
   attributes: Record<string, boolean>;
+  /** ⚑ Where the concierge walked in from, when they said. See the `ZoneCreated` event — this is
+   *  adjacency declared by a person, not derived from geometry, because it cannot be derived. */
+  enteredFrom?: EnteredFrom;
   closedAt?: string;
   closeNote?: string;
   /** A Table C reason id (`naReasons`), when the zone closed with nothing captured. */
@@ -413,6 +417,7 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
           label: e.label,
           level: e.level,
           attributes: { ...e.attributes },
+          enteredFrom: e.enteredFrom,
           lifecycle: [],
           canvases: [],
           photos: [],

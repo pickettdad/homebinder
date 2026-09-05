@@ -24,6 +24,7 @@ import { BigButton, Sheet } from "../../ui/bits";
 import { MediaThumb, MediaViewer, ZONE_LEVELS } from "./shared";
 import { cameraAvailable } from "../../native/hsCamera";
 import { zoneGaps } from "../../native/zone";
+import type { EnteredFrom } from "../../engine/v2/events";
 import type { ChecklistConfig } from "../../engine/schema/checklistConfig";
 import type { CaptureIntent } from "../../engine/v2/events";
 
@@ -297,9 +298,10 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
             setLevel={setNewLevel}
             typeId={newType}
             setTypeId={setNewType}
+            existingZones={zones.map((z) => ({ zoneId: z.zoneId, label: z.label }))}
             onClose={() => setSwitching(false)}
-            onCreate={(typeId, label, level) =>
-              createZone(typeId, label, {}, level).then((id) => {
+            onCreate={(typeId, label, level, enteredFrom) =>
+              createZone(typeId, label, {}, level, enteredFrom).then((id) => {
                 setSwitching(false);
                 navigate({ name: "zone2", zoneId: id });
               })
@@ -649,9 +651,10 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
           setLevel={setNewLevel}
           typeId={newType}
           setTypeId={setNewType}
+          existingZones={zones.filter((z) => z.zoneId !== zone.zoneId).map((z) => ({ zoneId: z.zoneId, label: z.label }))}
           onClose={() => setSwitching(false)}
-          onCreate={(typeId, label, level) =>
-            createZone(typeId, label, {}, level).then((id) => {
+          onCreate={(typeId, label, level, enteredFrom) =>
+            createZone(typeId, label, {}, level, enteredFrom).then((id) => {
               setSwitching(false);
               navigate({ name: "zone2", zoneId: id });
             })
@@ -676,6 +679,7 @@ function ZoneSheet({
   setLevel,
   typeId,
   setTypeId,
+  existingZones,
   onClose,
   onCreate,
 }: {
@@ -684,10 +688,12 @@ function ZoneSheet({
   setLevel: (l: string) => void;
   typeId: string | null;
   setTypeId: (t: string | null) => void;
+  existingZones: { zoneId: string; label: string }[];
   onClose: () => void;
-  onCreate: (typeId: string, label: string, level: string) => Promise<unknown>;
+  onCreate: (typeId: string, label: string, level: string, enteredFrom?: EnteredFrom) => Promise<unknown>;
 }) {
   const [label, setLabel] = useState("");
+  const [from, setFrom] = useState<EnteredFrom | undefined>(undefined);
   const selected = zoneTypes.find((t) => t.id === typeId);
   return (
     <Sheet open title="Start where you're standing" onClose={onClose}>
@@ -728,11 +734,73 @@ function ZoneSheet({
             </button>
           ))}
         </div>
+        {/*
+          ⚑ **"Which room did you come from?" — never "which rooms are adjacent?"**
+
+          Every zone mints its own ARKit origin, so *two plans are never in a common frame* and which
+          rooms touch **cannot be derived from position**. The desk guesses it from walk order and
+          door counts. ⛑ **A person standing in a doorway already knows**, and the question is phrased
+          as the thing they just did rather than a fact about the house: *the first is answerable with
+          certainty, the second asks them to hold a house in their head.*
+
+          ⚑ **"Somewhere I haven't captured" is a finding, not a fallback.** A hall walked through and
+          never scanned is a room nobody captured — an escalation item — and *an edge pointing at
+          nothing beats no edge*, because the alternative is picking the nearest wrong room or
+          skipping and losing the adjacency entirely.
+
+          **Optional throughout.** The first room of a visit has no answer, and a forced answer is a
+          wrong one.
+        */}
+        <div className="flex flex-col gap-1.5 border-t border-slate-700 pt-3">
+          <p className="text-xs text-slate-400">Which room did you come from?</p>
+          <div className="flex flex-wrap gap-2">
+            {existingZones.map((z) => (
+              <button
+                key={z.zoneId}
+                type="button"
+                onClick={() =>
+                  setFrom((f) =>
+                    f?.kind === "zone" && f.zoneId === z.zoneId ? undefined : { kind: "zone", zoneId: z.zoneId },
+                  )
+                }
+                className={`rounded-lg px-3 py-1.5 text-sm ring-1 ${
+                  from?.kind === "zone" && from.zoneId === z.zoneId
+                    ? "bg-brass-600 text-white ring-brass-500"
+                    : "bg-slate-800 text-slate-400 ring-slate-700"
+                }`}
+              >
+                {z.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setFrom((f) => (f?.kind === "uncaptured" ? undefined : { kind: "uncaptured" }))}
+              className={`rounded-lg px-3 py-1.5 text-sm ring-1 ${
+                from?.kind === "uncaptured"
+                  ? "bg-amber-600 text-white ring-amber-500"
+                  : "bg-slate-800 text-slate-400 ring-slate-700"
+              }`}
+            >
+              somewhere I haven't captured
+            </button>
+            <button
+              type="button"
+              onClick={() => setFrom((f) => (f?.kind === "outside" ? undefined : { kind: "outside" }))}
+              className={`rounded-lg px-3 py-1.5 text-sm ring-1 ${
+                from?.kind === "outside"
+                  ? "bg-slate-600 text-slate-100 ring-slate-500"
+                  : "bg-slate-800 text-slate-400 ring-slate-700"
+              }`}
+            >
+              outside
+            </button>
+          </div>
+        </div>
         <BigButton
           disabled={!typeId}
           onClick={() => {
             if (!typeId) return;
-            void onCreate(typeId, label.trim() || selected?.typicalLabels[0] || typeId, level);
+            void onCreate(typeId, label.trim() || selected?.typicalLabels[0] || typeId, level, from);
           }}
         >
           Start here

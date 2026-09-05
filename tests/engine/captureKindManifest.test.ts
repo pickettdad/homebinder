@@ -186,3 +186,44 @@ describe("what the app refused, and what a person deleted", () => {
     expect(m.refusals).toHaveLength(2);
   });
 });
+
+/**
+ * ⚑ **Which room the concierge came from — the one adjacency fact geometry cannot recover.**
+ *
+ * Every zone mints its own ARKit origin, so *two plans are never in a common frame* and which rooms
+ * touch cannot be derived from position. ⛑ The invariant under test is **not** the list of answers —
+ * it is that **an absent answer, an uncaptured space and outside are three different facts**, and
+ * that the declaration survives to the export intact.
+ */
+describe("where the concierge walked in from", () => {
+  const zoneWith = (enteredFrom?: unknown) =>
+    ({
+      ...(stateWith([]) as unknown as Record<string, unknown>),
+      zones: [
+        {
+          zoneId: "z", type: "mechanical", label: "Mechanical", attributes: {}, enteredFrom,
+          lifecycle: [], photos: [], voiceNotes: [], canvases: [], noteIds: [], chatThreadIds: [],
+        },
+      ],
+    }) as unknown as SessionStateV2;
+  const zoneOf = (enteredFrom?: unknown) =>
+    buildManifestV3({ state: zoneWith(enteredFrom), events: [], configSnapshot: {}, exportedAt: "t", appVersion: "t" })
+      .zones[0]!;
+
+  it("carries a declared adjacency through to the export", () => {
+    expect(zoneOf({ kind: "zone", zoneId: "hall" }).enteredFrom).toEqual({ kind: "zone", zoneId: "hall" });
+  });
+
+  it("keeps 'not declared' distinct from 'outside'", () => {
+    // ⛑ Absent means nobody said. `outside` means somebody said outside. A desk that treated them
+    // as one would invent an exterior door on every room where the question was skipped.
+    expect(zoneOf(undefined).enteredFrom).toBeUndefined();
+    expect(zoneOf({ kind: "outside" }).enteredFrom).toEqual({ kind: "outside" });
+  });
+
+  it("carries an edge that points at a room nobody captured", () => {
+    // ⚑ A finding, not a fallback: a hall walked through and never scanned is an escalation item,
+    // and an edge pointing at nothing is more useful than no edge.
+    expect(zoneOf({ kind: "uncaptured" }).enteredFrom).toEqual({ kind: "uncaptured" });
+  });
+});

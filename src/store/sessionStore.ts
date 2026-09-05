@@ -26,6 +26,7 @@ import type { ChecklistConfig } from "../engine/schema/checklistConfig";
 import type {
   CaptureIntent, CaptureTarget, ItemResolution, ItemScope, PinFlag, PinTypeRef, V2EventPayload, V2SessionEvent,
   VisitKind,
+  EnteredFrom,
 } from "../engine/v2/events";
 import { foldV2, type SessionStateV2 } from "../engine/v2/fold";
 import { auditSnapshot, deriveZoneAudit } from "../engine/v2/checklist";
@@ -142,7 +143,7 @@ interface AppStore {
   // ---- v2 actions (the pin model). All dispatch through the same atomic append path.
   startSessionV2(args: { propertyFlags: string[]; propertyLabel?: string; visitKind: VisitKind }): Promise<void>;
   dispatchV2(payloads: V2EventPayload[], media?: MediaRow[]): Promise<V2SessionEvent[]>;
-  createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string): Promise<string>;
+  createZone(zoneType: string, label: string, attributes: Record<string, boolean>, level?: string, enteredFrom?: EnteredFrom): Promise<string>;
   /** Set a zone's attributes AFTER creation. Capture mode does not ask them (they are
    *  classification), so without this a capture-created zone could never have them set. */
   setZoneAttributes(zoneId: string, attributes: Record<string, boolean>): Promise<void>;
@@ -398,9 +399,9 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().dispatchV2([{ type: "ZoneAttributesSet", zoneId, attributes }]);
   },
 
-  async createZone(zoneType, label, attributes, level) {
+  async createZone(zoneType, label, attributes, level, enteredFrom) {
     const zoneId = uuidv7();
-    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes, level }]);
+    await get().dispatchV2([{ type: "ZoneCreated", zoneId, zoneType, label, attributes, level, enteredFrom }]);
     return zoneId;
   },
 

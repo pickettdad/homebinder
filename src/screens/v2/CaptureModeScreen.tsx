@@ -341,7 +341,7 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
   const gaps = zoneGaps({
     photos: zone.photos.length + liveContainers.reduce((n, p) => n + p.photos.length, 0),
     hasFloorplan: zone.photos.some((m) => m.intent === "floorplan"),
-    containers: liveContainers.map((p) => ({ frames: p.photos.map((m) => ({ position: m.position as never })) })),
+    containers: liveContainers.map((p) => ({ number: p.number, frames: p.photos.map((m) => ({ position: m.position as never })) })),
   });
 
   return (

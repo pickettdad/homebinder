@@ -203,8 +203,8 @@ describe("zoneMeasures", () => {
  * reads by the third room.
  */
 describe("what a zone is missing, said while the concierge is still in it", () => {
-  const anchored = { frames: [{ position: { positioned: true } as never }] };
-  const floating = { frames: [{ position: undefined }, { position: undefined }] };
+  const anchored = { number: 1, frames: [{ position: { positioned: true } as never }] };
+  const floating = (number: number) => ({ number, frames: [{ position: undefined }, { position: undefined }] });
 
   it("says nothing about a room nobody has started", () => {
     // Unstarted is not incomplete. This is the case that decides whether the banner is readable.
@@ -221,14 +221,30 @@ describe("what a zone is missing, said while the concierge is still in it", () =
     expect(g.missing.join(" ")).toMatch(/floorplan/);
   });
 
-  it("counts the objects the desk cannot place, rather than saying some", () => {
-    const g = zoneGaps({ photos: 34, hasFloorplan: true, containers: [anchored, floating, floating] });
-    // A number is actionable — the concierge knows how many to go back to. "Some" is not.
-    expect(g.missing.join(" ")).toMatch(/2 objects/);
+  /**
+   * ⛑ **Named, not counted** (field 2026-09-05: *"it says 3 objects the desk cannot place, but then
+   * doesn't really say what they are or what to do"*).
+   *
+   * ⚑ A number is a verdict; a list is an instruction. **The concierge is standing in the room and
+   * can fix an object they can identify — they cannot fix a count.**
+   */
+  it("names the objects the desk cannot place, and only those", () => {
+    const g = zoneGaps({ photos: 34, hasFloorplan: true, containers: [anchored, floating(4), floating(7)] });
+    expect(g.missing.join(" ")).toContain("#4");
+    expect(g.missing.join(" ")).toContain("#7");
+    // The anchored one is fine and must not be named — a warning listing working objects is one
+    // nobody reads by the third room.
+    expect(g.missing.join(" ")).not.toContain("#1");
+  });
+
+  it("says what to do about it, not only that it is wrong", () => {
+    const g = zoneGaps({ photos: 4, hasFloorplan: false, containers: [floating(2)] });
+    expect(g.missing.join(" ")).toMatch(/scan the room/);
+    expect(g.missing.join(" ")).toMatch(/take one more photo/);
   });
 
   it("names both when both are missing, and does not stop at the first", () => {
-    const g = zoneGaps({ photos: 4, hasFloorplan: false, containers: [floating] });
+    const g = zoneGaps({ photos: 4, hasFloorplan: false, containers: [floating(3)] });
     expect(g.missing).toHaveLength(2);
   });
 });

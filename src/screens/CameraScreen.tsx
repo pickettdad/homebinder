@@ -289,11 +289,17 @@ function ContextFilmstrip({
   model,
   label,
   onOpen,
+  onHold,
 }: {
   model: ReturnType<typeof stripModel>;
   label: string;
   onOpen: (capture: MediaRef) => void;
+  /** ⛑ Long press, the SAME gesture the container strip uses. See `onHold` there — one gesture
+   *  learned once beats two places to look, and the field could not find the delete at all. */
+  onHold: (capture: MediaRef) => void;
 }) {
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
   return (
     <div className="flex flex-col gap-1">
       <p className="px-1 text-xs text-slate-400">
@@ -318,7 +324,18 @@ function ContextFilmstrip({
               key={capture.mediaId}
               type="button"
               aria-label="Open capture"
-              onClick={() => onOpen(capture)}
+              onPointerDown={() => {
+                fired.current = false;
+                held.current = setTimeout(() => {
+                  fired.current = true;
+                  onHold(capture);
+                }, 600);
+              }}
+              onPointerUp={() => held.current && clearTimeout(held.current)}
+              onPointerLeave={() => held.current && clearTimeout(held.current)}
+              /* ⛑ **A press that became a hold is not also a tap.** Otherwise deleting a capture
+                 opens it on the way past, and the viewer appears over the confirmation. */
+              onClick={() => { if (!fired.current) onOpen(capture); }}
               className="h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600"
             >
               <MediaThumb mediaId={capture.mediaId} mime={capture.mime} className="h-full w-full object-cover" />
@@ -2471,6 +2488,7 @@ export function CameraScreen({
           <ContextFilmstrip
             model={strip}
             label={zone?.label ?? "zone"}
+            onHold={(capture) => setConfirmDelete(capture)}
             /* Shot this visit → the full reviewer, with its exposure stack and 1:1. Filed earlier →
                the flat viewer, which is all the record can offer. The strip does not need to know
                the difference; the tap resolves it. */

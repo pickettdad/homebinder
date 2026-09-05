@@ -1094,7 +1094,21 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         failure = error.localizedDescription
         everRan = false
         paused = true
-        releaseCamera?()
+        /*
+         ⛑ **The camera is NOT handed back here, and handing it back was a failure LOOP.**
+
+         `sensorFailed` **is** ARKit being refused the camera. This handler answered by calling
+         `releaseCamera` — *which starts the capture session that was refusing it* — producing the
+         next `sensorFailed`. Five in nine minutes, twice over, with nine-second preset restores and
+         a black screen the field could not get out of. ⚑ **And a session carrying a `failure`
+         refuses `captureStill`, so not one photograph took the new path in either smoke test.**
+
+         **The old design could do this safely because ARKit only ever wanted the lens for a
+         second.** It now holds it for the life of the zone, so *releasing on failure is releasing
+         to the thing that caused the failure.*
+
+         The lens comes back on `pause` and on `closeZone` — the two moments a person asked for it.
+        */
         hideArPreview?()
         onEvent?([
             "zoneFailed": error.localizedDescription,

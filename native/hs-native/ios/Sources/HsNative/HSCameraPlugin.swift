@@ -1361,6 +1361,10 @@ final class CameraController: NSObject {
     /// ⚑ The zone takes the lens and keeps it. See `zoneOwnsCamera`.
     func takeCameraForZone() {
         zoneOwnsCamera = true
+        // ⚑ Logged, because "did the new ownership code run at all" was a question two smoke tests
+        // could not answer — the absence of `reclaimRefused` was ambiguous between *never called*
+        // and *never reached*.
+        HSZoneLog.record("cameraToZone", ["owns": true])
         yieldCamera()
     }
 

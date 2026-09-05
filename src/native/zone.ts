@@ -137,16 +137,23 @@ export interface ZonePlan {
 export function zoneGaps(zone: {
   photos: number;
   hasFloorplan: boolean;
-  containers: { frames: { position?: ZonePosition }[] }[];
+  containers: { number: number; frames: { position?: ZonePosition }[] }[];
 }): { complete: boolean; missing: string[] } {
   const missing: string[] = [];
   // Only a zone somebody actually photographed can be missing anything. An untouched zone is not
   // incomplete, it is unstarted, and saying otherwise would fire on every room before it is walked.
   if (zone.photos === 0) return { complete: true, missing };
-  if (!zone.hasFloorplan) missing.push("no floorplan");
-  const unplaceable = zone.containers.filter((c) => !containerAnchorState(c.frames).anchored).length;
-  if (unplaceable > 0) {
-    missing.push(`${unplaceable} object${unplaceable === 1 ? "" : "s"} the desk cannot place`);
+  if (!zone.hasFloorplan) missing.push("no floorplan — scan the room");
+  /* ⛑ **Named, not counted, and the field asked for exactly this.** *"It says 3 objects the desk
+     cannot place, but then doesn't really say what they are or what to do."* ⚑ A number is a
+     verdict; a list is an instruction. **The concierge is standing in the room and can fix an
+     object they can identify** — and cannot fix a count. */
+  const unplaceable = zone.containers.filter((c) => !containerAnchorState(c.frames).anchored);
+  if (unplaceable.length > 0) {
+    const names = unplaceable.map((c) => `#${c.number}`).join(", ");
+    missing.push(
+      `object${unplaceable.length === 1 ? "" : "s"} ${names} — take one more photo of each, standing still`,
+    );
   }
   return { complete: missing.length === 0, missing };
 }

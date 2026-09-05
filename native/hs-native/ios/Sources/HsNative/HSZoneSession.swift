@@ -119,7 +119,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     var showArPreview: ((ARSession) -> Void)?
     /// ⚑ The preview is fed from here because this is where the frames already arrive — see
     /// `attachArPreview`. Throttled: a scan does not need sixty drawn frames a second.
-    var onPreviewFrame: ((ARFrame) -> Void)?
+    /**
+     ⛑ **Deliberately NOT an `ARFrame`, and that is the whole bug it was written with.**
+
+     ARKit delivers frames from a small fixed pool. **Holding an `ARFrame` past the delegate
+     callback stops ARKit delivering new ones** — Apple documents it, and the field found the exact
+     signature: the preview froze on one image while *the shutter still fired, containers still
+     opened and deletes still worked.* ⚑ *The app was never blocked; the frame supply was.*
+
+     So the pieces travel and the frame does not: a **copy** of the pixels, the mesh anchors (their
+     own objects, safe to keep) and the camera snapshot the projection needs.
+     */
+    var onPreviewFrame: ((CVPixelBuffer, [ARMeshAnchor], ARCamera) -> Void)?
     private var lastPreviewAt = Date.distantPast
     private var lastPlanAt = Date.distantPast
     var hideArPreview: (() -> Void)?
@@ -137,6 +148,51 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      twice.**
      */
     var onAnalysisFrame: ((CVPixelBuffer) -> Void)?
+
+    /**
+     ⚑ **A copy, because the original belongs to ARKit's frame pool.**
+
+     A `CVPixelBuffer` handed out of `didUpdate` and retained across a queue hop keeps a slot in that
+     pool occupied, and enough of them stop the session delivering anything. *A ~4 MB memcpy on the
+     delegate thread is roughly a millisecond; a starved frame pool is a dead preview.*
+     */
+    private func copyBuffer(_ src: CVPixelBuffer) -> CVPixelBuffer? {
+        var out: CVPixelBuffer?
+        let w = CVPixelBufferGetWidth(src), h = CVPixelBufferGetHeight(src)
+        let attrs: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary]
+        guard CVPixelBufferCreate(nil, w, h, CVPixelBufferGetPixelFormatType(src),
+                                  attrs as CFDictionary, &out) == kCVReturnSuccess,
+              let dst = out else { return nil }
+        CVPixelBufferLockBaseAddress(src, .readOnly)
+        CVPixelBufferLockBaseAddress(dst, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(dst, [])
+            CVPixelBufferUnlockBaseAddress(src, .readOnly)
+        }
+        // Plane by plane: ARKit's capture buffer is bi-planar YCbCr, and a single memcpy of the
+        // base address would copy one plane and leave the picture greyscale.
+        let planes = CVPixelBufferGetPlaneCount(src)
+        if planes == 0 {
+            guard let a = CVPixelBufferGetBaseAddress(src), let b = CVPixelBufferGetBaseAddress(dst) else { return nil }
+            memcpy(b, a, CVPixelBufferGetDataSize(src))
+            return dst
+        }
+        for i in 0..<planes {
+            guard let a = CVPixelBufferGetBaseAddressOfPlane(src, i),
+                  let b = CVPixelBufferGetBaseAddressOfPlane(dst, i) else { return nil }
+            let rows = CVPixelBufferGetHeightOfPlane(src, i)
+            let srcStride = CVPixelBufferGetBytesPerRowOfPlane(src, i)
+            let dstStride = CVPixelBufferGetBytesPerRowOfPlane(dst, i)
+            if srcStride == dstStride {
+                memcpy(b, a, rows * srcStride)
+            } else {
+                for r in 0..<rows {
+                    memcpy(b.advanced(by: r * dstStride), a.advanced(by: r * srcStride), min(srcStride, dstStride))
+                }
+            }
+        }
+        return dst
+    }
 
     /// ⚑ A session can DIE. `sensorFailed` is transient often enough that a retry is a real answer,
     /// so this is recorded, reported, and cleared by rebuilding rather than by restarting the app.
@@ -584,10 +640,25 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             ]
             if let surface { position["surface"] = surface }
 
-            // ⚑ Off the tracking thread. Encoding a 12 MP frame on the delegate queue is frames the
-            // tracker does not get, and the tracker is the thing this whole design exists to keep fed.
+            /*
+             ⛑ **The pixels are copied out and the frame is released BEFORE the hop, and that
+             ordering is the whole fix.**
+
+             ⚑ *The field signature was unmistakable:* the screen froze on the **first** photograph of
+             a zone while the shutter still fired, containers still opened and deletes still worked.
+             **Nothing was blocked — ARKit had simply stopped producing frames**, because this closure
+             held one of its pooled buffers for as long as a 12 MP JPEG encode *and* an OCR pass took.
+             The old camera's buffers could be held like this; ARKit's cannot.
+
+             *A ~35 MB memcpy costs a handful of milliseconds against a 78 ms shutter. A starved frame
+             pool costs the viewfinder for the rest of the zone.*
+             */
+            let w = Int(f.camera.imageResolution.width), h = Int(f.camera.imageResolution.height)
+            guard let pixels = self.copyBuffer(f.capturedImage) else {
+                completion(["ok": false, "why": "could not copy the frame"]); return
+            }
             self.encodeQueue.async {
-                let ci = CIImage(cvPixelBuffer: f.capturedImage)
+                let ci = CIImage(cvPixelBuffer: pixels)
                 guard let jpeg = CIContext().jpegRepresentation(
                     of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(),
                     options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95]
@@ -609,7 +680,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 if wantsText, let read = CameraController.readAccurately(jpeg: jpeg) { entry["ocr"] = read }
                 HSZoneLog.record("stillThroughArkit", [
                     "ms": ms, "bytes": jpeg.count, "mapping": mapping, "tracking": tracking,
-                    "w": Int(f.camera.imageResolution.width), "h": Int(f.camera.imageResolution.height),
+                    "w": w, "h": h,
                     "surface": surface != nil,
                 ])
                 DispatchQueue.main.async {
@@ -1067,7 +1138,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         /* ⚑ Every frame, because the pipeline does its own cadence gate — it counts frames and
            analyses every Nth, and it must do that counting once rather than once per source. */
-        onAnalysisFrame?(frame.capturedImage)
+        // ⚑ A COPY. See `copyBuffer` — handing ARKit's own buffer to another queue starves the
+        // frame pool, and a starved pool stops the session dead while the rest of the app runs on.
+        if onAnalysisFrame != nil, let copied = copyBuffer(frame.capturedImage) {
+            onAnalysisFrame?(copied)
+        }
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
         /* ⛑ **Positioning gets preview frames too, and its absence was the black viewfinder.**
@@ -1081,7 +1156,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         // ~20 fps is a live picture to a walking person and a third of the drawing work.
         guard Date().timeIntervalSince(lastPreviewAt) > 0.05 else { return }
         lastPreviewAt = Date()
-        onPreviewFrame?(frame)
+        // The pixels are copied; the anchors and the camera are their own objects and are safe to
+        // carry. **The ARFrame itself never leaves this method.**
+        if let copied = copyBuffer(frame.capturedImage) {
+            onPreviewFrame?(copied, frame.anchors.compactMap { $0 as? ARMeshAnchor }, frame.camera)
+        }
     }
 
     /**

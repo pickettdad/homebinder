@@ -438,21 +438,20 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
      A frame arriving while one is drawing is **dropped**, not queued: a preview is about *now*, and
      a backlog only makes the picture later.
      */
-    private func drawArPreview(_ frame: ARFrame) {
+    private func drawArPreview(_ buffer: CVPixelBuffer, _ anchors: [ARMeshAnchor], _ camera: ARCamera) {
         guard arPreview != nil, !previewBusy else { return }
         previewBusy = true
         previewQueue.async { [weak self] in
-            self?.renderArPreview(frame)
+            self?.renderArPreview(buffer, anchors, camera)
             self?.previewBusy = false
         }
     }
 
-    private func renderArPreview(_ frame: ARFrame) {
+    private func renderArPreview(_ buffer: CVPixelBuffer, _ anchors: [ARMeshAnchor], _ camera: ARCamera) {
         guard arPreview != nil else { return }
-        let ci = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        let ci = CIImage(cvPixelBuffer: buffer).oriented(.right)
         guard let base = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
 
-        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
         guard !anchors.isEmpty else {
             DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = base }
             return
@@ -481,10 +480,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
          * Filled rather than stroked because the question is *is this surface captured*, and a
          * translucent film answers it at a glance where an outline asks to be interpreted.
          */
-        let cam = frame.camera.transform.columns.3
+        let cam = camera.transform.columns.3
         let camPos = SIMD3<Float>(cam.x, cam.y, cam.z)
         // World → camera space, so "is this behind me" is one multiply and a sign test.
-        let viewMatrix = simd_inverse(frame.camera.transform)
+        let viewMatrix = simd_inverse(camera.transform)
         let near = anchors.sorted {
             let a = $0.transform.columns.3, b = $1.transform.columns.3
             return simd_distance(camPos, SIMD3<Float>(a.x, a.y, a.z))
@@ -529,7 +528,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                        at the frame edge and keeps every remaining shape honest. */
                     let camSpace = viewMatrix * world
                     guard camSpace.z < -0.05 else { ok = false; break }
-                    let screen = frame.camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
+                    let screen = camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
                                                            orientation: .portrait,
                                                            viewportSize: size)
                     guard screen.x.isFinite, screen.y.isFinite,
@@ -678,7 +677,9 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             made.onAnalysisFrame = { [weak self] buffer in self?.controller?.analyseAsync(buffer) }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
-            made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
+            made.onPreviewFrame = { [weak self] buffer, anchors, camera in
+                self?.drawArPreview(buffer, anchors, camera)
+            }
             made.hideArPreview = { [weak self] in self?.detachArPreview() }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())

@@ -166,6 +166,37 @@ that string."*
 **What the desk gets:** for each leg, its frames, its two position anchors, and the narration spoken
 over exactly that leg — bound by one `captureId`, with `continuesFrom` linking the legs into the run.
 
+### ⚑ How a traverse is ordered — three mechanisms, declared, with what each guarantees
+
+**Ruled 2026-09-04.** *The ordering already ships; the contract did not.* ⛑ **The desk is about to
+depend on all three, and if any changes semantics, run traces and placement break silently — no
+error, just wrong answers.** Counts below are from the 2026-08-30 export: 301 `pan` media, 12 legs.
+
+**1 · `events[].seq` orders the legs.** Runs 1…205, and **exactly 12 `pan` frames carry a
+`PhotoAdded` event** — one per leg, the primary. *Guarantee: every leg has exactly one event, and
+event order is leg order.*
+
+**2 · `frame.continuesFrom` separates runs from legs.** On **185 media, all `pan`**, pointing at the
+previous leg's `captureId`. **8 of the 12 legs carry one; the 4 that do not are run starts.**
+⚑ *Guarantee: absence marks the head of a run.* Without it, four separate run traces read as one
+twelve-leg run.
+
+**3 · `position.at` marks the measurements — and is NOT distinct per leg.**
+
+⛑ **The design session's proposed clause said `position.at` is distinct on each leg's two positioned
+frames. It is not: 24 positioned `pan` frames carry 16 distinct values.** The eight duplicates are
+the eight chained boundaries — *`next leg` carries the end anchor of leg N forward as the start of
+leg N+1, timestamp included, because they are one measurement of one place at one moment.*
+
+⚑ **So a repeated `position.at` is information, not an error: it says these two frames share a
+boundary anchor.** *Guarantee: `position.at` identifies a measurement, never a frame.* **A desk that
+assumed distinctness would have split one anchor into two and mis-ordered exactly the boundaries the
+route depends on** — which is the failure the clause was written to prevent, in the clause itself.
+
+**And the interior frames have no order, no pose, and no reader.** 277 of the 301 carry neither a
+position nor a `primary` role. *Stated so nobody builds an ordering for them: nothing in the desk
+process reads them, and inventing a `seq` would be a field with no consumer.*
+
 ### ⚑ Why not a position per frame, said plainly so nobody asks for it as a small change
 
 **It is not a tuning problem, it is decision one.** A traverse runs on the `AVCaptureSession` with

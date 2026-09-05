@@ -839,6 +839,22 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     /**
+     ⚑ **Try to get the session back without touching the camera.**
+
+     A `sensorFailed` while a zone is open is contention that has usually cleared by the time anyone
+     reacts, and the only correct response is *ask ARKit again* — never *give the lens to the thing
+     that took it.* ⛑ The old handler did the second, which produced the next `sensorFailed`, five
+     times in nine minutes.
+     */
+    func retry() -> [String: Any] {
+        guard let m = mode else { return ["ok": false, "why": "no zone open"] }
+        failure = nil
+        let unmet = enter(m, reset: true)
+        showArPreview?(session)
+        return ["ok": failure == nil, "mode": m.rawValue, "unmet": unmet, "why": failure ?? ""]
+    }
+
+    /**
      Wait for a frame ARKit is willing to stand behind, or give up and say so.
 
      ⚑ **Bounded, and the timeout is a result rather than a failure to report later.** A pose taken

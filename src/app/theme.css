@@ -83,3 +83,34 @@ html.hs-camera-live #root {
 :root {
   color-scheme: dark;
 }
+
+/*
+  ⛑ **iOS's press-and-hold menu is switched off everywhere, and "everywhere" is the ruling.**
+
+  Long-pressing a photograph or a container brought up the system's share / save / copy sheet on
+  top of the app — over a viewfinder, mid-inspection, and *on the very gesture that deletes an
+  object*, so the confirmation and the OS menu arrived together.
+
+  ⚑ **There is no point in this product where the system menu is the right answer.** A concierge
+  never wants to save an inspection photograph to their camera roll or copy it to a message; the
+  export is the only way anything leaves, deliberately. **So it is off globally rather than
+  suppressed on the two controls that happened to surface it** — a per-control fix would have been
+  rediscovered as a bug on the third control to grow a long press.
+
+  `user-select` is off with it: a text selection loupe over a live camera preview is the same class
+  of interruption, and nothing here is text a person needs to select. *Inputs are exempt, because
+  they are the one place typing and selecting is the act.*
+*/
+:root,
+body {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}

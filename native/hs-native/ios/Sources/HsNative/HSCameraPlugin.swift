@@ -644,8 +644,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                both hold the rear camera: run them together and ARKit is refused with `sensorFailed`
                while the preview freezes — both seen in the field 2026-08-21. The zone session asks
                for the camera, uses it, and gives it straight back. */
-            made.needCamera = { [weak self] in self?.controller?.yieldCamera() }
-            made.releaseCamera = { [weak self] in self?.controller?.reclaimCamera() }
+            made.needCamera = { [weak self] in
+                self?.controller?.takeCameraForZone()
+            }
+            made.releaseCamera = { [weak self] in self?.controller?.giveCameraBackFromZone() }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
             made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
@@ -1342,6 +1344,18 @@ final class CameraController: NSObject {
      so coming back is `startRunning()` rather than a rebuild — which is why the handover is
      milliseconds and not the nine seconds that would come from tearing the input down.
      */
+    /// ⚑ The zone takes the lens and keeps it. See `zoneOwnsCamera`.
+    func takeCameraForZone() {
+        zoneOwnsCamera = true
+        yieldCamera()
+    }
+
+    /// The two moments a person actually asked for the lens back: pausing, and closing the zone.
+    func giveCameraBackFromZone() {
+        zoneOwnsCamera = false
+        reclaimCamera()
+    }
+
     func yieldCamera() {
         /* ⛑ **Synchronous, and asynchronous was the intermittent "Required sensor failed"**
            (field 2026-08-23).
@@ -1357,7 +1371,24 @@ final class CameraController: NSObject {
         HSZoneLog.record("cameraYielded", ["running": session.isRunning])
     }
 
+    /**
+     ⚑ **Refused while a zone holds the lens.**
+
+     The zone session now runs for the life of a room rather than for the instant a pose is taken,
+     so *"give the camera back"* stopped being a safe request. ⛑ Smoke test 2026-09-05: five
+     `Required sensor failed` in nine minutes, a nine-second preset restore, a black screen — **and
+     zero photographs through the tracking session** — because something reclaimed the lens, ARKit
+     failed, the failure handler released the lens again, and round it went.
+
+     *Ownership is a fact about the zone, not a race between two callers.*
+     */
+    private(set) var zoneOwnsCamera = false
+
     func reclaimCamera() {
+        guard !zoneOwnsCamera else {
+            HSZoneLog.record("reclaimRefused", ["reason": "zone owns the camera"])
+            return
+        }
         /* ⛑ **Synchronous, for the same reason `yieldCamera` is — and leaving this one async is why
            switching to Text froze the viewfinder** (field 2026-08-23).
 

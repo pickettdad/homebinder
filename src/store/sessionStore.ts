@@ -240,6 +240,26 @@ function acquireSessionLock(sessionId: string): void {
   });
 }
 
+/**
+ * Every media ref in a session, primaries only — siblings hang off these.
+ *
+ * ⚑ A local walk rather than an export from `foldV2`: the fold's own `findMedia` is a closure over
+ * the state it is building, and lifting it out would give one function two homes. This reads the
+ * finished state, which is the only thing a caller here has.
+ */
+function findMediaRef(session: SessionStateV2, mediaId: string) {
+  const lists = [
+    session.inbox,
+    ...session.zones.flatMap((z) => [z.photos, z.voiceNotes]),
+    ...session.pins.flatMap((p) => [p.photos, p.voiceNotes]),
+  ];
+  for (const list of lists) {
+    const hit = list.find((m) => m.mediaId === mediaId);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 export const useApp = create<AppStore>((set, get) => ({
   ready: false,
   screen: { name: "home" },
@@ -537,9 +557,29 @@ export const useApp = create<AppStore>((set, get) => ({
     );
   },
 
+  /**
+   * ⛑ **Deletes the frame AND the frames that came with it.**
+   *
+   * A bracketed plate is four rows in the media table and one ref in the log. Discarding used to
+   * delete **one** row: the fold correctly dropped the whole ref including its siblings, so nothing
+   * broke visibly — *and the other three blobs stayed in IndexedDB with no reference anywhere, on a
+   * device whose storage budget is the reason media has its own table.* **A silent leak, on the one
+   * act whose entire purpose is to reclaim space.**
+   *
+   * ⚑ **And it refuses on a completed session.** `reassignMedia` above already asserts this — its
+   * comment calls filing into a closed zone *"the back door"* — while discard did not, so a third
+   * delete gesture would have been free to remove evidence from a finished inspection. *The
+   * asymmetry was never a decision; it was an omission that two screens happened to cover.*
+   */
   async discardMediaV2(mediaId) {
+    const session = get().v2Session;
+    assertEditable(session, undefined);
+    // Read the ref BEFORE dispatching: the fold detaches it, and afterwards there is nothing to
+    // ask which frames belonged to it.
+    const ref = session ? findMediaRef(session, mediaId) : undefined;
+    const ids = [mediaId, ...(ref?.siblings ?? []).map((s) => s.mediaId)];
     await get().dispatchV2([{ type: "MediaDiscarded", mediaId }]);
-    await deleteMedia([mediaId]);
+    await deleteMedia(ids);
   },
 
   async reassignMedia(mediaId, target) {

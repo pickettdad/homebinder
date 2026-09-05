@@ -272,6 +272,31 @@ about 94 px. Text smaller than that is not attempted. *The walk's numbers sugges
 currently costing us serials, and lowering it is untested — recorded as a known lever, not as a
 defect.*
 
+## 1c · What a deletion looks like in the export — two acts, two shapes
+
+**Shipped 2026-09-04.** The concierge can now delete a capture and delete an object container. ⚑
+**Neither removes anything silently, and the two behave differently on purpose.**
+
+| act | event | in the export |
+|---|---|---|
+| **Delete a capture** | `MediaDiscarded` | ⛑ **The media entry is GONE**, along with every sibling frame of that capture. Its only trace is the verbatim `MediaDiscarded` in `events[]` |
+| **Delete an object** | `PinRetired` | ⚑ **The container and every photograph of it STAY**, with `pins[].retired = { at, note }`. *A record that a thing was removed is worth more than the absence of the thing* |
+
+⛑ **So a retired container's media is fully present in `media[]` and fully packed in the zip**, and
+`totals.pins` and `totals.photos` count it. **The binder must join `media[].owner.pinId` back to
+`pins[].retired` to know.** *That join was possible and undeclared; it is declared now.* The note
+reads `"deleted in the room"`.
+
+**Why the asymmetry.** A discarded capture is usually a misfire — a frame of the floor, a frame of
+nothing — and there is no question a desk could ask about it. A deleted **object** is different: the
+concierge photographed a thing and then decided it was wrong, and *that decision is information the
+desk may want to see.* **The photographs are what makes the decision reviewable.**
+
+⚑ **And a sibling can be deleted on its own.** A bracket's extra frames are nested under their
+primary; deleting one splices it out of `siblings[]` and the primary survives. *Until 2026-09-04 that
+orphaned the event while the blob was already destroyed, and the export threw on the first bracketed
+plate anyone deleted — found by audit before the gesture shipped, not by a failed export.*
+
 ## 2 · Two new `intent` values — `floorplan` and `mesh`
 
 Both are ordinary captures: real files, real hashes, listed in `media[]` like any photograph, with

@@ -34,6 +34,7 @@ import {
   type OpenContainer,
 } from "../capture/objectContainer";
 import { useVoiceRecorder } from "../capture/useVoiceRecorder";
+import { ConfirmSheet } from "../ui/bits";
 import { ZoneStrip } from "./ZoneStrip";
 import { FloorPlanView } from "./FloorPlanView";
 import { zoneMeasures } from "../native/zone";
@@ -209,11 +210,18 @@ function ObjectStrip({
   model,
   onNew,
   onTap,
+  onHold,
 }: {
   model: ReturnType<typeof stripModel>;
   onNew: () => void;
   onTap: (pinId: string) => void;
+  /** ⛑ Long press. The strip's tap is already spent on enter/leave, and this control must NOT also
+   *  change which container is open — *a control that silently changes what the next shot means is
+   *  the container failure this strip's own doctrine warns about.* */
+  onHold: (pinId: string) => void;
 }) {
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
   return (
     <div className="absolute bottom-32 left-2 top-14 flex w-16 flex-col gap-2 overflow-y-auto">
       <button
@@ -233,7 +241,18 @@ function ObjectStrip({
             // The label carries the state, because the ring is the only other thing that does and
             // a ring is not readable by anything that is not an eye.
             aria-label={inside ? `Leave object ${object.number}` : `Object ${object.number}`}
-            onClick={() => onTap(object.pinId)}
+            onPointerDown={() => {
+              fired.current = false;
+              held.current = setTimeout(() => {
+                fired.current = true;
+                onHold(object.pinId);
+              }, 600);
+            }}
+            onPointerUp={() => held.current && clearTimeout(held.current)}
+            onPointerLeave={() => held.current && clearTimeout(held.current)}
+            // A press that became a hold must not also be a tap — otherwise deleting an object
+            // enters it on the way past.
+            onClick={() => { if (!fired.current) onTap(object.pinId); }}
             className={`h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-slate-900/70 ${
               inside ? "ring-2 ring-brass-400" : "ring-1 ring-slate-500"
             }`}
@@ -331,7 +350,7 @@ export function CameraScreen({
   zoneId?: string;
   startAction?: "floorplan" | "mesh" | "room-shot" | "traverse" | "document";
 }) {
-  const { navigate, showToast, v2Session, createPin, capturePhotoV2 } = useApp();
+  const { navigate, showToast, v2Session, createPin, capturePhotoV2, discardMediaV2, retirePin } = useApp();
   const [status, setStatus] = useState<ModeStatusEvent | null>(null);
   /** The latest status, readable from callbacks that must not re-subscribe when it changes —
    *  `beginTraverse` needs the lens state and is deliberately stable. */
@@ -375,6 +394,10 @@ export function CameraScreen({
      takes to relocalise. The field read that as a crash — *"screen goes black and stayed black"* —
      which is what an unexplained black screen means to anyone. It is now labelled. */
   const [measuring, setMeasuring] = useState(false);
+  /** The capture awaiting a delete confirmation, or null. */
+  const [confirmDelete, setConfirmDelete] = useState<MediaRef | null>(null);
+  /** The container awaiting a delete confirmation, or null. */
+  const [confirmContainer, setConfirmContainer] = useState<string | null>(null);
   /** The last leg-boundary audio gap, in ms. Shown so the requirement is answered by a number. */
   const [voiceGapMs, setVoiceGapMs] = useState<number | null>(null);
   const pendingIntentRef = useRef<CaptureIntent | null>(null);
@@ -1659,6 +1682,7 @@ export function CameraScreen({
         <ObjectStrip
           model={strip}
           onNew={() => void newContainer()}
+          onHold={(pinId) => setConfirmContainer(pinId)}
           onTap={(pinId) => setOpen((current) => tapContainer(current, pinId, zoneId))}
         />
       )}
@@ -1677,6 +1701,59 @@ export function CameraScreen({
       {/* ⛑ **The black screen, named.** While ARKit holds the lens the capture session is stopped
           and there is nothing to draw — 1 s on a fresh session, up to 5 s relocalising. Unlabelled,
           that is indistinguishable from a crash, and the field read it as one twice. */}
+      {/*
+        ⛑ **Two confirmations, and each names what it will destroy.** *"Delete this photograph?"* is
+        answerable without knowing what happens to the other three frames of a bracket, or to the
+        eleven photographs inside a container — so the count is in the question.
+
+        ⚑ **A deleted container is a tombstone, not a hole.** Its photographs stay in the export
+        with the container marked retired, because *a record that a thing was removed is worth more
+        than the absence of the thing* — and the desk is told so in the manifest rather than left to
+        infer it from a join.
+      */}
+      <ConfirmSheet
+        open={confirmDelete !== null}
+        title="Delete this capture?"
+        detail={
+          confirmDelete
+            ? `${1 + (confirmDelete.siblings?.length ?? 0)} frame${(confirmDelete.siblings?.length ?? 0) ? "s" : ""} will be removed from this visit and from the export. This cannot be undone in the room.`
+            : ""
+        }
+        confirmLabel="Delete the capture"
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => {
+          const target = confirmDelete;
+          setConfirmDelete(null);
+          setOpenCapture(null);
+          if (target) {
+            void discardMediaV2(target.mediaId).catch((e) =>
+              setError(e instanceof Error ? e.message : "Could not delete that capture"),
+            );
+          }
+        }}
+      />
+      <ConfirmSheet
+        open={confirmContainer !== null}
+        title="Delete this object?"
+        detail={(() => {
+          const pin = v2Session?.pins.find((p) => p.pinId === confirmContainer);
+          const n = pin?.photos.length ?? 0;
+          return `Object ${pin?.number ?? "?"} and its ${n} photograph${n === 1 ? "" : "s"} will be marked deleted. The desk will see it was removed rather than that it never existed.`;
+        })()}
+        confirmLabel="Delete the object"
+        onCancel={() => setConfirmContainer(null)}
+        onConfirm={() => {
+          const id = confirmContainer;
+          setConfirmContainer(null);
+          if (id) {
+            // Leave it if it is the one open, so the next shot cannot land in a deleted container.
+            if (openRef.current?.pinId === id) setOpen(null);
+            void retirePin(id, "deleted in the room").catch((e) =>
+              setError(e instanceof Error ? e.message : "Could not delete that object"),
+            );
+          }
+        }}
+      />
       {measuring && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70">
           <p className="rounded-lg bg-slate-900/90 px-4 py-3 text-sm text-slate-200 ring-1 ring-slate-600">
@@ -2226,6 +2303,19 @@ export function CameraScreen({
                   }`}
                 >
                   1:1
+                </button>
+                {/* ⛑ **Deletes the CAPTURE, never the frame being looked at.** This viewer is a
+                    frame stepper, so the obvious reading of "delete this" is the frame on screen —
+                    and a bracket's siblings are nested under their primary. *A misfire is a whole
+                    capture in the wrong place, not one exposure of it*, which is the act the owner
+                    asked for. It acts on `openCapture`, and `shownFrame` is deliberately not
+                    consulted. */}
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(openCapture)}
+                  className="rounded-lg bg-red-900/60 px-3 py-2 text-sm text-red-200 ring-1 ring-red-700"
+                >
+                  delete
                 </button>
                 <button
                   type="button"

@@ -269,11 +269,31 @@ export function foldV2(events: V2SessionEvent[]): SessionStateV2 {
     return undefined;
   };
 
-  /** Remove a media ref from every holder (pin/zone/inbox); undefined if unknown. */
+  /**
+   * Remove a media ref from every holder (pin/zone/inbox); undefined if unknown.
+   *
+   * ⛑ **Siblings are matched too, and without that a delete corrupts the export.**
+   *
+   * A bracket or a torch pair files as ONE ref with its extra frames nested in `siblings`, and the
+   * viewer a delete gesture naturally lives on is a **frame stepper** — so the id in hand is often
+   * a sibling's. `MediaDiscarded` on one used to match nothing here, orphan the event, and leave the
+   * sibling in `manifest.media` — *while the store had already destroyed its blob*, so the export
+   * threw `media <id> missing from storage` on the first bracketed plate anyone deleted.
+   *
+   * ⚑ **Found by an adversarial audit before the gesture shipped, not by an export failing in the
+   * field.** Splicing the sibling out of its primary's array is the whole fix: the primary survives,
+   * the frame goes, and the manifest and the blob store agree again.
+   */
   const detachMedia = (mediaId: string): MediaRef | undefined => {
     for (const list of allMediaLists()) {
       const idx = list.findIndex((m) => m.mediaId === mediaId);
       if (idx !== -1) return list.splice(idx, 1)[0];
+      // A sibling of one of these, one level down. Recursion is deliberately not deeper: a sibling
+      // of a sibling is not a thing a capture can produce.
+      for (const ref of list) {
+        const s = ref.siblings?.findIndex((x) => x.mediaId === mediaId) ?? -1;
+        if (s !== -1) return ref.siblings!.splice(s, 1)[0] as MediaRef;
+      }
     }
     return undefined;
   };

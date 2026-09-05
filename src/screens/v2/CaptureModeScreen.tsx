@@ -329,12 +329,17 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
     the design session's own §8 audit. **The question it answers is exactly the one this banner
     asks**, so it is wired here rather than reimplemented.
   */
+  /* ⛑ **Retired containers are excluded, and leaving them in was my own bug.** A container the
+     concierge deleted still carries its photographs in the fold — that is what a tombstone means —
+     so counting it made the banner report objects the desk will never be asked to place, *and it
+     would have started doing so the moment a delete gesture shipped.* `isObjectContainer` already
+     excludes retired pins by construction; this had reimplemented the filter and forgotten the
+     clause. */
+  const liveContainers = v2Session.pins.filter((p) => p.zoneId === zone.zoneId && !p.retired);
   const gaps = zoneGaps({
-    photos: zone.photos.length + v2Session.pins.filter((p) => p.zoneId === zone.zoneId).reduce((n, p) => n + p.photos.length, 0),
+    photos: zone.photos.length + liveContainers.reduce((n, p) => n + p.photos.length, 0),
     hasFloorplan: zone.photos.some((m) => m.intent === "floorplan"),
-    containers: v2Session.pins
-      .filter((p) => p.zoneId === zone.zoneId)
-      .map((p) => ({ frames: p.photos.map((m) => ({ position: m.position as never })) })),
+    containers: liveContainers.map((p) => ({ frames: p.photos.map((m) => ({ position: m.position as never })) })),
   });
 
   return (

@@ -682,6 +682,33 @@ export function CameraScreen({
   }, [zoneId, capturePhotoV2]);
 
   /**
+   * ⛑ **Leaving by the back button finishes the scan; it does not abandon it.**
+   *
+   * Field 2026-09-05: *"I backed out of mesh and went to do the captures, and the top label still
+   * said mesh."* ⚑ **Only the finish buttons returned the session to positioning**, so a concierge
+   * who left any other way carried mesh mode into every capture that followed — and the native
+   * session agreed with the label, which is the part that mattered: those photographs were taken by
+   * a session still configured to reconstruct a room.
+   *
+   * **Finishing rather than discarding is the deliberate half.** The alternative — drop the mode,
+   * drop the geometry — loses a walk somebody actually did because they used the wrong exit.
+   * *`finishMesh` already files nothing when nothing was built, so an abandoned scan costs a
+   * function call and a real one is saved.*
+   *
+   * ⚑ The ref is written in an effect and read in an unmount cleanup, because a cleanup closes over
+   * the render that created it — and reading `meshing` directly here is exactly the stale-state
+   * mistake this file has now made three times.
+   */
+  const leaveRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    leaveRef.current = () => {
+      if (meshing) void finishMesh();
+      else if (scanning) void finishScan();
+    };
+  });
+  useEffect(() => () => leaveRef.current(), []);
+
+  /**
    * ⚑ Rebuild rather than resume. A failed `ARSession` cannot be revived by `run(config)` — that is
    * what made every mode after a failure inherit the corpse — so this closes the zone and opens it
    * again, which is the one thing that was previously only achievable by relaunching the app.

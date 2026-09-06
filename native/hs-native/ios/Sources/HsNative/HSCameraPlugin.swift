@@ -1290,6 +1290,36 @@ final class CameraController: NSObject {
             }
             self.sessionQueue.async {
                 do {
+                    /*
+                     ⛑ **The ownership hole, and it was the only path without a guard.**
+
+                     `reclaimCamera` refuses while a zone holds the lens. **This does not go through
+                     `reclaimCamera`** — opening the capture screen calls `start()`, which configured
+                     and started the capture session unconditionally. With a zone open that is ARKit
+                     being shoved off the sensor, and the field log shows it four times in ninety
+                     seconds: `cameraToZone` → `presetReasserted` → **`sessionFailed: Required sensor
+                     failed`** → a forced re-init with a **new world origin**. ⚑ *That is the
+                     "positioning stopped — tap to restart it" the concierge kept meeting, and six
+                     re-inits is six origins, which is the drift problem coming back in by a side
+                     door.*
+
+                     ⚑ **Checked here, inside the queue block, not at the call site** — this hop is
+                     asynchronous, so a check made before it says what was true then, not what is
+                     true when the camera is actually touched.
+
+                     While the zone owns the lens there is nothing to start: **ARKit is the camera**,
+                     its preview is already on screen, and stills go through `captureStill`. Attaching
+                     the capture session's own preview layer over it would show exactly the black
+                     rectangle the field reported, because that layer has no running session behind it.
+                     */
+                    if self.zoneOwnsCamera {
+                        HSZoneLog.record("startDeferredToZone", ["mode": mode.rawValue])
+                        DispatchQueue.main.async {
+                            self.startStatusSampling()
+                            completion(.success(self.capabilities(unmetAtStart: [])))
+                        }
+                        return
+                    }
                     try self.configureSession()
                     self.session.startRunning()
                     DispatchQueue.main.async {

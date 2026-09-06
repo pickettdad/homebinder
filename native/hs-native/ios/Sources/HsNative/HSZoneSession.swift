@@ -934,7 +934,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     func retry() -> [String: Any] {
         guard let m = mode else { return ["ok": false, "why": "no zone open"] }
         failure = nil
-        let unmet = enter(m, reset: true)
+        // ⚑ **No reset.** Preserving the origin is the entire difference between retrying in place
+        // and reopening the zone — see `everRan` in `didFailWithError`.
+        let unmet = enter(m)
         showArPreview?(session)
         return ["ok": failure == nil, "mode": m.rawValue, "unmet": unmet, "why": failure ?? ""]
     }
@@ -1159,7 +1161,22 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         // The pixels are copied; the anchors and the camera are their own objects and are safe to
         // carry. **The ARFrame itself never leaves this method.**
         if let copied = copyBuffer(frame.capturedImage) {
-            onPreviewFrame?(copied, frame.anchors.compactMap { $0 as? ARMeshAnchor }, frame.camera)
+            /*
+             ⛑ **The overlay is a mesh-mode affordance, so it is gated on the MODE and never on
+             whether anchors happen to exist.**
+
+             ⚑ *This is my own regression from the drift fix.* Positioning now runs with
+             `sceneReconstruction = .mesh` continuously — mesh helps tracking — so **mesh anchors
+             exist in every mode**, and an overlay drawn whenever anchors are present is an overlay
+             drawn always. The field read it exactly as it looks: *"went back to photograph this
+             room and it was still showing the mesh overlay."*
+
+             **A gold film over the viewfinder means *this surface is captured*. In a mode that is
+             not capturing surfaces it means nothing, and a signal that means nothing is one that
+             gets read as the mode it belongs to.**
+             */
+            let overlay = mode == .mesh ? frame.anchors.compactMap { $0 as? ARMeshAnchor } : []
+            onPreviewFrame?(copied, overlay, frame.camera)
         }
     }
 
@@ -1178,7 +1195,21 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     func session(_ session: ARSession, didFailWithError error: Error) {
         HSZoneLog.record("sessionFailed", ["error": error.localizedDescription])
         failure = error.localizedDescription
-        everRan = false
+        /*
+         ⛑ **Contention is not a dead session, and clearing this flag treated them as the same.**
+
+         `everRan = false` forces the next `enter` to run with `.resetTracking`, **which mints a new
+         world origin** — so every pose already taken in the room is silently re-based against a
+         different one. ⚑ *That is the drift failure this whole rebuild exists to remove, arriving
+         through the recovery path.* The 2026-09-05 log shows six re-inits in ninety seconds, each
+         one a new origin, each one triggered by a `sensorFailed` that was itself avoidable.
+
+         **`sensorFailed` means something else took the lens for a moment.** The map is intact and
+         ARKit can relocalize into it — and if it cannot, tracking says `limited(relocalizing)`,
+         which is an honest state a concierge can act on. *Any other error is a session that really
+         is gone, and there a fresh origin is the truthful answer rather than a silent one.*
+         */
+        everRan = (error as NSError).code == ARError.sensorFailed.rawValue
         paused = true
         /*
          ⛑ **The camera is NOT handed back here, and handing it back was a failure LOOP.**

@@ -1,4 +1,9 @@
 import ARKit
+// ⚑ Explicit, as in every sibling that touches the AR primary camera (`HSArProbe`, `HSPlateAB`,
+// `HSControlProbe`, `HSLensProbe`): `configurableCaptureDeviceForPrimaryCamera` hands back an
+// `AVCaptureDevice`, and reading a member of it needs this module in scope rather than assumed
+// out of ARKit's own imports.
+import AVFoundation
 import Foundation
 import RoomPlan
 import simd
@@ -232,6 +237,13 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "mode": mode?.rawValue ?? Mode.positioning.rawValue,
             "unmet": [String](),
             "reused": true,
+            /* ⛑ **"Answers identically" has to include the arm state** (audit 2026-09-06). This is the
+               REUSE answer, and it left `armed` out — so a concierge who paused positioning, stepped
+               back to the zone screen and returned got a strip reset to *offer Pause* over a session
+               still refusing every position with `why: "paused"`. ⚑ `anchorAvailability` then told
+               them the room could be anchored while nothing in it could: the wall at the top of this
+               file, reached through the viewfinder instead of through a capture, and silent both ways. */
+            "armed": armed,
             "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
             "roomPlanSupported": RoomCaptureSession.isSupported
         ]
@@ -269,6 +281,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "startedAt": ISO8601DateFormatter().string(from: startedAt),
             "mode": Mode.positioning.rawValue,
             "unmet": [String](),
+            /* Read off the variable rather than written `true`, so this answer and `state()`'s reuse
+               answer cannot drift apart — which is the defect above with the sides swapped. */
+            "armed": armed,
             "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
             "roomPlanSupported": RoomCaptureSession.isSupported
         ]
@@ -363,11 +378,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             /* ⛑ **Plane detection stays ON, and stripping it was a bug I introduced** (zone log,
                2026-08-21: `surface: false` on every position taken).
 
-               The ray-cast needs something to hit. With no plane search and no reconstruction there
-               is no geometry in the session at all, so `raycast` returns an empty array every time
-               and the pose comes back with no surface — ⚑ **which is the difference between *where
-               the concierge stood* and *what they were standing in front of***, and the second is
-               the one a measurement needs.
+               ⛑ **The REASON has changed, and the old one must not be re-derived from this
+               line.** It read *the ray-cast needs something to hit* — and that is no longer why:
+               the surface point is measured depth on the optical axis, falling back to a
+               ray/triangle intersection against the mesh (`HSSurface`), and **planes are not
+               consulted at all.** Plane detection stays because removing it is a *configuration*
+               change, and a configuration change is a session re-run — a measured ~15 mm pose jump
+               and a second of `limited(initializing)`, paid to delete something that is merely
+               unused. ⚑ *Unused is not harmful, and this file's rule is that a re-run earns itself.*
+
+               What that old reason pointed at is still true and still the point: ⚑ **the difference
+               between *where the concierge stood* and *what they were standing in front of***, and
+               the second is the one a measurement needs.
 
                ⛑ **Reconstruction is now ON here, and that reverses the note this comment used to
                carry.** It said reconstruction was *the expensive half and the mesh mode's job* —
@@ -376,9 +398,13 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                **`nominal` for all 5,520 samples**, never dropped a frame from 24 fps, and used
                **9% of the battery against the sleeping build's 17%.**
 
-               ⚑ **And the mesh is what the ray-cast should hit.** A plane is a guess at a surface;
-               the mesh *is* the surface, and the desk's own process says so — *"where a mesh covers a
-               confirmed container, prefer it for position and extent."* */
+               ⚑ **And a plane is a guess at a surface; the mesh *is* the surface** — the desk's
+               own process says so, *"where a mesh covers a confirmed container, prefer it for
+               position and extent."* ⛑ *That doctrine sat here for four weeks while both capture
+               doors ray-cast at `.estimatedPlane` and nothing ever queried the mesh.* It is executed
+               now: `HSSurface` measures depth on the axis first and intersects the mesh where depth
+               cannot see, and the reconstruction this configuration accumulates is what the second
+               rung reads — as well as the extent `harvestMesh` ships. */
             config.planeDetection = [.horizontal, .vertical]
             if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
                 config.sceneReconstruction = .mesh
@@ -452,8 +478,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
          floorplan — took the camera away from AVFoundation on the first photograph and **never put
          anything in its place.** The viewfinder froze on one frame for the rest of the zone while
          the shutter, the containers and the filmstrip all kept working. *It used to be survivable
-         because `sleepSession()` handed the lens back within seconds; that function now has no
-         callers at all.*
+         because `sleepSession()` handed the lens back within seconds; that function has since been
+         deleted for want of a caller.*
 
          **The rule moves here because a rule kept in N callers holds until somebody writes N+1** —
          which is the same finding as `finishScan`, the roomWaiter, and `reclaimCamera`, and this is
@@ -735,19 +761,42 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let mapping = self.mappingWord(f)
             let tracking = HSArProbe.describe(f.camera.trackingState)
 
-            /* ⚑ On-axis ray from THIS frame's transform. The optical axis is the one ray that needs
-               no pixel-to-sensor mapping, so it is immune to the intrinsics misregistration reported
-               between the stream and the high-resolution frame on some iPad generations. */
-            let origin = SIMD3<Float>(p.x, p.y, p.z)
-            let dir = SIMD3<Float>(-t.columns.2.x, -t.columns.2.y, -t.columns.2.z)
-            var surface: [String: Any]? = nil
-            if let hit = self.session.raycast(
-                ARRaycastQuery(origin: origin, direction: dir, allowing: .estimatedPlane, alignment: .any)
-            ).first {
-                let q = hit.worldTransform.columns.3
-                surface = ["x": Double(q.x), "y": Double(q.y), "z": Double(q.z),
-                           "distance": Double(simd_distance(origin, SIMD3<Float>(q.x, q.y, q.z)))]
-            }
+            /*
+             ⛑ **The lamp is asked; it used to be asserted.** This entry hard-coded `"torch": false`,
+             so a still taken with the torch lit was filed as an unlit frame — and *labelled* one:
+             `storedFrameLabel` prints "no torch" straight off this field. **Nothing downstream can
+             recover it from the pixels**, so a wrong value here is permanent, and it is the lighting
+             provenance of the photograph the desk is about to judge.
+
+             ⚑ *A zone does not keep the torch off, and that is the whole of the defect.* The capture
+             session stops when the zone takes the lens, but `CameraController` keeps evaluating the
+             torch on its five-second status timer, and the torch button is live in a zone and still
+             reaches `adjust` — which needs the controller, not a running session. Both write the
+             SAME `AVCaptureDevice` ARKit is driving: `HSPlateAB` lights a plate through this very
+             accessor mid-session, so this is measured rather than argued.
+
+             The lamp, not `CameraController.torchOn` — that is only what was last *written*, and
+             `HSControlProbe` measured a write `isTorchActive` had not caught up with on the next
+             line. And read at delivery rather than stamped at request the way the torch pair stamps
+             `torchForRequest`: the pair stamps because it toggles the lamp between two queued
+             requests, and here there is one frame, no toggle in flight, and an exposure that happens
+             *after* the request — so delivery is the nearer instant. `nil` is the one unreadable
+             state, ARKit declining to hand its primary camera back for configuration, and every
+             probe in this package that has asked has been handed a device on this iPad.
+             */
+            let torchLit = ARWorldTrackingConfiguration
+                .configurableCaptureDeviceForPrimaryCamera?.isTorchActive ?? false
+
+            /* ⚑ What the lens was aimed at, from THIS frame — and `HSSurface` is the one place
+               that decides, which is why the ray that used to be written out here is gone. The
+               optical axis is still the ray, and still for the reason it always was: it needs no
+               pixel-to-sensor mapping, so it is immune to the intrinsics misregistration reported
+               between the stream and the high-resolution frame on some iPad generations.
+
+               ⛑ The answer is a plain value with no ARKit object inside it, so it can cross the
+               encode hop below — this closure has already been taught once what holding ARKit's own
+               objects costs. */
+            let aim = HSSurface.ahead(of: f, live: self.session.currentFrame)
 
             var position: [String: Any] = [
                 "positioned": true, "zoneId": self.zoneId, "tracking": tracking,
@@ -766,7 +815,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                    This is the case `projection` was built for and it is now the ordinary one. */
                 "projection": ["projectable": true],
             ]
-            if let surface { position["surface"] = surface }
+            if let payload = aim.payload { position["surface"] = payload }
 
             /*
              ⛑ **The pixels are copied out and the frame is released BEFORE the hop, and that
@@ -803,14 +852,22 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 var entry: [String: Any] = [
                     "path": url.path, "bytes": jpeg.count, "index": 0,
                     "exifOrientation": CameraController.exifOrientation(of: jpeg),
-                    "torch": false, "lens": "normal",
+                    // `lens` stays a constant and is not the same kind of claim: world tracking is
+                    // offered only the wide-angle device on this iPad (`HSLensProbe`, 2026-08-24),
+                    // which is why `emitStatus` reports `normal` for the whole of a zone.
+                    "torch": torchLit, "lens": "normal",
                 ]
                 if wantsText, let read = CameraController.readAccurately(jpeg: jpeg) { entry["ocr"] = read }
-                HSZoneLog.record("stillThroughArkit", [
+                /* ⛑ **The old row carried `"surface": <bool>` and nothing else**, which is how
+                   a 96% hit rate read as validation while measuring how reliably a plane could be
+                   invented. What answered, how far, how sure, and what it cost — or, on a refusal,
+                   which rung refused and why. */
+                var row: [String: Any] = [
                     "ms": ms, "bytes": jpeg.count, "mapping": mapping, "tracking": tracking,
                     "w": w, "h": h,
-                    "surface": surface != nil,
-                ])
+                ]
+                for (key, value) in aim.log { row[key] = value }
+                HSZoneLog.record("stillThroughArkit", row)
                 DispatchQueue.main.async {
                     completion([
                         "ok": true, "latencyMs": ms, "frames": [entry],
@@ -846,8 +903,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      bolted on afterwards at the cost of a round each. Here it comes free and it ships from day one.
 
      **The pose is where the concierge STOOD, not where the object is** — marker-accurate, and
-     `surface` carries the ray-cast hit when there is one so the desk has both and can tell them
-     apart. *2.3 m from the panel* is defensible; *2,438 mm* is not.
+     `surface` carries the **measured** point in front of the lens when there is one, so the desk has
+     both and can tell them apart. *2.3 m from the panel* is defensible; *2,438 mm* is not.
      */
     func position() -> [String: Any] {
         guard mode != nil else { return ["positioned": false, "why": "no zone open"] }
@@ -864,7 +921,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         /* ⛑ **The lens goes back on EVERY path out of here, and it did not** (field 2026-08-23:
            the viewfinder freezing after a second shot, with the strip saying *hold still*).
 
-           The success path ended with `sleepSession()`. The failure path — tracking not settled in
+           The success path used to end with `sleepSession()`, deleted 2026-09-05 — see its tombstone below. The failure path — tracking not settled in
            time — returned early and skipped it, so ARKit kept the camera and the capture session
            never restarted. ⚑ **A frozen viewfinder was the app telling the truth about a lens
            nobody had given back.** The log said it in two lines: `cameraYielded` with no
@@ -947,8 +1004,6 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         }
         let t = frame.camera.transform
         let p = t.columns.3
-        /* Measured against the pose held at `sleepSession`, before anything else moves. */
-        let resumeJump: Float? = sleptAt.map { simd_distance($0, SIMD3<Float>(p.x, p.y, p.z)) }
         var out: [String: Any] = [
             "positioned": true,
             "zoneId": zoneId,
@@ -975,31 +1030,6 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "intrinsics": (0..<3).flatMap { r in (0..<3).map { c in Double(frame.camera.intrinsics[c][r]) } },
             "imageWidth": Int(frame.camera.imageResolution.width),
             "imageHeight": Int(frame.camera.imageResolution.height),
-            /*
-             ⚑ **The one measurement that observes the failure directly, at the instant it happens.**
-
-             *Where the session went to sleep, against where it thinks it woke up.* Everything else
-             on this pose — `mapping`, `reinits`, `sinceInitSec` — **describes conditions**. This
-             one is the discontinuity itself: the concierge does not teleport, so a large
-             `resumeJumpM` over a short `sleepSec` is the estimate moving, not the person.
-
-             ⛑ **Recorded because my own diagnosis was wrong and could not be tested.** I read
-             *zero `relocalizing` in 109 wakes* as evidence the wake was rebuilding the world —
-             and it is a **tautology**: `initialWorldMap` and `sessionShouldAttemptRelocalization`
-             appear nowhere in this plugin, so relocalisation was never possible to observe. *I
-             diagnosed one forced-constant field and built a conclusion on a second one in the same
-             message.* And `HSArProbe` had already measured this exact cycle: **origin moved
-             0.00003 m and the mesh came back byte-identical.** A wake that rebuilt the world could
-             not do that.
-
-             So the wake is not the mechanism, and **the mechanism is now something a number can
-             settle rather than an argument.** The leading candidate is genuine VIO drift in a
-             degenerate room — positioning is the one mode that runs with `sceneReconstruction = []`,
-             so it is the one mode without the LiDAR that would disambiguate repeating parallel
-             pipes at 0.3–0.6 m.
-            */
-            "resumeJumpM": resumeJump.map { Double($0) } as Any,
-            "sleepSec": sleptWhen.map { Date().timeIntervalSince($0) } as Any,
             "mode": mode?.rawValue ?? "",
             "at": ISO8601DateFormatter().string(from: Date()),
             "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
@@ -1007,22 +1037,20 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             // camera was facing and the desk needs that to ray-cast for itself later.
             "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(t[c][r]) } }
         ]
-        // Where the lens was pointing, hit against whatever geometry exists. Absent is fine and is
-        // recorded as absent — a mesh hole reads UNKNOWN, never "nothing there".
-        let origin = SIMD3<Float>(p.x, p.y, p.z)
-        let direction = -SIMD3<Float>(t.columns.2.x, t.columns.2.y, t.columns.2.z)
-        let query = ARRaycastQuery(origin: origin, direction: direction,
-                                   allowing: .estimatedPlane, alignment: .any)
-        if let hit = session.raycast(query).first {
-            let h = hit.worldTransform.columns.3
-            out["surface"] = [
-                "x": Double(h.x), "y": Double(h.y), "z": Double(h.z),
-                "distance": Double(simd_distance(origin, SIMD3<Float>(h.x, h.y, h.z)))
-            ]
-        }
+        /* Where the lens was pointing, measured. Absent is fine and is recorded as absent —
+           nothing to measure reads UNKNOWN, never "nothing there", and never a plausible number
+           nobody can tell from a measured one.
+
+           ⚑ **The same function the shutter asks**, because the traverse's two leg anchors come
+           through this door: a leg anchored by one rule and a photograph anchored by another is two
+           coordinate stories in one zone. *And the wrong `allowing:` value got written here twice
+           precisely because there were two places to write it.* */
+        let aim = HSSurface.ahead(of: frame, live: session.currentFrame)
+        if let payload = aim.payload { out["surface"] = payload }
         // The lens goes back in the `defer` above — on this path and on every other.
-        HSZoneLog.record("position", ["ok": true, "tracking": state,
-                                      "surface": out["surface"] != nil])
+        var row: [String: Any] = ["ok": true, "tracking": state]
+        for (key, value) in aim.log { row[key] = value }
+        HSZoneLog.record("position", row)
         return out
     }
 
@@ -1032,25 +1060,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         enter(.positioning)
     }
 
-    /** Where the camera was when the session went to sleep. See `resumeJump` — this is half of the
-     *  only measurement that observes the failure directly. */
-    private var sleptAt: SIMD3<Float>?
-    private var sleptWhen: Date?
+    /*
+     ⛑ **DELETED: `sleepSession()`, `sleptAt`, `sleptWhen`, and the two pose keys they fed —
+     `resumeJumpM` and `sleepSec`.** Named here because the 2026-09-02 diagnosis still prints those
+     columns, and a column that quietly stops appearing invites somebody to put the field back.
 
-    /**
-     ⛑ **Only `pause()` and `closeZone()` reach this now.**
-     *A zone that is open keeps its session running* — see `position()` for the measurements that
-     made that the design rather than an option.
-     */
-    private func sleepSession() {
-        if let c = session.currentFrame?.camera.transform.columns.3 {
-            sleptAt = SIMD3<Float>(c.x, c.y, c.z)
-        }
-        sleptWhen = Date()
-        session.pause()
-        paused = true
-        releaseCamera?()
-    }
+     `sleepSession()` was the only thing that ever set the pair, and **nothing has called it since
+     positioning stopped being a duty cycle** and the session started running for the life of the
+     zone. So every pose written after that shipped both keys as `nil as Any` — *present in the
+     payload and structurally absent in every row*, which reads as **no jump** rather than as **not
+     measured**. ⚑ Same class as the refusal variant's `tracking` before it was fixed: a field no
+     code path could populate. The TypeScript pose type mirrors this payload field for field and
+     never declared either key (`src/native/zone.ts`), so the contract had already moved on.
+
+     ⛑ Its own doc comment named `pause()` and `closeZone()` as the callers and **neither was one** —
+     both pause the session themselves, and `pause()` also hides the preview, which this never did.
+     *A caller list kept in a comment is not a caller list*, and this one kept a dead function
+     looking live across two audits.
+
+     ⚑ **And the question it was aimed at is settled, so the instrument is not worth rebuilding.**
+     `docs/POSE-DIAGNOSIS-2026-09-02.md` holds its one real reading — 0.24 mm across a 116-second
+     sleep — and Gate 1 measured the running session directly: 6.0 cm bounded over 46 minutes.
+    */
 
     /**
      ⚑ **Try to get the session back without touching the camera.**
@@ -1206,8 +1237,32 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
              the map every pose afterwards is corrected against. Re-entering positioning keeps that
              map, because `enter` only resets when the session actually died.
              */
-            _ = self.enter(.positioning)
-            self.showArPreview?(self.session)
+            /*
+             ⛑ **And only while RoomPlan is still the mode** (audit 2026-09-06).
+
+             ⚑ *`deliverRoom` clears `roomWaiter` on the `RoomBuilder` Task and calls it a runloop
+             turn later, on main.* A `setZoneMode("mesh")` arriving in that gap — Capacitor runs
+             plugin calls on its own `bridge` queue, so it genuinely can — finds nothing left to
+             supersede, `enter(.mesh)` runs, **and then this closure lands on top of it and takes
+             the session straight back out of mesh.** The concierge walks the room with the strip
+             still saying mesh, presses Finish, and `setMode(.positioning)` finds `mode` already
+             `.positioning` — so `harvestMesh` is skipped and the walk is discarded. *That is the
+             2026-09-05 symptom exactly — "clicked finish and looked like nothing registered" —
+             reached by a second road.*
+
+             ⚑ **The 30-second backstop below cannot cover this one**: it guards the waiter it still
+             holds, and this waiter was detached before it ever ran. So the rule lives on the action
+             it governs. *Both guards stay, because they decide different things:* the backstop
+             decides whether to answer the caller at all; this decides whether to steer the session.
+             */
+            if self.mode == .roomplan {
+                _ = self.enter(.positioning)
+                self.showArPreview?(self.session)
+            } else {
+                // ⚑ Recorded rather than silent — the line that would have named the bug above in
+                // a zone log instead of in an audit.
+                HSZoneLog.record("roomFinishedElsewhere", ["mode": self.mode?.rawValue ?? "none"])
+            }
             completion(out)
         }
         stopRoomCapture(keepSession: true)
@@ -1508,5 +1563,563 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
                         didProvide instruction: RoomCaptureSession.Instruction) {
         HSZoneLog.record("roomInstruction", ["text": "\(instruction)"])
         onEvent?(["roomInstruction": "\(instruction)"])
+    }
+}
+
+/**
+ ⚑ **What the lens was aimed at — measured, and the record says by what. One place, both doors.**
+
+ ⛑ *Field 2026-09-06, zone "Bedroom 4", and the arithmetic is the whole finding.* Two photographs of
+ one table lamp, two minutes apart, one unbroken session, the same `originEpoch`:
+
+ ```
+ camera moved   dx=+0.352  dy=-0.658  dz=+0.195   0.771 m
+ surface moved  dx=+0.537  dy=-0.683  dz=+0.253   0.905 m
+ per-axis ratio surface/camera:  x 1.53   y 1.04   z 1.30
+ ```
+
+ **All near 1, none near 0.** A ray ending on the same physical object barely moves when the observer
+ does — the ratio would be ~0. **The surface was tracking the observer**, and the standoff the desk
+ ranks on barely changed: 0.867 → 0.936 m.
+
+ Both capture doors asked for `allowing: .estimatedPlane`, which does not *hit* anything: ARKit fits
+ a plane to the feature points **around this ray at this instant**, so the answer is a function of
+ where somebody stood. A lamp is ~0.15 m across; the fit found the big background behind it. ⚑ **And
+ that generalises to everything this app photographs — a valve, a nameplate, a shutoff, a water
+ heater. Planes miss precisely the objects that matter.**
+
+ ⚑ **No `allowing:` value fixes it, because it is the type.** `ARRaycastTarget` declares exactly
+ three cases and all three are planes (`ARRaycastQuery.h`): existing-plane-geometry,
+ existing-plane-infinite, estimated-plane. There is no mesh target and no depth target. So this file
+ asks the two instruments that *measure* a surface instead, **in the order of what can contain the
+ object**:
+
+ | rung | what it is | when it answers |
+ |---|---|---|
+ | `sceneDepth` | the LiDAR's own distance at the pixel on the optical axis | almost always |
+ | `mesh` | nearest triangle of the reconstructed scene along the same ray | where depth cannot see |
+ | *(refused)* | — | glass, mirrors, chrome, past reach, a mesh with a hole on the axis |
+
+ ⚑ **Depth first, because it measures the nearest thing at that pixel whether or not reconstruction
+ kept it.** ARKit's mesh is coarse on thin geometry: the lamp may not be in it at all, and then the
+ nearest triangle on the axis is *the wall behind the lamp* — stable, joinable, diagnosable, and
+ still not the lamp. **Nearest surface along the ray is the requirement**; the mesh answers *nearest
+ reconstructed surface*, which is a different question that happens to agree in most rooms. The mesh
+ rung therefore runs **only where depth refused**, so a mistake in it can only reach captures that
+ would otherwise carry no surface at all.
+
+ ⛑ **And a guess is not reported at all.** The desk places with no human in the loop and ranks
+ candidate frames by `surface.distance`, closest wins — so a plausible number under that key is a
+ confident wrong placement nobody downstream catches, and a label beside it is a label a reader can
+ forget. Absent already reads *unknown, never nothing there*, and every consumer treats the field as
+ optional. **An honest orphan beats false continuity.** The refusal names itself in the zone log,
+ which is where a diagnosis belongs and where a bare `surface: true/false` could never carry one.
+ */
+enum HSSurface {
+
+    /// ⛑ Past this the ray has gone through a doorway or a hole in the mesh, and either way it is
+    /// not the thing being photographed. The design's own plausibility bound, applied to every rung
+    /// so one source cannot answer where another would be refused.
+    static let reach: Float = 8
+    /// Nearer than this is a hand, a sleeve or the concierge's own arm — LiDAR sees them and the
+    /// mesh sometimes reconstructs them. Never the subject.
+    static let near: Float = 0.05
+    /// A stall guard on the mesh rung, not a filter — and **recorded when it fires**, so a room that
+    /// hits it is visible rather than quietly under-searched.
+    static let triangleBudget = 400_000
+
+    /// ARKit's own words for a face, in `ARMeshClassification` order (`ARMeshGeometry.h`).
+    private static let classes = ["none", "wall", "floor", "ceiling", "table", "seat", "window", "door"]
+
+    /**
+     One answer, and **the only thing that decides whether it is fit to export.**
+
+     ⚑ *The refusal lives on the value rather than in the callers.* A rule kept in two callers holds
+     until somebody writes the third — the same finding as `finishScan`, the roomWaiter,
+     `reclaimCamera` and `showArPreview`, and this is the fifth time this file has paid for it.
+     */
+    struct Hit {
+        enum Source: String {
+            /// The still's own depth map.
+            case depth = "sceneDepth"
+            /// The live frame's depth map, unprojected through **its own** pose and intrinsics.
+            case depthStream = "sceneDepth.stream"
+            /// A triangle of the reconstructed scene.
+            case mesh
+            /// Nothing measured. There is no fourth case, and that is the point.
+            case none
+
+            var measured: Bool { self != .none }
+        }
+
+        var source: Source = .none
+        var point: SIMD3<Float>? = nil
+        var distance: Float = 0
+        // The depth rungs' own witnesses: how sure ARKit was, and whether the sampled patch
+        // straddled an edge.
+        var confidence: String? = nil
+        var spreadM: Float? = nil
+        var samples: Int? = nil
+        // The mesh rung's: which block stopped the ray, and ARKit's word for the face.
+        var anchor: String? = nil
+        var kind: String? = nil
+        /* ⚑ **Computed either way; spoken only when there is something to say.** A diagnostic
+           decides whether there is a problem before it describes one — `summarize()` in
+           `src/dev/writeBench.ts` is the worked example, and it is the one that got this wrong
+           first. So `surfaceMs` always ships (a measurement stays comparable across runs) and the
+           `why` strings ship only on a rung that failed. */
+        var depthWhy = ""
+        var meshWhy = ""
+        var meshFrom: String? = nil
+        var triangles = 0
+        var budgetHit = false
+        var ms: Double = 0
+
+        /**
+         The manifest payload — **present only when something measured.**
+
+         ⛑ No estimate, no plane fit, no fallback shape lives under this key. It is read at the desk
+         without asking where it came from, so anything admitted here is consumed as a measurement
+         by construction.
+         */
+        var payload: [String: Any]? {
+            guard source.measured, let point else { return nil }
+            var out: [String: Any] = [
+                "x": Double(point.x), "y": Double(point.y), "z": Double(point.z),
+                "distance": Double(distance),
+                /* ⚑ Which source answered, and it is the field that dates a row. An export from
+                   before this change carries the same four numbers from a plane ARKit invented,
+                   with no way to tell — and the desk holds exports from both builds. */
+                "source": source.rawValue,
+            ]
+            if let confidence { out["confidence"] = confidence }
+            if let spreadM { out["spreadM"] = Double(spreadM) }
+            if let samples { out["samples"] = samples }
+            // The same `uuidString` `harvestMesh` writes as `pieces[].id`, so a hit joins to the
+            // block it hit.
+            if let anchor { out["anchor"] = anchor }
+            if let kind { out["kind"] = kind }
+            return out
+        }
+
+        /// What went into the answer, for the zone log.
+        var log: [String: Any] {
+            // ⛑ A word, never a boolean. `surface: true` was the answer on 96% of frames while every
+            // one of them was invented — a log that cannot tell a guess from a measurement cannot
+            // report this defect, and for four weeks it did not.
+            var out: [String: Any] = ["surface": source.rawValue, "surfaceMs": ms]
+            if source.measured {
+                out["surfaceM"] = Double(distance)
+                if let confidence { out["surfaceConfidence"] = confidence }
+                if let spreadM { out["surfaceSpreadM"] = Double(spreadM) }
+                if let kind { out["surfaceKind"] = kind }
+            }
+            if !depthWhy.isEmpty { out["depthWhy"] = depthWhy }
+            if !meshWhy.isEmpty { out["meshWhy"] = meshWhy }
+            if let meshFrom { out["meshFrom"] = meshFrom }
+            if triangles > 0 { out["meshTriangles"] = triangles }
+            if budgetHit { out["meshBudgetHit"] = true }
+            return out
+        }
+    }
+
+    /// A depth read on the axis, before it becomes a point.
+    struct Depth {
+        let metres: Float
+        let confidence: String
+        let spreadM: Float
+        let samples: Int
+    }
+
+    /// The mesh rung's answer, hit or miss, with what it cost.
+    struct MeshAnswer {
+        let point: SIMD3<Float>?
+        let t: Float
+        let anchor: String?
+        let kind: String?
+        let why: String
+        let triangles: Int
+        let budgetHit: Bool
+    }
+
+    /**
+     **The ladder — the one function both capture doors ask.**
+
+     `live` is the session's current frame, used for two different fallbacks and for nothing else:
+     ⚑ **whether the out-of-band still carries a depth map or a mesh anchor list is a device question
+     a header cannot answer, and I did not measure it.** Taking an empty answer at face value would
+     silently retire `surface` from every photograph — *which is the failure this whole change exists
+     to end* — so both fall back and the log says which was used (`sceneDepth.stream`, `meshFrom`).
+     One ordinary walk settles it.
+     */
+    static func ahead(of frame: ARFrame, live: ARFrame?) -> Hit {
+        let began = CACurrentMediaTime()
+        var hit = Hit()
+        var refusals: [String] = []
+
+        let (own, ownWhy) = depthOnAxis(frame)
+        if let own {
+            hit = fromDepth(own, frame: frame, source: .depth)
+        } else {
+            refusals.append("still \(ownWhy)")
+            /* ⛑ **The live frame's depth is unprojected through the LIVE frame's own pose and its
+               own intrinsics**, never the still's. A depth read is camera-relative; run it through a
+               different frame's pose and the world point is a measurement of nowhere. The two frames
+               are a hand-motion apart, the world point is still the world point of the surface, and
+               `source` says which instant it was measured in. */
+            if let live, live !== frame {
+                let (streamed, streamWhy) = depthOnAxis(live)
+                if let streamed {
+                    hit = fromDepth(streamed, frame: live, source: .depthStream)
+                } else {
+                    refusals.append("live \(streamWhy)")
+                }
+            }
+        }
+
+        if !hit.source.measured {
+            /* ⚑ Mesh anchors are **world-anchored objects**, so which frame's list they came from
+               changes nothing about where they are — which is why this fallback is safe where the
+               depth one needed a pose to travel with it. The ray still starts at the photograph's
+               own pose. */
+            let ownAnchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
+            let anchors = ownAnchors.isEmpty
+                ? (live?.anchors ?? []).compactMap { $0 as? ARMeshAnchor }
+                : ownAnchors
+            hit.meshFrom = ownAnchors.isEmpty ? "live" : "still"
+            let t = frame.camera.transform
+            let p = t.columns.3
+            let ray = meshOnAxis(origin: SIMD3<Float>(p.x, p.y, p.z),
+                                 direction: SIMD3<Float>(-t.columns.2.x, -t.columns.2.y, -t.columns.2.z),
+                                 anchors: anchors)
+            hit.triangles = ray.triangles
+            hit.budgetHit = ray.budgetHit
+            hit.meshWhy = ray.why
+            if let point = ray.point {
+                hit.source = .mesh
+                hit.point = point
+                hit.distance = ray.t
+                hit.anchor = ray.anchor
+                hit.kind = ray.kind
+            }
+        }
+
+        hit.depthWhy = refusals.joined(separator: "; ")
+        hit.ms = (CACurrentMediaTime() - began) * 1000
+        return hit
+    }
+
+    /// The point, assembled once, so the two depth rungs cannot describe it differently.
+    private static func fromDepth(_ read: Depth, frame: ARFrame, source: Hit.Source) -> Hit {
+        let t = frame.camera.transform
+        let p = t.columns.3
+        let origin = SIMD3<Float>(p.x, p.y, p.z)
+        let dir = simd_normalize(SIMD3<Float>(-t.columns.2.x, -t.columns.2.y, -t.columns.2.z))
+        return Hit(source: source, point: origin + dir * read.metres,
+                   // ⚑ On the axis the depth **is** the standoff. No distance to compute and none to
+                   // get wrong.
+                   distance: read.metres, confidence: read.confidence,
+                   spreadM: read.spreadM, samples: read.samples)
+    }
+
+    /**
+     ⚑ **The depth on the optical axis, in metres, or the reason there is none.**
+
+     **Read on the axis, and that is what makes it both cheap and safe.** At the principal point the
+     unprojection collapses to `origin + depth · (−Z)`: no pixel-to-sensor mapping, so it inherits
+     the immunity the shutter's own comment already claims against the intrinsics misregistration
+     between the streaming format and the high-resolution still. ⛑ *And the
+     perpendicular-versus-radial question every depth map raises **cannot arise here**, because on
+     the axis the two are the same number.* The intrinsics are used only to say **which pixel** is on
+     the axis — a normalised coordinate carries between a 256×192 depth map and a 4032×3024 still
+     over the same field of view, and the principal point is the one coordinate a difference in crop
+     cannot move, because it is the centre of both.
+
+     ⛑ **A patch, and the NEAR cluster of it — that choice is the defect itself in miniature.** A
+     window straddling a lamp and the wall a metre behind it holds two populations, and a plain
+     median or a mean picks whichever holds more pixels, **which is exactly how the plane fit got it
+     wrong.** So the near decile anchors the answer and a 5 cm / 5% band decides which samples are
+     the *same* surface. The band is sensor noise, never the size of an object: which surface wins is
+     already settled — the near one.
+
+     Formats are read rather than assumed, the discipline `harvestMesh` applies to the mesh buffers
+     and for the same reason: an assumption that holds works until an OS release, and this one would
+     fail silently by metres.
+     */
+    static func depthOnAxis(_ frame: ARFrame) -> (Depth?, String) {
+        guard let depth = frame.sceneDepth else { return (nil, "no depth on the frame") }
+        let map = depth.depthMap
+        guard CVPixelBufferGetPixelFormatType(map) == kCVPixelFormatType_DepthFloat32 else {
+            return (nil, "depth format \(CVPixelBufferGetPixelFormatType(map))")
+        }
+        CVPixelBufferLockBaseAddress(map, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(map, .readOnly) }
+        let width = CVPixelBufferGetWidth(map), height = CVPixelBufferGetHeight(map)
+        guard width > 0, height > 0, let base = CVPixelBufferGetBaseAddress(map) else {
+            return (nil, "depth unreadable")
+        }
+        let rowBytes = CVPixelBufferGetBytesPerRow(map)
+
+        /* Nullable in the API and treated as such: without it every sample is taken and the record
+           says `unrated`, which is a different claim from `high` and has to stay a different one. */
+        let rated: CVPixelBuffer? = {
+            guard let c = depth.confidenceMap,
+                  CVPixelBufferGetPixelFormatType(c) == kCVPixelFormatType_OneComponent8,
+                  CVPixelBufferGetWidth(c) == width, CVPixelBufferGetHeight(c) == height else { return nil }
+            return c
+        }()
+        if let rated { CVPixelBufferLockBaseAddress(rated, .readOnly) }
+        defer { if let rated { CVPixelBufferUnlockBaseAddress(rated, .readOnly) } }
+        let confBase = rated.flatMap { CVPixelBufferGetBaseAddress($0) }
+        let confRow = rated.map { CVPixelBufferGetBytesPerRow($0) } ?? 0
+
+        let k = frame.camera.intrinsics
+        let res = frame.camera.imageResolution
+        let px = min(max(Int(Double(k.columns.2.x) / Double(res.width) * Double(width)), 0), width - 1)
+        let py = min(max(Int(Double(k.columns.2.y) / Double(res.height) * Double(height)), 0), height - 1)
+        /* About 2% of the frame across — roughly 5 cm at a metre on this iPad's 256×192 map, which is
+           inside a nameplate and inside a lamp. Derived from the buffer so a different depth
+           resolution keeps the same angular size rather than the same pixel count. */
+        let half = max(1, width / 50)
+
+        func gather(_ floorLevel: Int) -> [Float] {
+            var out: [Float] = []
+            out.reserveCapacity((2 * half + 1) * (2 * half + 1))
+            for y in (py - half)...(py + half) where y >= 0 && y < height {
+                let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: Float.self)
+                let conf = confBase?.advanced(by: y * confRow).assumingMemoryBound(to: UInt8.self)
+                for x in (px - half)...(px + half) where x >= 0 && x < width {
+                    if let conf, Int(conf[x]) < floorLevel { continue }
+                    let d = row[x]
+                    // LiDAR reports 0 where it has nothing, and noise past its range.
+                    guard d.isFinite, d > near, d < reach else { continue }
+                    out.append(d)
+                }
+            }
+            return out
+        }
+
+        /* ⚑ **High first, and medium only where high had too little to say.** A single threshold
+           either refuses every dark or glossy object or accepts the low-confidence pixels that are
+           wrong by metres. An eighth of the window is the floor, and the word travels with the
+           answer either way, so the desk is never left inferring which it got. */
+        let window = (2 * half + 1) * (2 * half + 1)
+        let floorCount = max(8, window / 8)
+        var word = confBase == nil ? "unrated" : "high"
+        var values = gather(ARConfidenceLevel.high.rawValue)
+        if values.count < floorCount, confBase != nil {
+            word = "medium"
+            values = gather(ARConfidenceLevel.medium.rawValue)
+        }
+        guard values.count >= floorCount else {
+            return (nil, "depth thin (\(values.count) of \(window))")
+        }
+
+        values.sort()
+        let nearest = values[values.count / 10]
+        let farthest = values[min(values.count - 1, (values.count * 9) / 10)]
+        /* The near decile rather than the minimum, so one stray near pixel cannot set it — a decile
+           of a hundred-odd samples is a dozen deep. */
+        let band = max(Float(0.05), nearest * 0.05)
+        let cluster = values.filter { $0 <= nearest + band }
+        return (Depth(metres: cluster[cluster.count / 2], confidence: word,
+                      // p90 − p10 over the confident samples: centimetres means one surface filled
+                      // the window, a metre means it straddled an edge and that frame is worth less.
+                      spreadM: farthest - nearest, samples: values.count), "")
+    }
+
+    /**
+     ⚑ **The nearest triangle of the reconstructed scene along the ray**, or an honest miss.
+
+     ARKit cannot do this — every `ARRaycastTarget` is a plane — so the intersection is done here by
+     hand, against the geometry `sceneReconstruction = .mesh` has been accumulating in every
+     non-RoomPlan mode since the continuous-session change and **which nothing ever queried.**
+
+     **Nearest anchors first, then a box, then triangles**, which is what keeps this affordable.
+     ARKit's mesh anchors are roughly metre-sized blocks; a ray crosses a handful of the two dozen in
+     a room and every other block dies on six compares. The box test takes the best hit so far as its
+     far bound, so once something close is found the rest of the room stops being triangles at all.
+     *`renderArPreview` already sorts by anchor distance for the same reason.* Visiting order changes
+     the cost, never the answer.
+
+     ⛑ **The ray goes into the block's frame; the geometry never comes out of it.** One 4×4 inverse
+     against several thousand triangles — and because the local ray is the exact preimage of the
+     world ray, `t` is the **same parameter in both frames**, already in world metres, which is why
+     the local direction is transformed and deliberately **not** re-normalised.
+     */
+    static func meshOnAxis(origin: SIMD3<Float>, direction: SIMD3<Float>,
+                           anchors: [ARMeshAnchor]) -> MeshAnswer {
+        var triangles = 0
+        var budgetHit = false
+        var sawGeometry = false
+        var boxesCrossed = 0
+        var best = reach
+        var bestAnchor: ARMeshAnchor?
+        var bestFace = -1
+
+        func answer(_ why: String, _ dir: SIMD3<Float>) -> MeshAnswer {
+            guard let winner = bestAnchor else {
+                return MeshAnswer(point: nil, t: 0, anchor: nil, kind: nil,
+                                  why: why, triangles: triangles, budgetHit: budgetHit)
+            }
+            return MeshAnswer(point: origin + dir * best, t: best,
+                              anchor: winner.identifier.uuidString, kind: word(winner, face: bestFace),
+                              why: "", triangles: triangles, budgetHit: budgetHit)
+        }
+
+        let length = simd_length(direction)
+        guard length > 0 else { return answer("no direction", direction) }
+        // Normalised in WORLD space and never again — see the note on `t` above.
+        let dir = direction / length
+        guard !anchors.isEmpty else { return answer("no mesh anchors", dir) }
+
+        let ordered = anchors.sorted {
+            let a = $0.transform.columns.3, b = $1.transform.columns.3
+            return simd_distance(origin, SIMD3<Float>(a.x, a.y, a.z))
+                 < simd_distance(origin, SIMD3<Float>(b.x, b.y, b.z))
+        }
+
+        for anchor in ordered {
+            let geometry = anchor.geometry
+            let verts = geometry.vertices
+            let faces = geometry.faces
+            /* `indexCountPerPrimitive` is READ rather than assumed — the rule `harvestMesh` states
+               for the same buffers, because layout is ARKit's to change. A line primitive has no
+               interior to hit and is skipped rather than misread. */
+            guard verts.count > 0, faces.count > 0, faces.indexCountPerPrimitive == 3 else { continue }
+            sawGeometry = true
+            // Checked per anchor rather than per triangle: this is a stall guard, not a filter.
+            if triangles >= triangleBudget { budgetHit = true; break }
+
+            let inverse = simd_inverse(anchor.transform)
+            let o4 = inverse * SIMD4<Float>(origin.x, origin.y, origin.z, 1)
+            let d4 = inverse * SIMD4<Float>(dir.x, dir.y, dir.z, 0)
+            let localOrigin = SIMD3<Float>(o4.x, o4.y, o4.z)
+            let localDir = SIMD3<Float>(d4.x, d4.y, d4.z)
+
+            /* Vertices through the source's own `offset` and `stride`, as a `(Float, Float, Float)`
+               — the same twelve-byte reading `harvestMesh` uses. ⛑ `renderArPreview` reads these
+               same buffers as `SIMD3<Float>`, which is sixteen bytes against a twelve-byte source;
+               that is a latent over-read worth its own change, and burying an unrelated crash risk
+               in the patch the field has to trust to diagnose this one would be the wrong trade.
+               This reader agrees with `harvestMesh`, so the count of interpretations stays at two. */
+            let vertexBase = verts.buffer.contents().advanced(by: verts.offset)
+            let vertexStride = verts.stride
+            func vertex(_ i: Int) -> SIMD3<Float> {
+                let p = vertexBase.advanced(by: vertexStride * i)
+                    .assumingMemoryBound(to: (Float, Float, Float).self).pointee
+                return SIMD3<Float>(p.0, p.1, p.2)
+            }
+
+            // One cheap pass for the block's box, in its own frame. Min/max on three floats is a
+            // fraction of a triangle test, and it is what buys the right to skip the triangle pass.
+            var low = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+            var high = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+            for i in 0..<verts.count {
+                let v = vertex(i)
+                low = simd_min(low, v)
+                high = simd_max(high, v)
+            }
+            guard crosses(from: localOrigin, along: localDir,
+                          low: low, high: high, from: near, to: best) else { continue }
+            boxesCrossed += 1
+
+            let indexBase = faces.buffer.contents()
+            let indexWidth = faces.bytesPerIndex
+            /* ⛑ `bytesPerIndex` is honoured rather than assumed 4. The header says the width is the
+               buffer's to state; a 16-bit buffer read as 32-bit is not an error and not a crash, it
+               is **a room made of the wrong triangles**. */
+            func corner(_ i: Int) -> Int {
+                let p = indexBase.advanced(by: i * indexWidth)
+                return indexWidth == 2
+                    ? Int(p.assumingMemoryBound(to: UInt16.self).pointee)
+                    : Int(p.assumingMemoryBound(to: UInt32.self).pointee)
+            }
+
+            for face in 0..<faces.count {
+                let i0 = corner(face * 3), i1 = corner(face * 3 + 1), i2 = corner(face * 3 + 2)
+                guard i0 < verts.count, i1 < verts.count, i2 < verts.count else { continue }
+                let v0 = vertex(i0), v1 = vertex(i1), v2 = vertex(i2)
+                /* Möller–Trumbore, **with backfaces accepted.** ARKit promises no consistent winding
+                   toward the observer, and *nearest surface along the ray* is the requirement — a
+                   culled backface is a hole invented by arithmetic. */
+                let edge1 = v1 - v0, edge2 = v2 - v0
+                let h = simd_cross(localDir, edge2)
+                let det = simd_dot(edge1, h)
+                if abs(det) < 1e-9 { continue }   // the ray lies in the triangle's plane
+                let invDet = 1 / det
+                let s = localOrigin - v0
+                let u = invDet * simd_dot(s, h)
+                if u < 0 || u > 1 { continue }
+                let q = simd_cross(s, edge1)
+                let v = invDet * simd_dot(localDir, q)
+                if v < 0 || u + v > 1 { continue }
+                let hitT = invDet * simd_dot(edge2, q)
+                if hitT > near, hitT < best {
+                    best = hitT
+                    bestAnchor = anchor
+                    bestFace = face
+                }
+            }
+            triangles += faces.count
+        }
+
+        if bestAnchor != nil { return answer("", dir) }
+        /* ⚑ Four different misses, and the log says which. *"The mesh had no answer"* is not one
+           fact: an empty session is a room nobody walked, a hole on the axis is a surface the LiDAR
+           never saw, and a bound overrun is a ray that left the building. They need different
+           fixes, and the bare boolean this replaces collapsed all of them into one. */
+        return answer(!sawGeometry ? "no triangle mesh"
+                      : boxesCrossed == 0 ? "no mesh block on the axis"
+                      : "no triangle on the axis inside \(Int(reach)) m", dir)
+    }
+
+    /// Ray against an axis-aligned box, in the box's own frame — six compares and no square roots.
+    /// This is why a room of a quarter-million triangles is not a quarter-million triangle tests.
+    private static func crosses(from o: SIMD3<Float>, along d: SIMD3<Float>,
+                                low: SIMD3<Float>, high: SIMD3<Float>,
+                                from tMin: Float, to tMax: Float) -> Bool {
+        var nearT = tMin, farT = tMax
+        for k in 0..<3 {
+            /* ⛑ Handled rather than divided: an axis-parallel ray gives an infinite slope, `0 × ∞`
+               is NaN, and NaN compares false against everything — silently rejecting the block the
+               concierge is standing square in front of. */
+            if abs(d[k]) < 1e-8 {
+                if o[k] < low[k] || o[k] > high[k] { return false }
+                continue
+            }
+            let inv = 1 / d[k]
+            var a = (low[k] - o[k]) * inv
+            var b = (high[k] - o[k]) * inv
+            if a > b { swap(&a, &b) }
+            nearT = max(nearT, a)
+            farT = min(farT, b)
+            if nearT > farT { return false }
+        }
+        return true
+    }
+
+    /**
+     ARKit's classification of one face, read as one byte for one face — never a whole buffer.
+
+     ⛑ **It labels the surface the ray terminated on, never the subject of the photograph** — and it
+     is the cheapest miss-detector available: `kind: "wall"` on a water-heater shot *is* the ray
+     landing behind the thing, legible at the desk without another walk.
+
+     ⚑ **And it is `nil` today, deliberately.** `ARMeshGeometry.classification` is nullable and is
+     populated only under `ARSceneReconstructionMeshWithClassification`; `enter` asks for `.mesh`.
+     The one-line change that populates it is **not made here**, because Gate 1's 46-minute
+     `nominal` / 9%-battery result was measured on `.mesh`, and a reconstruction change re-opens a
+     published thermal measurement. That is the same discipline this change applies to
+     `HSGateOne`'s CSV column: an instrument is upgraded deliberately, in the run that re-measures
+     it, never as a side effect. Absent `kind` reads *unclassified*, which is exactly what it is.
+     */
+    private static func word(_ anchor: ARMeshAnchor, face: Int) -> String? {
+        guard let source = anchor.geometry.classification,
+              face >= 0, face < source.count else { return nil }
+        let raw = Int(source.buffer.contents()
+            .advanced(by: source.offset + source.stride * face)
+            .assumingMemoryBound(to: UInt8.self).pointee)
+        return classes.indices.contains(raw) ? classes[raw] : nil
     }
 }

@@ -48,6 +48,15 @@ real number; the direction is not in doubt.
 | ray-cast hit rate | **172 of 179 — 96%**, distances 0.14–5.72 m, median 1.72 m |
 | image | sharp, well exposed, 1.8–3.1 MB |
 
+⛑ **Read the ray-cast row as *how reliably a plane can be invented*, not as validation** (annotated
+2026-09-06, number unchanged). That harness asked `allowing: .estimatedPlane`, which fits a plane to
+the feature points around the ray rather than hitting anything, so 96% measures the fitter's
+willingness to answer. The field caught it from an export: two photographs of one table lamp, camera
+moving 0.771 m and the surface point moving 0.905 m **with it**. Capture now measures depth on the
+optical axis and falls back to the mesh; `HSGateOne` is deliberately **unchanged**, because silently
+changing what its `from = "raycast"` column measures would make the next Gate run incomparable with
+this one. That column moves in the turn that re-runs Gate 1, as a *second* column beside this one.
+
 **Session health:** feature points median **229**, max 592 — against **0–9** in production. Mapping
 `mapped` for 68% of the session. ⚑ **The origin anchor was revised by ARKit 71 times** — loop
 closure, continuously, which the production build achieved zero times in its life.

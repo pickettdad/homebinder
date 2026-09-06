@@ -266,7 +266,8 @@ describe("keeping an existing preview", () => {
  * So the plain capture door took the camera away from AVFoundation on the first shutter press and
  * **never put anything in its place**: the viewfinder froze on one frame for the rest of the zone
  * while the shutter, containers, filmstrip and delete all kept working. *It used to be survivable
- * because `sleepSession()` handed the lens back within seconds — that function now has no callers.*
+ * because `sleepSession()` handed the lens back within seconds — that function has since been
+ * deleted for want of a caller.*
  *
  * The invariant is **where the rule lives**, not how many callers exist today.
  */
@@ -305,5 +306,83 @@ describe("replacing a zone", () => {
     const openFn = /func openZone\(_ call: CAPPluginCall\)[\s\S]*?\n    \}\n/.exec(PLUGIN_SRC)?.[0] ?? "";
     expect(openFn).not.toBe("");
     expect(openFn).toMatch(/outgoing\.closeZone\(\)/);
+  });
+});
+
+/**
+ * ⛑ **A surface the field reports is one it MEASURED, and the record says by what.**
+ *
+ * ⚑ *Field 2026-09-06, zone "Bedroom 4".* Two photographs of one table lamp, two minutes apart in
+ * one unbroken session, moved the surface point **0.905 m across a 0.771 m walk** — per-axis ratios
+ * 1.53 / 1.04 / 1.30, all near 1 and none near 0. A point on the object barely moves when the
+ * observer does. **It was tracking the photographer**, because both capture doors asked for
+ * `allowing: .estimatedPlane`, which fits a plane to the feature points around the ray at that
+ * instant rather than hitting anything.
+ *
+ * ⚑ **`ARRaycastTarget` has three cases and all three are planes**, so this cannot be fixed by
+ * choosing a different one — which is why the invariant is stated as *the session builds no
+ * ray-cast query at all*. That holds however many capture doors are added; a list of today's two
+ * would fire on the third and say nothing about it.
+ *
+ * *Why a source assertion:* the rule lives entirely in Swift and the failure mode is a **new** door
+ * measuring its own way. A behavioural test would need the device that already found the bug.
+ */
+describe("what the surface point is measured against", () => {
+  const zoneLines = ZONE_SRC.split("\n");
+
+  it("asks ARKit for no plane ray-cast anywhere in the session", () => {
+    expect(ZONE_SRC).not.toMatch(/ARRaycastQuery\(/);
+  });
+
+  it("has doors that ask at all — a test that finds nothing passes for the wrong reason", () => {
+    // The shutter and `takePosition`. Containment, never equality: a third door is welcome.
+    expect((ZONE_SRC.match(/HSSurface\.ahead\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("never writes a surface it did not get from that one answer", () => {
+    /* ⚑ The rule is *where the value comes from*, not how many callers there are. A door that
+       hand-rolled its own point would be the whole defect returning under a different name. */
+    const strays = zoneLines
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => /\["surface"\]\s*=/.test(line) && !/aim\.payload/.test(line))
+      // Named, not counted: a count tells a maintainer there is a problem and not where.
+      .map(({ line, i }) => `line ${i + 1}: ${line.trim()}`);
+    expect(strays).toEqual([]);
+  });
+
+  it("refuses to export anything it did not measure", () => {
+    /* ⛑ The desk ranks by `surface.distance`, closest wins, and reads the field without asking
+       where it came from — so a labelled guess would keep flowing into placements through every
+       consumer that did not check the label. An honest orphan beats false continuity. */
+    expect(ZONE_SRC).toMatch(/var payload: \[String: Any\]\? \{\s*\n\s*guard source\.measured/);
+  });
+
+  it("says which source answered, in the export and in the log", () => {
+    // An estimate and a measurement were byte-identical in the manifest, and the desk holds both.
+    expect(ZONE_SRC).toMatch(/"source": source\.rawValue/);
+    // ⚑ A word, not a boolean: `surface: true` was how a 96% rate of inventing planes read as
+    // validation for four weeks.
+    expect(ZONE_SRC).toMatch(/"surface": source\.rawValue/);
+  });
+
+  it("reads every buffer's own layout rather than assuming it", () => {
+    /* ⛑ `harvestMesh` states this rule for the same buffers — layout is ARKit's to change, and an
+       assumption that holds today works until an OS release. A depth map that is not float32, or a
+       16-bit index buffer read as 32-bit, fails silently and by metres. */
+    const surface = /enum HSSurface \{[\s\S]*$/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(surface).not.toBe("");
+    expect(surface).toMatch(/verts\.stride/);
+    expect(surface).toMatch(/verts\.offset/);
+    expect(surface).toMatch(/bytesPerIndex/);
+    expect(surface).toMatch(/indexCountPerPrimitive == 3/);
+    expect(surface).toMatch(/kCVPixelFormatType_DepthFloat32/);
+  });
+
+  it("bounds the mesh work so a dense room cannot stall the shutter", () => {
+    // ⚑ A stall guard, and recorded when it fires rather than silently applied — a capped answer
+    // that says nothing is an answer nobody can compare with the next room's.
+    const surface = /enum HSSurface \{[\s\S]*$/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(surface).toMatch(/triangleBudget/);
+    expect(surface).toMatch(/budgetHit = true/);
   });
 });

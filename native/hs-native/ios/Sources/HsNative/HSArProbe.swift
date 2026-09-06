@@ -168,6 +168,18 @@ final class HSArProbe: NSObject, ARSessionDelegate {
      the object or at the photographer".** A nameplate is shot from 0.3–1 m, so if a ray forward
      from the pose lands at roughly that distance the container's position is the object's surface;
      if it misses, the position is where somebody stood and the whole anchoring argument fails.
+
+     ⛑ **All three sources on one press, because this probe asked the right question and then
+     reported the wrong witness's answer as the finding.** It has written `raycastTarget` since the
+     day it was built and nobody ever read it; it said `estimatedPlane` every time, which is ARKit
+     stating outright that it *invented* the plane. The field found that four weeks later, in an
+     export, from two photographs of a table lamp.
+
+     ⚑ **The disagreement between the sources IS the measurement.** On a flat wall they agree. On
+     the objects this app photographs — a valve, a nameplate, a lamp, a water heater — the plane
+     finds the background, and `depthVsMeshM` is the number that says whether reconstruction even
+     contains the thing. This is off the shutter, so it is free here in a way a per-capture
+     cross-check would not be.
      */
     private func probeRaycast() {
         guard let frame = session.currentFrame else {
@@ -182,15 +194,60 @@ final class HSArProbe: NSObject, ARSessionDelegate {
                                    allowing: .estimatedPlane, alignment: .any)
         let hits = session.raycast(query)
         result["raycastHits"] = hits.count
+        var planeDistance: Float?
         if let first = hits.first {
             let p = first.worldTransform.columns.3
             let d = simd_distance(origin, SIMD3<Float>(p.x, p.y, p.z))
+            planeDistance = d
             result["raycastDistance"] = Double(d)
             result["raycastTarget"] = "\(first.target)"
-            step(String(format: "raycast: hit at %.2f m, target %@", d, "\(first.target)"))
+            /* ⚑ `anchor == nil` on an estimated-plane result is ARKit saying the plane was invented
+               — `ARRaycastResult.h`: "In case of an estimated plane target, an anchor MAY be
+               provided if the ray hit an existing plane." It is the one field that separates a real
+               detected surface from a fit to this instant's feature points, and both production
+               sites threw it away for four weeks. */
+            result["raycastAnchored"] = first.anchor != nil
+            step(String(format: "raycast plane: hit at %.2f m, target %@, anchored %@",
+                        d, "\(first.target)", first.anchor != nil ? "yes" : "no"))
         } else {
             result["raycastDistance"] = -1
-            step("raycast: NO HIT")
+            step("raycast plane: NO HIT")
+        }
+
+        // What the capture doors would actually record for this frame — the ladder, unmodified.
+        let aim = HSSurface.ahead(of: frame, live: session.currentFrame)
+        result["surfaceSource"] = aim.source.rawValue
+        result["surfaceDistance"] = aim.source.measured ? Double(aim.distance) : -1
+        result["surfaceMs"] = aim.ms
+        if let confidence = aim.confidence { result["surfaceConfidence"] = confidence }
+        if let spread = aim.spreadM { result["surfaceSpreadM"] = Double(spread) }
+        if !aim.depthWhy.isEmpty { result["surfaceDepthWhy"] = aim.depthWhy }
+        /* ⛑ A refusal has no distance, so it does not print one. A diagnostic decides whether
+           there is anything to say before it says what — `0.00 m` beside a refused surface is a
+           number somebody will eventually read as a measurement. */
+        step(aim.source.measured
+             ? "surface: \(aim.source.rawValue) at \(String(format: "%.2f", aim.distance)) m"
+                + " in \(String(format: "%.1f", aim.ms)) ms"
+             : "surface: REFUSED — \(aim.depthWhy.isEmpty ? aim.meshWhy : aim.depthWhy)")
+
+        /* ⚑ And the mesh asked SEPARATELY, even when depth already answered — that is the whole
+           point of a probe. `depthVsMeshM` is the one number that says whether the reconstruction
+           contains the object or only the wall behind it, and no capture can afford to ask it. */
+        let mesh = HSSurface.meshOnAxis(origin: origin, direction: direction,
+                                        anchors: frame.anchors.compactMap { $0 as? ARMeshAnchor })
+        result["meshRayDistance"] = mesh.point != nil ? Double(mesh.t) : -1
+        result["meshRayKind"] = mesh.kind ?? ""
+        result["meshRayWhy"] = mesh.why
+        result["meshRayTriangles"] = mesh.triangles
+        if mesh.point != nil {
+            if let planeDistance { result["planeVsMeshM"] = Double(abs(planeDistance - mesh.t)) }
+            if aim.source.measured, aim.source != .mesh {
+                result["depthVsMeshM"] = Double(abs(aim.distance - mesh.t))
+            }
+            step("raycast mesh: hit at \(String(format: "%.2f", mesh.t)) m"
+                 + " (\(mesh.kind ?? "unclassified")) over \(mesh.triangles) triangles")
+        } else {
+            step("raycast mesh: NO HIT — \(mesh.why)")
         }
     }
 

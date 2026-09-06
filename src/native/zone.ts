@@ -20,6 +20,11 @@ export interface ZoneOpened {
   startedAt: string;
   mode: ZoneMode;
   unmet: string[];
+  /** ⚑ **May positions be taken** — the concierge's Pause, NOT whether ARKit is awake (it is asleep
+   *  almost always, by design). It rides the open answer because re-entering a zone *reuses* the
+   *  session rather than rebuilding it: a screen that assumed `true` here painted an armed strip
+   *  over a session refusing every position, and the wall in this file's header took the room. */
+  armed: boolean;
   meshSupported: boolean;
   roomPlanSupported: boolean;
 }
@@ -43,10 +48,44 @@ export type ZonePosition =
       z: number;
       /** Column-major 4×4. A pose without an orientation cannot say which way the camera faced. */
       transform: number[];
-      /** ⚑ Where the lens was POINTING, when geometry existed to hit. The pose is where the
-       *  concierge stood; this is the surface in front of them, and the desk needs both to tell
-       *  them apart. Absent means the mesh had no answer — *unknown*, never *nothing there*. */
-      surface?: { x: number; y: number; z: number; distance: number };
+      /**
+       * ⚑ **Where the lens was POINTING, measured.** The pose is where the concierge stood; this is
+       * the surface in front of them, and the desk needs both to tell them apart.
+       *
+       * ⛑ **`source` is not decoration, and this comment used to be a lie.** It said *the mesh had
+       * no answer*; the mesh was never asked. Until 2026-09-06 every surface came from
+       * `allowing: .estimatedPlane` — a plane ARKit **invents** from the feature points around the
+       * ray at that instant. Two photographs of one table lamp, two minutes apart in one unbroken
+       * session, moved their surface **0.905 m while the camera moved 0.771 m**: the point tracked
+       * the observer instead of staying on the object, and `distance` — the number the desk ranks
+       * on, closest wins — moved with it.
+       *
+       * **A guess is now refused rather than reported**, so this field is absent more often and
+       * every one that arrives was measured. Absent still reads *unknown*, never *nothing there*.
+       */
+      surface?: {
+        x: number;
+        y: number;
+        z: number;
+        distance: number;
+        /** Which instrument answered: LiDAR depth on the optical axis (of the still's own frame, or
+         *  of the live frame one instant later), or a ray/triangle hit on the reconstructed mesh. */
+        source: "sceneDepth" | "sceneDepth.stream" | "mesh";
+        /** Depth rungs: ARKit's own word for the samples — `high` | `medium` | `unrated`. */
+        confidence?: string;
+        /** Depth rungs: p90 − p10 across the sampled patch. Centimetres means one surface filled
+         *  the window; a metre means the aimed point straddled an edge and this frame is worth
+         *  less. The answer already commits to the near side. */
+        spreadM?: number;
+        /** Depth rungs: how many pixels answered. */
+        samples?: number;
+        /** Mesh rung: the block that stopped the ray, the same id as `mesh.pieces[].id`. */
+        anchor?: string;
+        /** Mesh rung: ARKit's `ARMeshClassification` word for the face — *the surface hit, never
+         *  the subject of the photograph.* `wall` on a water-heater shot is the ray landing behind
+         *  the thing. Absent means unclassified, which is every face under `.mesh`. */
+        kind?: string;
+      };
       /**
        * ⚑ **How much of the room ARKit believes it knows** — `notAvailable` | `limited` |
        * `extending` | `mapped`, straight from `ARFrame.worldMappingStatus`.

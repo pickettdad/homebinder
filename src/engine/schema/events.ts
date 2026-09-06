@@ -175,9 +175,37 @@ export type CapturePositionMeta =
       z: number;
       /** Column-major 4×4, so the desk can ray-cast for itself years later. */
       transform: number[];
-      /** ⚑ The pose is where the concierge STOOD. This is the surface in front of the lens, when
-       *  geometry existed to hit it. Absent reads *unknown*, never *nothing there*. */
-      surface?: { x: number; y: number; z: number; distance: number };
+      /**
+       * ⚑ The pose is where the concierge STOOD. This is the surface in front of the lens, when
+       * something could measure it. Absent reads *unknown*, never *nothing there*.
+       *
+       * ⛑ **`source` says what answered, and it is the field that dates a row.** Until 2026-09-06
+       * this carried a plane ARKit *invented* around the ray, caught the only way it could be: two
+       * frames of one table lamp, taken 0.771 m apart, whose surface points moved 0.905 m —
+       * **tracking the photographer, not the object.** An estimate is now refused rather than
+       * shipped, because the desk places with no human in the loop and ranks by `distance`.
+       *
+       * ⚑ **`source` is optional here and required in `ZonePosition` on purpose.** The native side
+       * never writes a surface without it; sessions already on disk carry the four bare numbers
+       * from the old build. **A row with no `source` is a row from before the fix — do not place
+       * from it.**
+       */
+      surface?: {
+        x: number;
+        y: number;
+        z: number;
+        distance: number;
+        source?: "sceneDepth" | "sceneDepth.stream" | "mesh";
+        /** `high` | `medium` | `unrated`, ARKit's word for the depth samples. */
+        confidence?: string;
+        /** p90 − p10 across the sampled patch: centimetres is one surface, a metre a straddled edge. */
+        spreadM?: number;
+        samples?: number;
+        /** The mesh block that stopped the ray — joins to `mesh.pieces[].id`. */
+        anchor?: string;
+        /** ARKit's classification of the face the ray ended on. The surface, never the subject. */
+        kind?: string;
+      };
       /**
        * ⚑ **How much of the room ARKit believes it knows** — `notAvailable` | `limited` |
        * `extending` | `mapped`, straight from `ARFrame.worldMappingStatus`.

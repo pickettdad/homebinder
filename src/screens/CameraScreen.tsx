@@ -427,9 +427,15 @@ export function CameraScreen({
    *  which begins well before the camera calls the iPad still. */
   const readableSince = useRef<number | null>(null);
   const [timing, setTiming] = useState<{ waitedMs: number; captureMs: number } | null>(null);
-  /** What the torch was last asked to be, until the camera confirms it. See `toggleTorch`. */
-  const [torchAsked, setTorchAsked] = useState<boolean | null>(null);
-  const torchPending = torchAsked !== null && torchAsked !== (status?.torchOn ?? false);
+  /** What the torch was last asked to be, and the mode it was asked in, until the camera confirms
+   *  it. See `toggleTorch`. */
+  const [torchAsked, setTorchAsked] = useState<{ on: boolean; mode: CameraMode | undefined } | null>(null);
+  /* ⚑ The mode is half the pending test, because the camera drops a torch override when the mode
+     changes (`torchOverride`, HSCameraPlugin.swift) — so the torch can now move with no tap behind
+     it. An *asked* carried across that change paints a request nobody has, on the one control the
+     owner has already had corrected twice for claiming a state the camera was not in. */
+  const torchPending = torchAsked !== null && torchAsked.mode === status?.mode
+    && torchAsked.on !== (status?.torchOn ?? false);
   const [audioProbe, setAudioProbe] = useState<AudioProbeStarted | null>(null);
   const [audioClip, setAudioClip] = useState<AudioProbeResult | null>(null);
   const [capabilities, setCapabilities] = useState<CameraCapabilities | null>(null);
@@ -524,7 +530,13 @@ export function CameraScreen({
            is its normal state. ⚑ Two different facts had one flag: **is the session awake** (almost
            never, by design) and **may positions be taken** (usually yes). The strip needs the
            second, so that is what this now carries. */
-        setZonePaused(false);
+        /* ⛑ **And it is READ from the session, never asserted** (audit 2026-09-06). `openZone` on a
+           zone already open REUSES it — `openZoneReused` in the zone log — so a concierge who paused,
+           backed out to the zone screen and came straight back re-armed nothing natively while this
+           line said armed. ⚑ The strip then offered Pause, `anchorAvailability` said the room could be
+           anchored, and every capture in it refused with `why: "paused"`: **the room goes unpositioned
+           and the screen shows the one state it is not in.** */
+        setZonePaused(!out.armed);
         if (!out.roomPlanSupported && startAction === "floorplan") {
           setZoneNote("No floorplan on this device");
           /* ⚑ Evented, not merely shown. Until 2026-09-04 every one of these lived in a React
@@ -726,6 +738,12 @@ export function CameraScreen({
     leaveRef.current = () => {
       if (meshing) void finishMesh();
       else if (scanning) void finishScan();
+      /* ⛑ **Walking out mid-trace still owes the lens back.** The back button never reaches
+         `endTraverse`, so without this the run's handover ends the zone disarmed and every capture
+         after it files `{positioned:false, why:"paused"}` — the same silent loss the failure path
+         guards, arriving through the one exit nobody presses on purpose. Read here rather than in
+         the cleanup for the reason this ref exists at all: a cleanup closes over its own render. */
+      if (traversing) void handLens("zone");
     };
   });
   useEffect(() => () => leaveRef.current(), []);
@@ -756,7 +774,12 @@ export function CameraScreen({
     if (retried.ok) {
       setZoneOpen(true);
       if (retried.mode) setZoneMode(retried.mode as ZoneMode);
-      setZonePaused(false);
+      /* ⛑ **`setZonePaused(false)` stood here, and it was the same assertion one door along** (audit
+         2026-09-06). `HSZoneSession.retry` re-runs the session in place and does not touch `armed` —
+         a retry revives a dead ARSession, it does not undo a concierge's Pause — so clearing the flag
+         here put the strip back into exactly the state the open path above was just fixed for.
+         ⚑ Leaving it alone IS the fix: it already holds what the session holds, and nothing in this
+         file now writes the arm state from a literal. */
       setZoneNote(null);
       return;
     }
@@ -1211,6 +1234,34 @@ export function CameraScreen({
    * declares *this is a thing and I am now photographing it*, never what the thing is.
    */
   /**
+   * ⛑ **Who holds the lens while a traverse runs — written once, because it has two ends**
+   * (audit 2026-09-06, confirmed high).
+   *
+   * A traverse is an `AVCaptureSession` act: native `startTraverse` opens with
+   * `guard session.isRunning` and refuses with *notRunning*. ⚑ **The zone session takes that lens
+   * at the first pose and never gives it back** — `sleepSession()` lost its last caller when
+   * positioning stopped duty-cycling, which is the change that bought 6.0 cm of bounded error, and
+   * `reclaimCamera` refuses for the life of the room. So `beginTraverse` measured its start anchor,
+   * *which is the very call that wakes positioning*, and then asked a stopped session to walk a
+   * wall. **Every traverse begun inside a zone rejected before its first frame**, and the one place
+   * it still worked was the harness with no zone open — which is where it was exercised.
+   *
+   * ⚑ **The return leg is not optional, and not only for the happy path.** `pause()` disarms
+   * positioning as well as releasing the lens, so a `takePosition` after a run answers
+   * `{positioned:false, why:"paused"}` — and that unpositioned end is handed to the next leg as its
+   * start through `lastEnd`. **One missed re-arm leaves a whole chained route with no anchors while
+   * every leg still reports success**, which is why the three exits that owe it — the run, the
+   * failed start, the back button — all call this rather than each carrying the rule.
+   */
+  const handLens = useCallback(async (to: "traverse" | "zone") => {
+    if (!zoneRef.current) return;
+    const out = await (to === "traverse" ? pauseZone() : resumeZone()).catch(() => null);
+    /* Painted from the return, never from the ask. A handover that did not happen leaves the state
+       it had, and this flag is what the strip uses to say whether a position can still be taken. */
+    setZonePaused(out?.paused ?? (to === "zone"));
+  }, []);
+
+  /**
    * The traverse, driven from the instruments panel.
    *
    * ⚑ The *mechanism* only. No capture kind, no in-frame guidance, and nothing filed — the
@@ -1269,6 +1320,11 @@ export function CameraScreen({
          focus and can take a moment; leaving the bar reading "start trace" while frames are
          already firing is the state the field called confusing, and it was. */
       setTraversing(true);
+      /* ⚑ **The outbound half of `handLens`, and the anchor above is why it has to be here.**
+         `takePosition` wakes positioning, which takes the camera for the life of the room, and a
+         traverse cannot run on a stopped capture session. Before the lens request rather than after
+         it, so `swapLens`'s preset re-assert lands on a session that is actually running. */
+      await handLens("traverse");
       // ⚑ Lens SECOND, and it MUST be before `startTraverse`. A traverse locks exposure, white
       // balance and focus on its first frame and refuses a lens swap mid-run — so a wide default
       // applied afterwards would be silently declined, and the run would be shot on normal while
@@ -1286,6 +1342,11 @@ export function CameraScreen({
     } catch (err) {
       setTraversing(false);
       setError(err instanceof Error ? err.message : String(err));
+      /* ⛑ **Re-armed on the failure path too — a handover has two ends on every path, not only the
+         one that works.** A run that never started would otherwise leave positioning disarmed for
+         the rest of the zone, so every later capture files `{positioned:false, why:"paused"}`: a
+         room of unplaceable photographs caused by the recovery rather than by the fault. */
+      await handLens("zone");
     }
   }, []);
 
@@ -1401,6 +1462,11 @@ export function CameraScreen({
       setTraverseResult(result);
       /* The far end of the leg. Taken after the run has stopped, so no handover ever lands inside
          a traverse — the two anchors bracket it rather than interrupt it. */
+      /* ⚑ **The inbound half of `handLens`, and the anchor cannot be read without it.** The
+         outbound half disarmed positioning along with releasing the lens, so a `takePosition`
+         before this line answers `{positioned:false, why:"paused"}` — and that end is what
+         `lastEnd` hands to the next leg as its start. */
+      await handLens("zone");
       setMeasuring(true);
       const endPosition = await takePosition()
         .catch(() => ({ positioned: false, why: "no zone open" }) as ZonePosition)
@@ -1485,9 +1551,26 @@ export function CameraScreen({
       setError(err instanceof Error ? err.message : String(err));
       return null;
     } finally {
+      /*
+       ⛑ **The lens comes back on EVERY exit, and the happy path was the only one that had it.**
+
+       ⚑ *Adversarial review 2026-09-06 called this the blocker, and it is right:* `handLens("zone")`
+       sat inside the `try`, below three awaited calls that can each throw — `toggleVoice` writes to
+       IndexedDB, `cycleVoice` starts a recorder, and `stopTraverse` itself rejects if the controller
+       is no longer traversing. **Any of them throwing leaves the traverse holding the lens with
+       positioning disarmed, for the rest of the room** — every later photograph refuses its pose and
+       the concierge is told to hold still, which cannot help.
+
+       **`finally` is the only correct home for the return leg of a handover.** *This is the
+       one-ended-operation class for the seventh time in this file, and the sixth was `handLens`
+       itself.* Idempotent by construction: `handLens("zone")` on a zone that already holds the lens
+       re-enters a configuration it is already in and `enterUnchanged` returns without touching the
+       session.
+      */
+      void handLens("zone");
       setTraversing(false);
     }
-  }, [capturePhotoV2, recorder.state, toggleVoice, cycleVoice]);
+  }, [capturePhotoV2, recorder.state, toggleVoice, cycleVoice, handLens]);
 
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;
@@ -1673,7 +1756,7 @@ export function CameraScreen({
    */
   const toggleTorch = async () => {
     const wanted = !status?.torchOn;
-    setTorchAsked(wanted);
+    setTorchAsked({ on: wanted, mode: status?.mode });
     try {
       await adjustCamera({ torchOverride: wanted });
     } catch (err) {
@@ -2245,13 +2328,35 @@ export function CameraScreen({
                 frames · <span className="font-mono text-slate-100">{traverseProgress.frames}</span>
                 {traverseProgress.lastPair?.measured && (
                   <>
-                    {" · overlap "}
+                    {/*
+                      ⚑ **The live line prints the number the word beside it was computed from.**
+                      It printed `overlap` and `disparity`, and flow-v1 retired both.
+
+                      ⛑ `disparity` was not merely retired here — it was never *arriving*.
+                      `measureOverlap` writes it below the flow branch's own `return`, so it exists
+                      only on the translation-only fallback that runs when Vision errors. On every
+                      pair flow judged — which is every pair on a walk that worked — the key was
+                      absent and `?? 0` rendered a measurement nobody took as **0.000**. A defaulted
+                      zero is worse than a blank: it is a reading never taken wearing the clothes of
+                      one that was, which is `#104`'s shape arriving in the readout rather than in the
+                      mechanism. So an absent value reads `—`, and on the rare pair where flow itself
+                      could not answer, `—` is the honest live word for it.
+
+                      `overlap` is the translation model's answer and that model is what flow
+                      replaced. `covered` is what `contiguity` is thresholded on
+                      (`flow.covered < traverseMinimumOverlap`), so the number and the grey word
+                      below it now say the same thing — the retired-metric defect for the FOURTH
+                      time, fixed the way the result panel already fixed it for itself.
+
+                      ⚑ And the `measured` gate stays. `covered` is recorded BEFORE the texture and
+                      flow-still guards, so an unverified pair carries a coverage number those guards
+                      exist to disbelieve — a covered lens read 1.000. Widening this to "has a
+                      covered value" would print exactly the number the blank-wall work was built to
+                      stop believing.
+                    */}
+                    {" · covered "}
                     <span className="font-mono text-slate-100">
-                      {(traverseProgress.lastPair.overlap ?? 0).toFixed(2)}
-                    </span>
-                    {" · disparity "}
-                    <span className="font-mono text-slate-100">
-                      {(traverseProgress.lastPair.disparity ?? 0).toFixed(3)}
+                      {traverseProgress.lastPair.covered?.toFixed(2) ?? "—"}
                     </span>
                   </>
                 )}

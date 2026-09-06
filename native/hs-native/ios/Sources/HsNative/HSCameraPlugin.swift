@@ -93,6 +93,25 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        /*
+         ⛑ **At launch, on the session queue, before any zone can exist — the whole point of the
+         pre-build is WHEN it happens.**
+
+         ⚑ Measured (`HSArProbe`): building an `AVCaptureDeviceInput` costs **7 ms here and 9,006 ms
+         once ARKit holds the camera.** Baseline Service Design v1.12 calls this "a requirement of
+         the hatch and not an optimisation of it", and it had never been built — which is why the
+         room shot's wide frame has no affordable path today.
+
+         *Nothing else changes.* No session runs, no preset moves, no lens is selected. `swapLens`
+         simply finds an input already made instead of making one in the expensive state, and falls
+         back to building on demand — today's behaviour — if this failed.
+         */
+        /* ⛑ `ensureController()`, not the optional chain — `controller?` silently does nothing when
+           the controller has not been made yet, which at `load()` is always. **A pre-build that
+           quietly never runs is worse than none**: it reads as present in the source and still costs
+           9,006 ms in the field. *Caught by checking the device log for `inputsPrepared` and finding
+           no row* — the instrument earning its place immediately. */
+        ensureController().warmInputs()
         if CommandLine.arguments.contains("--hs-plate"), #available(iOS 16.0, *) {
             let p = HSPlateAB()
             plateAB = p
@@ -1790,14 +1809,67 @@ final class CameraController: NSObject {
     /// The session surgery alone. Split from `apply(mode:)` rather than calling back into it: a
     /// swap must be followed by a full re-configure, and two functions that each call the other to
     /// finish the job is how one of them ends up running twice.
+    /**
+     ⛑ **Inputs built once, at launch, because building one later costs 9,006 ms.**
+
+     ⚑ *Measured, `HSArProbe`:* `AVCaptureDevice.default` + `AVCaptureDeviceInput(device:)` takes
+     **7 ms at launch and 9,006 ms while ARKit holds the camera.** Baseline Service Design v1.12 calls
+     the launch-time pre-build **"a requirement of the hatch and not an optimisation of it"** — and it
+     was never built. `configureSession` creates exactly one input and guards on
+     `session.inputs.isEmpty`, so every ultra-wide has been allocated lazily, in the expensive state,
+     inside the swap that needs it.
+
+     ⚠️ **Touched from `sessionQueue` ONLY.** An adversarial review of the first attempt at this found
+     the same cache written from three queues, and its verdict is the reason for this comment rather
+     than a lock: *"a raced Swift Dictionary is memory-unsafe, not merely stale."* Every read and
+     every write below is already inside `sessionQueue`; keep it that way.
+
+     *Zoom cannot substitute and that is measured too* (`docs/ZOOM-FLOOR-RESULT-2026-09-06.md`): while
+     ARKit runs, the device it configures is pinned to exactly `[1.0, 1.0]` — 64.7° against the
+     ultra-wide's 107.3°, with no path between them but an input swap.
+     */
+    private var preparedInputs: [CameraLens: AVCaptureDeviceInput] = [:]
+
+    /// Built at launch, on `sessionQueue`, before any zone can exist. Failure is silent and harmless:
+    /// `swapLens` falls back to building one on demand, which is exactly today's behaviour.
+    /// ⚑ Public entry point: hops to `sessionQueue` so callers cannot get the queue wrong. The rule
+    /// that `preparedInputs` is touched from one queue lives here, not in each caller.
+    func warmInputs() {
+        sessionQueue.async { [weak self] in self?.prepareInputs() }
+    }
+
+    private func prepareInputs() {
+        for lens in [CameraLens.normal, CameraLens.wide] where preparedInputs[lens] == nil {
+            guard let d = AVCaptureDevice.default(lens.deviceType, for: .video, position: .back),
+                  let input = try? AVCaptureDeviceInput(device: d) else { continue }
+            preparedInputs[lens] = input
+        }
+        HSZoneLog.record("inputsPrepared", ["lenses": preparedInputs.keys.map { $0.rawValue }.sorted()])
+    }
+
     private func swapLens(to wanted: CameraLens) -> Bool {
         guard !isTraversing else { return false }
         guard wanted != lens else { return true }
+        /* ⚑ The prepared input first. `AVCaptureDeviceInput` is reusable across add/remove cycles —
+           what is expensive is constructing one while ARKit holds the device, which is precisely
+           when a room shot needs it. */
+        if let ready = preparedInputs[wanted] {
+            return swapLens(to: wanted, using: ready)
+        }
         guard let newDevice = AVCaptureDevice.default(wanted.deviceType, for: .video, position: .back) else {
             return false
         }
         guard let newInput = try? AVCaptureDeviceInput(device: newDevice) else { return false }
+        /* ⛑ Cached on the way past, so a first swap pays the build once and a second never does.
+           Still `sessionQueue`-only — this line is inside the same call the guard above is. */
+        preparedInputs[wanted] = newInput
+        return swapLens(to: wanted, using: newInput)
+    }
 
+    /// ⚑ **The surgery itself, shared by both paths**, so a prepared input and a freshly-built one
+    /// can never diverge in what they do to the session. *Two functions that each half-do a swap is
+    /// how one of them forgets the preset.*
+    private func swapLens(to wanted: CameraLens, using newInput: AVCaptureDeviceInput) -> Bool {
         let previous = videoInput
         session.beginConfiguration()
         if let previous { session.removeInput(previous) }
@@ -1836,7 +1908,9 @@ final class CameraController: NSObject {
         ])
 
         videoInput = newInput
-        device = newDevice
+        // ⚑ From the input, not from a separate lookup — the two could disagree, and the device that
+        // governs torch and rotation below is the one this input actually opened.
+        device = newInput.device
         lens = wanted
 
         /*

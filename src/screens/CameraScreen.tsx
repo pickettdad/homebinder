@@ -2245,13 +2245,35 @@ export function CameraScreen({
                 frames · <span className="font-mono text-slate-100">{traverseProgress.frames}</span>
                 {traverseProgress.lastPair?.measured && (
                   <>
-                    {" · overlap "}
+                    {/*
+                      ⚑ **The live line prints the number the word beside it was computed from.**
+                      It printed `overlap` and `disparity`, and flow-v1 retired both.
+
+                      ⛑ `disparity` was not merely retired here — it was never *arriving*.
+                      `measureOverlap` writes it below the flow branch's own `return`, so it exists
+                      only on the translation-only fallback that runs when Vision errors. On every
+                      pair flow judged — which is every pair on a walk that worked — the key was
+                      absent and `?? 0` rendered a measurement nobody took as **0.000**. A defaulted
+                      zero is worse than a blank: it is a reading never taken wearing the clothes of
+                      one that was, which is `#104`'s shape arriving in the readout rather than in the
+                      mechanism. So an absent value reads `—`, and on the rare pair where flow itself
+                      could not answer, `—` is the honest live word for it.
+
+                      `overlap` is the translation model's answer and that model is what flow
+                      replaced. `covered` is what `contiguity` is thresholded on
+                      (`flow.covered < traverseMinimumOverlap`), so the number and the grey word
+                      below it now say the same thing — the retired-metric defect for the FOURTH
+                      time, fixed the way the result panel already fixed it for itself.
+
+                      ⚑ And the `measured` gate stays. `covered` is recorded BEFORE the texture and
+                      flow-still guards, so an unverified pair carries a coverage number those guards
+                      exist to disbelieve — a covered lens read 1.000. Widening this to "has a
+                      covered value" would print exactly the number the blank-wall work was built to
+                      stop believing.
+                    */}
+                    {" · covered "}
                     <span className="font-mono text-slate-100">
-                      {(traverseProgress.lastPair.overlap ?? 0).toFixed(2)}
-                    </span>
-                    {" · disparity "}
-                    <span className="font-mono text-slate-100">
-                      {(traverseProgress.lastPair.disparity ?? 0).toFixed(3)}
+                      {traverseProgress.lastPair.covered?.toFixed(2) ?? "—"}
                     </span>
                   </>
                 )}

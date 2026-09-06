@@ -100,9 +100,16 @@ discipline exists to prevent.
 
 **Pull requests — one per run, always.** Every run ends with an open PR into the
 default branch for that run's commits (owner decision 2026-07-25: "work I can't see is
-work I can't test" — the owner merges, which triggers the Netlify deploy to the test
-device). Never leave commits stranded on the branch with no PR. Reuse the run's open PR
-if one already exists; otherwise open a fresh one.
+work I can't test"). Never leave commits stranded on the branch with no PR. Reuse the run's
+open PR if one already exists; otherwise open a fresh one.
+
+⚑ **This session may merge its own PRs — owner ruling 2026-09-06.** *"I haven't merged the PR
+in a while. When we work like this, I don't always go in to merge, so you can merge those as
+well."* **Merge once CI is green**, then open a fresh PR for the work that follows. The 2026-07-25
+decision was about *visibility*, not about the owner being a gate — and an unmerged PR is a
+Netlify deploy that never reaches the test device, which is the opposite of what that decision
+wanted. *The PR still exists and is still the record; it simply does not wait.* Do not merge a
+red PR, and do not merge work the owner has asked to see first.
 
 **Re-base before pushing; verify ancestry after (2026-07-31, after three strandings).**
 `git fetch origin main` and restart the branch from it **before** the first commit of any
@@ -233,6 +240,19 @@ has never seen looks, from their side, like an artifact that appeared without wa
 they have to ask what it is. And a decision written into a repo doc the design session never
 reads is invisible exactly where it was supposed to be binding, which is the "unstated
 decision" failure with an extra step.
+
+**Usage can end a turn mid-flight, so no work sits uncommitted (owner concern 2026-09-06).**
+*"We do run the risk of running out of usage… I'd hate to hit the limit and lose work that was in
+progress."* ⛑ **The mitigation is not prediction — this session cannot see the usage meter and must
+not pretend to.** It is *never having much to lose*: **commit and push after each coherent fix**,
+not after a batch, and prefer several small commits to one large one. A fleet's findings are written
+to a file before they are acted on, so a turn that dies mid-application resumes from the file rather
+than from a re-run.
+
+⚑ **And `docs/STATE-OF-PLAY.md` is the resume point.** Rewritten wholesale at the end of any turn
+that changes what a fresh session would need to know: what is on the device, what the last walk
+proved, what is open and what is next. *It is a carried-forward document with a named consumer — the
+next session — so it stays, and it is replaced rather than appended to.*
 
 **Issue hygiene.** Docs (`REDESIGN-v2`, `PLAN-STAGE-*`, `CHECKLIST-MASTER-REVIEW`) carry
 *planned* work; the GitHub Issues tab carries *field defects that aren't fixed the same

@@ -283,6 +283,21 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      mechanism the whole mode design rests on. `.resetTracking` would give the zone a new origin and
      silently re-base every position taken after it against a different one.
      */
+    /// What the session is actually configured to do, so `enter` can tell a real change from a
+    /// mode label change. Compared by value — two configs that differ in nothing must compare equal.
+    private var lastConfigSignature: String?
+
+    private static func signature(of c: ARWorldTrackingConfiguration) -> String {
+        let res = c.videoFormat.imageResolution
+        return [
+            String(c.planeDetection.rawValue),
+            String(c.sceneReconstruction.rawValue),
+            String(c.frameSemantics.rawValue),
+            String(c.environmentTexturing.rawValue),
+            "\(Int(res.width))x\(Int(res.height))@\(c.videoFormat.framesPerSecond)",
+        ].joined(separator: "|")
+    }
+
     @discardableResult
     private func enter(_ next: Mode, reset: Bool = false) -> [String] {
         var unmet: [String] = []
@@ -293,22 +308,21 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         case .roomplan:
             // RoomPlan configures the session itself; we only ensure it has one to configure.
             config.planeDetection = [.horizontal, .vertical]
-        case .mesh:
-            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
-                config.sceneReconstruction = .mesh
-            } else {
-                unmet.append("mesh")
-            }
-            config.planeDetection = [.horizontal, .vertical]
-            /* ⚑ The video format is chosen for the STILL, not the tracking. Still resolution follows
-               it — 4032×3024 on the hi-res format against 2016×1512 on a low-power one, from the same
-               call — so a format picked to lighten tracking quarters the photographs, and a plate is
-               the thing being photographed. */
-            if #available(iOS 16.0, *),
-               let hi = ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing {
-                config.videoFormat = hi
-            }
-        case .positioning:
+        /*
+         ⛑ **Mesh and positioning are ONE configuration, and writing them as two was the cost.**
+
+         The doctrine was already stated below — *"the mode is a UI contract about what the person is
+         doing, not a different configuration"* — and the code did not honour it: mesh picked
+         `recommendedVideoFormatForHighResolutionFrameCapturing`, positioning picked `stillFormat()`,
+         and positioning alone asked for depth. **So every mesh↔positioning switch re-ran the session
+         and changed the video format**, which is a measured ~15 mm pose jump plus a second of
+         `limited(initializing)` — paid twice in a walk that changed mode twice, for nothing.
+
+         ⚑ *Field question 2026-09-05, and it was the right one:* **"shouldn't reinits be 0?"** The
+         first is the session starting and cannot be avoided. **Every one after it now has to earn
+         itself**, and only RoomPlan does — it reconfigures the session on its own.
+         */
+        case .mesh, .positioning:
             /* ⛑ **Plane detection stays ON, and stripping it was a bug I introduced** (zone log,
                2026-08-21: `surface: false` on every position taken).
 
@@ -344,6 +358,29 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            a failure inherit the corpse and need an app restart. If it has failed, the delegate has
            already cleared `everRan`, and the first run after that resets rather than resumes. */
         let mustReset = reset || !everRan || failure != nil
+        /*
+         ⛑ **A `run()` that changes nothing is not free, so it does not happen.**
+
+         Re-running restarts tracking — the 2026-08-30 walk reached `enter` 111 times and ARKit
+         reported `limited(initializing)` on 109 of them — and re-running with a different
+         `videoFormat` costs a measured ~15 mm pose jump. ⚑ **Neither is worth paying to arrive at
+         the configuration already running.**
+
+         *The signature is compared rather than the mode*, because the mode is a UI contract and the
+         session only cares about the config behind it. RoomPlan is excluded at both ends: it
+         reconfigures the session itself, so whatever we last set is no longer what is running —
+         **the thing consulted would not be the thing that governs.**
+         */
+        let signature = Self.signature(of: config)
+        /* ⚠️ `!paused` is load-bearing: a paused session was genuinely `pause()`d, and skipping the
+           run would leave it stopped while this method reported it running. */
+        if !mustReset, !paused, next != .roomplan, mode != .roomplan, signature == lastConfigSignature {
+            HSZoneLog.record("enterUnchanged", ["mode": next.rawValue, "reinits": reinitCount])
+            failure = nil
+            mode = next
+            modeStartedAt = Date()
+            return unmet
+        }
         failure = nil
         /* ⚑ Counted here, at the one place a session is (re)started. Every entry to this line is a
            re-establishment of tracking — the walk of 2026-08-30 reached this 111 times in five
@@ -354,6 +391,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "mode": next.rawValue, "reset": mustReset, "unmet": unmet, "reinits": reinitCount,
         ])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
+        // ⚑ Cleared for RoomPlan rather than stored: it configures the session behind our back, so a
+        // signature written here would describe a config that is about to stop being the live one.
+        lastConfigSignature = next == .roomplan ? nil : signature
         everRan = true
         mode = next
         modeStartedAt = Date()

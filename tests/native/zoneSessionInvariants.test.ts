@@ -116,3 +116,41 @@ describe("handing a scan mode back", () => {
     expect(waiter).not.toMatch(/hideArPreview\?\(\)/);
   });
 });
+
+/**
+ * ⛑ **A session run has to earn itself.**
+ *
+ * Field question 2026-09-05: *"shouldn't reinits be 0?"* ⚑ **The first cannot be — that one is the
+ * session starting.** Every one after it is a re-establishment of tracking, and the 2026-08-30 walk
+ * reached that line 111 times across five zones with ARKit reporting `limited(initializing)` on 109
+ * of them. A re-run that also changes `videoFormat` costs a measured ~15 mm pose jump on top.
+ *
+ * Mesh and positioning were written as two configurations while the doctrine beside them said they
+ * were one — *"the mode is a UI contract about what the person is doing, not a different
+ * configuration"* — so every switch between them paid both costs to arrive where it already was.
+ *
+ * The invariant is **not** the count in any particular walk, which depends on what the concierge
+ * did. It is that **a mode change carrying an identical configuration does not re-run the session**.
+ */
+describe("what a mode change costs", () => {
+  it("treats mesh and positioning as one configuration", () => {
+    // Written as one case, so they cannot drift apart again in two separate branches.
+    expect(ZONE_SRC).toMatch(/case \.mesh, \.positioning:/);
+  });
+
+  it("compares the configuration rather than the mode label", () => {
+    /* ⚑ The mode is a UI contract; the session only cares what is behind it. Comparing modes would
+       re-run whenever the label changed and skip whenever it did not — both wrong. */
+    expect(ZONE_SRC).toMatch(/signature == lastConfigSignature/);
+  });
+
+  it("still re-runs when the session is paused, has failed, or RoomPlan touched it", () => {
+    /* ⛑ Each of these means the live session is not what our signature says it is. Skipping any of
+       them reports a running session that is stopped, dead, or configured by somebody else — the
+       thing consulted not being the thing that governs, which is this repo's oldest failure. */
+    const guard = /if !mustReset, !paused, next != \.roomplan, mode != \.roomplan, signature == lastConfigSignature \{/;
+    expect(ZONE_SRC).toMatch(guard);
+    // And RoomPlan's own turn clears the signature rather than storing one it is about to invalidate.
+    expect(ZONE_SRC).toMatch(/lastConfigSignature = next == \.roomplan \? nil : signature/);
+  });
+});

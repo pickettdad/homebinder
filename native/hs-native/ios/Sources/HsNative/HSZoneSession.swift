@@ -1028,11 +1028,29 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            The waiter below is resolved by the delegate; the timeout is a backstop that says so. */
         HSZoneLog.record("roomPlanStopping")
         roomWaiter = { [weak self] out in
-            /* ⚑ The preview goes; the SESSION stays. `stop(pauseARSession: false)` is what makes
-               RoomPlan hand the live session back rather than end it, and pausing here would throw
-               away the map it just spent ninety seconds building — which is the map every pose
-               afterwards is corrected against. */
-            self?.hideArPreview?()
+            guard let self else { return }
+            /*
+             ⛑ **Back to positioning HERE, on the device, rather than left to whoever called.**
+
+             ⚑ *This line detached the preview and stopped* — so the session went on tracking with
+             nothing drawing it, and the field got **a black screen after finishing the floorplan
+             that only backing out of the zone could clear** (2026-09-05, and the log is unambiguous:
+             `roomDelivered` → `arPreviewDetached` → forty-five seconds of `tracking` and no attach).
+
+             **The caller was supposed to do this and one of the two callers did not.** `finishMesh`
+             calls `setZoneModeNative("positioning")`; `finishScan` calls `setZoneMode`, the *React
+             state setter one letter away from it* — so the label changed and the device did not.
+             ⚑ **A rule that lives in two callers is a rule that holds until somebody adds a third.**
+             Leaving a scan mode is a fact the session knows about itself, so it acts on it here and
+             no caller can forget.
+
+             The session stays: `stop(pauseARSession: false)` hands the live session back rather than
+             ending it, and pausing would throw away the map it just spent ninety seconds building —
+             the map every pose afterwards is corrected against. Re-entering positioning keeps that
+             map, because `enter` only resets when the session actually died.
+             */
+            _ = self.enter(.positioning)
+            self.showArPreview?(self.session)
             completion(out)
         }
         stopRoomCapture(keepSession: true)

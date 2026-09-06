@@ -18,6 +18,11 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const ZONE_SRC = readFileSync(
+  resolve(__dirname, "../../native/hs-native/ios/Sources/HsNative/HSZoneSession.swift"),
+  "utf8",
+);
+
 const PLUGIN = resolve(__dirname, "../../native/hs-native/ios/Sources/HsNative/HSCameraPlugin.swift");
 const src = readFileSync(PLUGIN, "utf8");
 const lines = src.split("\n");
@@ -65,10 +70,7 @@ describe("who is allowed to start the capture session", () => {
  * still showing the mesh overlay."*
  */
 describe("the mesh overlay", () => {
-  const zone = readFileSync(
-    resolve(__dirname, "../../native/hs-native/ios/Sources/HsNative/HSZoneSession.swift"),
-    "utf8",
-  );
+  const zone = ZONE_SRC;
 
   it("is gated on the mode at the one place that knows the mode", () => {
     // The anchors handed to the preview are chosen by mode, so the renderer cannot get it wrong.
@@ -79,5 +81,38 @@ describe("the mesh overlay", () => {
     /* ⛑ Holding an ARFrame past the delegate callback starves ARKit's frame pool and the viewfinder
        freezes while the rest of the app runs on — the 2026-09-05 field signature exactly. */
     expect(zone).toMatch(/onPreviewFrame: \(\(CVPixelBuffer, \[ARMeshAnchor\], ARCamera\) -> Void\)\?/);
+  });
+});
+
+/**
+ * ⛑ **Leaving a scan mode restores the viewfinder, and the session does it — not the caller.**
+ *
+ * Field 2026-09-05: *"screen goes black after finish roomplan."* The log is unambiguous —
+ * `roomDelivered` → `arPreviewDetached` → forty-five seconds of `tracking` events with nothing ever
+ * re-attached. RoomPlan hands the live `ARSession` back, so the session went on tracking perfectly
+ * behind a black rectangle, and only backing out of the zone cleared it.
+ *
+ * ⚑ **The rule existed and lived in the callers, which is why it held in one and not the other.**
+ * `finishMesh` called `setZoneModeNative`; `finishScan` called `setZoneMode` — *the React state
+ * setter one letter away from it* — so the label changed and the device did not. **A rule kept in
+ * two callers holds until somebody writes a third.**
+ *
+ * The invariant is therefore about *where the rule lives*, not about today's two callers.
+ */
+describe("handing a scan mode back", () => {
+  it("re-enters positioning and re-shows the preview inside the RoomPlan waiter", () => {
+    // The waiter is the one place that knows RoomPlan has delivered and the session is live again.
+    const waiter = /roomWaiter = \{[\s\S]*?\n        \}/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(waiter).not.toBe("");
+    expect(waiter).toMatch(/enter\(\.positioning\)/);
+    expect(waiter).toMatch(/showArPreview\?\(/);
+  });
+
+  it("never leaves the preview hidden with the session still running", () => {
+    /* ⚑ `hideArPreview` is legitimate where the session is genuinely going away — pausing, closing,
+       a hard failure. It is never legitimate as the last act of a delivery that keeps the session.
+       Asserted as *the waiter does not hide*, which holds however the rest of the file changes. */
+    const waiter = /roomWaiter = \{[\s\S]*?\n        \}/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(waiter).not.toMatch(/hideArPreview\?\(\)/);
   });
 });

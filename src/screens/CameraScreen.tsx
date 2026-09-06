@@ -1913,8 +1913,40 @@ export function CameraScreen({
    * correctly reads `statusRef.current` — the third instance of that class in this file today. And
    * it treated *not ready yet* as *nothing to do*, which is the silent-no-op shape this repo keeps
    * paying for. It now waits, and if the status never comes it **reports** rather than shrugging.
+   *
+   * ⚑ **That wait belongs to the AVFoundation path only, and the guard below says why.** In a zone
+   * ARKit holds the camera, the status cannot arrive inside the deadline, and the answer it would
+   * carry is fixed — so the wait was a race whose loss the field read as a broken camera.
    */
   const applyIntentLens = async (intent: LensIntent) => {
+    /*
+     ⛑ **Inside a zone there is no lens to apply, and the wait for one printed a false alarm on
+     every zone door** (field 2026-09-06: *"camera never reported its state — lens left as found"*).
+
+     The message was not a camera fault. `start()` returns early while the zone owns the camera
+     (`HSCameraPlugin.swift`, `startDeferredToZone`) — **above** the `apply(mode:)` that is the only
+     call emitting a status synchronously — so the first `modeStatus` in a zone comes from
+     `startStatusSampling`, a **5.0 s repeating** `Timer`. A 2.5 s deadline against a 5 s tick loses
+     every time. *The stall and the sentence were a timer race being reported as a hardware failure.*
+
+     ⚑ **And it fired on the majority case.** Both zone doors call this: the traverse wants `normal`,
+     already has `normal`, and needed nothing — so the alarm rang loudest where there was nothing to
+     say, which is the shape that gets a signal ignored by the time it matters.
+
+     **Returning here is not a workaround.** While the zone holds the camera there is exactly one
+     piece of glass: `emitStatus` reports `lensLocked: true`, `lens: "normal"`, `lensAvailable:
+     false` for the life of the zone, because world tracking is offered only the wide-angle device
+     on this iPad (thirteen formats, zero ultra-wide — `LENS-PROBE-2026-08-24`). So even a status
+     that arrived on time could only have said *no*. **The wait was for an answer already known.**
+
+     ⚑ *The room shot's wide frame is not abandoned — it is the hatch of Baseline Service Design
+     v1.12 §4.1a-i, a sibling pair taken at the shutter, and it needs a pre-built ultra-wide session
+     that does not exist yet.* This says what is true today rather than stalling on it.
+     */
+    if (zoneRef.current) {
+      if (intent === "room-shot") setZoneNote("1× in a zone — positioning holds the lens");
+      return;
+    }
     const deadline = Date.now() + 2500;
     while (!statusRef.current && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1924,7 +1956,12 @@ export function CameraScreen({
       setZoneNote("camera never reported its state — lens left as found");
       return;
     }
-    if (!live.lensAvailable) return;
+    /* Speaks, because outside a zone this means the hardware has no second piece of glass — which
+       is a fact about the iPad the concierge is holding, not a state that will resolve on its own. */
+    if (!live.lensAvailable) {
+      if (lensPolicyFor(live.mode, intent).default !== live.lens) showToast("this camera has one lens");
+      return;
+    }
     const policy = lensPolicyFor(live.mode, intent);
     if (policy.locked || live.lens === policy.default) return;
     const achieved = await chooseLens(policy.default);

@@ -607,10 +607,29 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let fb = a.geometry.faces
             let perFace = fb.indexCountPerPrimitive
             idx.reserveCapacity(fb.count * perFace)
+            /*
+             ⛑ **`bytesPerIndex` is read here AND honoured — it used to be read and ignored.**
+
+             The line advanced by `fb.bytesPerIndex` and then read `UInt32` unconditionally. On a
+             16-bit buffer that walks 2 bytes and reads 4, so every index but the first is two halves
+             of two different numbers: ⚑ **not a crash and not an error — a room made of the wrong
+             triangles**, in the one payload the desk reconstructs geometry from.
+
+             *The comment two lines above already stated the rule* — `indexCountPerPrimitive` "is read
+             rather than assumed, for the same reason" — and then the next statement broke it. Three
+             readers of this buffer exist (`renderArPreview`, `HSSurface`, here); the other two branch
+             correctly, and **the one that got it wrong is the one that writes the export.**
+
+             *It has not bitten yet because ARKit ships 32-bit indices today.* That is precisely the
+             "works until an OS release" hazard the sibling comment names.
+             */
+            let indexBase = fb.buffer.contents()
+            let indexWidth = fb.bytesPerIndex
             for i in 0..<(fb.count * perFace) {
-                idx.append(Int(fb.buffer.contents()
-                    .advanced(by: i * fb.bytesPerIndex)
-                    .assumingMemoryBound(to: UInt32.self).pointee))
+                let p = indexBase.advanced(by: i * indexWidth)
+                idx.append(indexWidth == 2
+                    ? Int(p.assumingMemoryBound(to: UInt16.self).pointee)
+                    : Int(p.assumingMemoryBound(to: UInt32.self).pointee))
             }
             pieces.append([
                 "id": a.identifier.uuidString,

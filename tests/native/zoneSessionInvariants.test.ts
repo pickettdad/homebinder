@@ -184,3 +184,65 @@ describe("which origin a measurement belongs to", () => {
     expect(stamps.length).toBeGreaterThanOrEqual(4); // capture, position, plan, mesh (empty + full)
   });
 });
+
+/**
+ * ⛑ **A scan that is still finalising owns the session, and everything else must say so.**
+ *
+ * The 2026-09-05 walk pressed Finish on the floorplan and opened mesh fourteen seconds later while
+ * delivery was still pending. Three separate things then went wrong, and each is asserted here
+ * because each failed silently:
+ *
+ * 1. `enter(.mesh)` re-ran the `ARSession` under RoomPlan and **the plan was never delivered** —
+ *    four walls, three doors and one window, scanned and gone with nothing recording the loss.
+ * 2. The 30-second backstop fired **into a session that had moved on**, running `enter(.positioning)`
+ *    and taking the concierge out of mesh mid-scan.
+ * 3. Finish on the mesh then found `mode` already `.positioning`, so the walked mesh was discarded.
+ *
+ * ⚑ The invariant is that **a pending delivery is either honoured or recorded — never dropped**, and
+ * that a backstop **reports** rather than steers.
+ */
+describe("a floorplan that is still finalising", () => {
+  it("records the loss when another mode supersedes it", () => {
+    // Fired with what is known, so the absence lands as a refusal the export carries.
+    expect(ZONE_SRC).toMatch(/if let waiter = roomWaiter, next != \.roomplan \{/);
+    expect(ZONE_SRC).toMatch(/roomSuperseded/);
+  });
+
+  it("lets the backstop report but never steer a session that moved on", () => {
+    /* ⛑ The waiter restores positioning because it normally runs while RoomPlan is still the mode.
+       Thirty seconds later that assumption is exactly what took a concierge out of mesh. */
+    expect(ZONE_SRC).toMatch(/if self\.mode == \.roomplan \{[\s\S]{0,200}?roomTimedOutElsewhere/);
+  });
+
+  it("records both ends of the build, because the gap between them lost a plan", () => {
+    // A delegate that never fires and a builder that never returns are indistinguishable without these.
+    for (const marker of ["roomDidEnd", "roomBuilding", "roomBuilt"]) {
+      expect(ZONE_SRC).toContain(marker);
+    }
+  });
+});
+
+/**
+ * ⛑ **Keeping a view must re-assert every condition that makes it visible.**
+ *
+ * The placement check fixed the first black mesh screen and caused the second: it returned early on
+ * *is it in the right place*, skipping the transparency block below it — and the capture path makes
+ * the host opaque again when it tears its own preview down. ⚑ **A fast path that re-checks one
+ * precondition and inherits the rest is wrong the moment a different one moves.**
+ */
+describe("keeping an existing preview", () => {
+  const PLUGIN_SRC = readFileSync(PLUGIN, "utf8");
+
+  it("asserts transparency on the keep path, not only on the build path", () => {
+    const keep = /if placed && ordered \{[\s\S]*?arPreviewKept[\s\S]*?\]\)/.exec(PLUGIN_SRC)?.[0] ?? "";
+    expect(keep).not.toBe("");
+    expect(keep).toMatch(/if web\.isOpaque \{/);
+  });
+
+  it("logs what governs visibility rather than what was checked", () => {
+    /* ⚑ The old line recorded the index alone, so a black screen and a working one printed the
+       same row — an instrument that agrees with the bug. */
+    const keep = /arPreviewKept", \[[\s\S]*?\]\)/.exec(PLUGIN_SRC)?.[0] ?? "";
+    expect(keep).toMatch(/webOpaque/);
+  });
+});

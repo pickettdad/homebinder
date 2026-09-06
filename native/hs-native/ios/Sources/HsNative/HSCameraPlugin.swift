@@ -388,7 +388,32 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                     && (superview.subviews.firstIndex(of: existing) ?? Int.max)
                      < (superview.subviews.firstIndex(of: web) ?? -1)
                 if placed && ordered {
-                    HSZoneLog.record("arPreviewKept", ["index": superview.subviews.firstIndex(of: existing) ?? -1])
+                    /*
+                     ⛑ **Keeping the view must re-assert every condition that makes it VISIBLE, and
+                     placement is only one of them.**
+
+                     ⚑ *Second black mesh screen, 2026-09-05, and my own fix caused it.* The check
+                     asked *is it in the right place* — it was, `arPreviewKept index: 0` — and
+                     returned before the transparency block below, **which is the other precondition
+                     and the one that had changed.** The capture path makes the host opaque again when
+                     it tears its own preview down, so a scan entered afterwards sat correctly placed
+                     behind an opaque page. The comment below has warned about exactly this since
+                     2026-08-21 and the early return skipped it.
+
+                     *The general form, and this is the third time this week:* **a fast path that
+                     re-checks one precondition and inherits the rest is a fast path that is wrong
+                     whenever a different one moved.**
+                     */
+                    if web.isOpaque {
+                        self.restoreOpaqueForAr = true
+                        WebLayer.makeTransparent(web)
+                    }
+                    HSZoneLog.record("arPreviewKept", [
+                        "index": superview.subviews.firstIndex(of: existing) ?? -1,
+                        // ⚑ Logged because it is what governs. The old line recorded what was
+                        // checked, so the black screen and a working one printed the same row.
+                        "webOpaque": web.isOpaque,
+                    ])
                     return
                 }
                 HSZoneLog.record("arPreviewRehomed", [

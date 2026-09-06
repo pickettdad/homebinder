@@ -623,9 +623,20 @@ export function CameraScreen({
   }, [zoneOpen, startAction]);
 
   const finishScan = useCallback(async () => {
-    setScanning(false);
+    /* ⛑ **The scan is not over when the button is pressed; it is over when the plan arrives.**
+
+       Field 2026-09-05: Finish was pressed, the screen said done, and the concierge opened mesh
+       fourteen seconds later — **while RoomPlan was still finalising.** Starting the next mode
+       re-ran the `ARSession` underneath it and the plan was never delivered at all: four walls,
+       three doors and one window, scanned and gone, with nothing on screen ever saying so.
+
+       ⚑ *`setScanning(false)` on the first line is what made that possible.* It cleared the only
+       state telling the concierge something was still happening, a full second before the plan
+       existed. The strip now says what it is doing until the plan actually lands. */
     setRoomProgress(null);
+    setZoneNote("filing the floorplan…");
     const plan = await stopRoomPlan().catch(() => ({ captured: false, why: "failed" }) as ZonePlan);
+    setScanning(false);
     setPlan(plan);
     setZoneMode("positioning");
     /* ⚑ The plan reported as the numbers somebody can price from, not as a count of surfaces.

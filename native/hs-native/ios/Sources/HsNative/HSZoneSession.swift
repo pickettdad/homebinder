@@ -426,6 +426,23 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     func setMode(_ next: Mode) -> [String: Any] {
+        /*
+         ⛑ **A plan still being finalised is not a plan you may run a new configuration over.**
+
+         The 2026-09-05 walk pressed Finish on the floorplan and opened mesh fourteen seconds later
+         while delivery was still pending; `enter(.mesh)` re-ran the `ARSession` underneath RoomPlan
+         and **the plan was never delivered at all** — 4 walls, 3 doors and 1 window, scanned and
+         gone. ⚑ *Nothing said so. The concierge's floorplan simply did not exist.*
+
+         It cannot be silent. The waiter is fired here with what is known, so the loss lands as a
+         refusal the export carries rather than as an absence nobody can date.
+         */
+        if let waiter = roomWaiter, next != .roomplan {
+            roomWaiter = nil
+            HSZoneLog.record("roomSuperseded", ["by": next.rawValue])
+            waiter(["captured": false,
+                    "why": roomError ?? "the floorplan was still finishing when \(next.rawValue) was opened"])
+        }
         if mode == .roomplan, next != .roomplan { stopRoomCapture(keepSession: true) }
         // Leaving a scan mode: give the lens and the screen back before anything else happens.
         if next == .positioning {
@@ -1125,7 +1142,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
             guard let self, let waiter = self.roomWaiter else { return }
             self.roomWaiter = nil
-            waiter(["captured": false, "why": self.roomError ?? "the scan did not finish in 30 s"])
+            /*
+             ⛑ **A backstop for a scan nobody is in any more must not reach out and change the mode.**
+
+             ⚑ *Field 2026-09-05, and it is the whole of that walk's confusion.* RoomPlan stopped at
+             41 s and never delivered. The concierge moved on to mesh and walked the room — **and at
+             71 s this timeout fired and ran `enter(.positioning)`, taking them out of mesh without
+             a word.** Pressing Finish a moment later found `mode` already `.positioning`, so
+             `harvestMesh` was skipped and the walked mesh was discarded: *"clicked finish and looked
+             like nothing registered."*
+
+             **The timeout's job is to stop the caller waiting, not to steer a session that has moved
+             on.** The waiter restores positioning because it normally runs while RoomPlan is still
+             the mode; thirty seconds later that is no longer a safe assumption.
+             */
+            if self.mode == .roomplan {
+                waiter(["captured": false, "why": self.roomError ?? "the scan did not finish in 30 s"])
+            } else {
+                HSZoneLog.record("roomTimedOutElsewhere", ["mode": self.mode?.rawValue ?? "none"])
+                self.onEvent?([
+                    "roomLost": self.roomError ?? "the floorplan did not finish and the room moved on",
+                ])
+            }
         }
     }
 
@@ -1334,6 +1372,12 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
 @available(iOS 17.0, *)
 extension HSZoneSession: RoomCaptureSessionDelegate {
     func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: Error?) {
+        /* ⛑ **Both ends of the build recorded, because the 2026-09-05 walk lost a plan between
+           them and the log could not say where.** `roomPlanStopping` was the last RoomPlan line
+           ever written: 4 walls, 3 doors and 1 window scanned, then nothing. ⚑ *A delegate that
+           never fires and a builder that never returns are indistinguishable without these two
+           lines*, and they are the difference between a diagnosis and another walk. */
+        HSZoneLog.record("roomDidEnd", ["error": error?.localizedDescription ?? ""])
         if let error {
             roomError = error.localizedDescription
             deliverRoom(["captured": false, "why": error.localizedDescription])
@@ -1342,7 +1386,9 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
         Task { [weak self] in
             guard let self else { return }
             do {
+                HSZoneLog.record("roomBuilding")
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
+                HSZoneLog.record("roomBuilt", ["walls": room.walls.count])
                 self.capturedRoom = room
                 self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch))
             } catch {

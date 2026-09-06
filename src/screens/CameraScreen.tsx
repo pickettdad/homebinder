@@ -1496,6 +1496,32 @@ export function CameraScreen({
       */
       const currentZone = zoneRef.current;
       const [first, ...rest] = result.frames;
+      /*
+       ⛑ **A leg that kept nothing says so, because silence here is indistinguishable from a leg
+       nobody walked.**
+
+       ⚑ *The owner predicted this before walking it:* "the wall is all white so I expect the traverse
+       will possibly fail." He is right, and the failure was worse than a poor trace — **every frame
+       below the texture floor is discarded, and the block below is gated on `first`, so a leg that
+       kept zero frames filed no media AND recorded no refusal.** A wall walked for two minutes and a
+       button pressed by accident produce **the identical export**.
+
+       *That is this repo's oldest distinction, on the wrong side of it:* an absence reads as *nobody
+       did this*; a refusal reads as *this was attempted, here is why it produced nothing*. **The
+       second is a targeted item for the next visit; the first is a hole nobody can date.**
+
+       Recorded as `recoverable`, because it is: the concierge is standing in the room, and the
+       remedy — more texture in frame, or accept that this surface has none — is theirs to make.
+      */
+      if (currentZone && !first) {
+        void recordRefusal({
+          act: "traverse",
+          zoneId: currentZone,
+          why: "the trace kept no frames — too little texture to measure movement against",
+          recoverable: true,
+        });
+        setZoneNote("that leg kept no frames — nothing to measure against on a blank surface");
+      }
       if (currentZone && first) {
         /*
           ⚑ The join and the registration model ride the FILED capture, not just the panel — which

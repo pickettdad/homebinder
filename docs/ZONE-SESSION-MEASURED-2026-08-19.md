@@ -20,7 +20,7 @@ quietly replaced.*
 | A bracket assembled by hand | ⚑ **works** — 3 × 12 MP at ISO **193 / 387 / 774**, one stop apart |
 | Torch inside the session | ⚑ **lights** — `isTorchActive=true`, level 1.0, tracking stays `normal` |
 | Mesh, 6 s, device barely moving | **11 anchors, 39,219 faces** |
-| Raycast from the camera pose into the mesh | **hits**, 1.54 m and 4.09 m |
+| Raycast from the camera pose ~~into the mesh~~ | **hits**, 1.54 m and 4.09 m — ⛑ **mislabelled: this asked `.estimatedPlane`, and the mesh was never queried** (corrected 2026-09-06) |
 | Step-out to 0.5× and back, input pre-built | ⚑ **86–144 ms of overhead**, mesh byte-identical, **no relocalisation** |
 | …with the input built while ARKit holds the camera | **9,008 ms** — avoidable, see §2 |
 | Lens ARKit uses | `builtInWideAngleCamera` — **the same glass the plate path uses today** |
@@ -96,9 +96,10 @@ it at all?**
    torch, the same lens as today, and a shutter ARKit already holds at 1/61 s.
 2. ⚑ **The app asks for coverage instead of framing.** *"You have two-thirds of this — tilt up."*
    Every ingredient is measured and present: the mesh accumulates 39k faces in six seconds, each
-   frame's frustum follows from `camera.transform` plus intrinsics, and a raycast lands on the
-   surface in front of the lens. Marking mesh faces as seen by the union of frame frusta is a
-   geometric computation.
+   frame's frustum follows from `camera.transform` plus intrinsics, and a ray lands on the surface in
+   front of the lens. ⛑ *That last clause was true of a plane ARKit invented, not of the surface —
+   corrected 2026-09-06; capture now measures depth on the axis and falls back to the mesh.* Marking
+   mesh faces as seen by the union of frame frusta is a geometric computation.
 3. **The establishing view is rendered at the desk**, by projecting posed frames onto the mesh and
    placing a virtual camera anywhere — including where the concierge could not stand. Correct
    geometry, more resolution than the 0.5× shot, arbitrary framing, **zero capture-time cost.**

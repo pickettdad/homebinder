@@ -14,7 +14,7 @@ Three states, and the third is the one worth building for.
 
 | | meaning |
 |---|---|
-| `{ positioned: true, … }` | measured, with `tracking`, a full 4×4 `transform`, and `surface` when a ray-cast hit |
+| `{ positioned: true, … }` | measured, with `tracking`, a full 4×4 `transform`, and `surface` when something **measured** the surface in front of the lens — see §1a |
 | `{ positioned: false, why }` | ⚑ **a refusal** — the app could take a position here and did not |
 | field absent, `owner.kind: "pin"` | this frame inherits from its container, which is the normal case |
 | field absent, `frame.role` is not `primary` | a **sibling** — the pose is on the `primary` frame of the same `frame.captureId` |
@@ -112,9 +112,43 @@ every entry already, so the desk resolves it with one filter.
 a non-projectable one points somewhere or says `null`.
 
 **`position.surface` is not `position.x/y/z`.** The pose is **where the concierge stood**; `surface`
-is the ray-cast hit **in front of the lens**, with its distance. For a nameplate shot the two are
+is the point measured **in front of the lens**, with its distance. For a nameplate shot the two are
 0.3–1 m apart, which is the difference between placing the water heater and placing the person
 photographing it.
+
+### ⚑ 1a · `surface.source`, and why `surface` is now rarer
+
+**Corrected 2026-09-06, from the field.** Until this build both capture doors ray-cast with
+`allowing: .estimatedPlane`, which does not *find* a surface — it fits a plane to the feature points
+around the ray **at that instant**. Two photographs of one table lamp, two minutes apart in one
+unbroken session: the camera moved 0.771 m and the surface point moved 0.905 m, per-axis ratios
+1.53 / 1.04 / 1.30. ⛑ **A point on the object would have moved ~0. The point was tracking the
+photographer** — and `surface.distance`, the number *closest wins* sorts on, went 0.867 → 0.936 m
+across that walk and meant nothing.
+
+Every `surface` now carries **`source`**, and only measured sources are sent:
+
+| `source` | what answered |
+|---|---|
+| `"sceneDepth"` | the LiDAR's own distance at the pixel on the optical axis, from the photograph's own frame |
+| `"sceneDepth.stream"` | the same read from the live frame one instant later, unprojected through **its own** pose |
+| `"mesh"` | nearest triangle of the reconstructed scene along the ray, where depth could not see |
+
+Beside it: `confidence` (`high` | `medium` | `unrated`) and `spreadM` — p90 − p10 across the sampled
+patch, so **centimetres means one surface filled the window and a metre means the aimed point
+straddled an edge**, which is a frame worth less; `samples`, how many pixels answered; and on a mesh
+hit, `anchor` (the same id as `mesh.pieces[].id`) and `kind`, ARKit's classification of the face —
+*the surface the ray ended on, never the subject of the photograph.*
+
+⚑ **A guess is refused rather than labelled.** The desk places with no human in the loop, so an
+estimate sitting under `surface` is a confident wrong placement nobody catches, and a flag beside it
+is a flag a reader can forget. ⛑ **So expect fewer positioned frames to carry `surface` than before
+— the old build answered 96% of the time because `.estimatedPlane` almost always invents something —
+and expect every one that does to have been measured.** An absent `surface` still reads *unknown*,
+never *nothing there*. **A frame carrying `surface` with no `source` is from the old build: do not
+place from it.**
+
+*Additive under the version policy: `manifestSchemaVersion` stays 3.*
 
 ### ⚑ A traverse leg carries two anchors — its first frame and its last
 

@@ -153,7 +153,19 @@ const state = {
             y: -0.518,
             z: 3.407,
             transform: [0.998, 0, -0.062, 0, 0.004, 0.998, 0.062, 0, 0.062, -0.062, 0.996, 0, 1.243, -0.518, 3.407, 1],
-            surface: { x: 1.61, y: -0.44, z: 3.92, distance: 0.72 },
+            /* ⚑ `source` and its witnesses are the provenance added 2026-09-06, when the surface
+               point stopped being a plane ARKit invented and became a depth measurement on the
+               optical axis. The fixture illustrates them, so the emitter has to carry them. */
+            surface: {
+              x: 1.61,
+              y: -0.44,
+              z: 3.92,
+              distance: 0.72,
+              source: "sceneDepth",
+              confidence: "high",
+              spreadM: 0.04,
+              samples: 104,
+            },
             projection: { projectable: true },
           },
         }),

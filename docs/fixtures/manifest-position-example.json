@@ -57,7 +57,11 @@
           "x": 1.61,
           "y": -0.44,
           "z": 3.92,
-          "distance": 0.72
+          "distance": 0.72,
+          "source": "sceneDepth",
+          "confidence": "high",
+          "spreadM": 0.04,
+          "samples": 104
         },
         "projection": {
           "projectable": true

@@ -29,7 +29,7 @@ near 5 cm and wandering. ⛑ *Bounded error, not drift.*
 
 ---
 
-## ⛑ The open defect, and it is the interesting one
+## ⛑ The defect that was open, and the fix that shipped 2026-09-06
 
 **The capture raycast does not hit the object.** Both sites use `allowing: .estimatedPlane`
 (`HSZoneSession.swift:745` in `captureStill`, `:1015` in `position()`), which asks ARKit to *invent* a
@@ -64,10 +64,20 @@ the surface."** The raycast never used the mesh.
 thing at the centre pixel; mesh reconstruction is poor on thin geometry and may not contain the lamp
 at all. **Nearest-surface-along-the-ray is the requirement, not any-surface.**
 
-**A workflow is designing the fix** (three approaches — manual mesh ray/triangle, layered fallback
-that records its source, sceneDepth unprojection — judged and synthesised). Requirements: **one
-function for both call sites**, the record **says which source answered**, and an estimate stays
-distinguishable from a measurement.
+**Fixed 2026-09-06 — `HSSurface`, one function both capture doors ask.** `sceneDepth` on the
+optical axis first (the LiDAR measures the nearest thing at that pixel whether or not reconstruction
+kept it), a ray/triangle intersection against `ARMeshAnchor` geometry where depth cannot see, and a
+**refusal** otherwise. No plane, no estimate, no `ARRaycastQuery` left in the session. Every exported
+`surface` carries `source`; the zone log carries `surfaceMs` and the reason each rung refused, in
+place of the bare `surface: true/false` that let a 96% rate of inventing planes read as validation.
+
+⚑ **The acceptance test is the owner's own pair, and it is now runnable:** two photographs of one
+object from two standing positions, ratio of surface movement to camera movement. **Near 0 and this
+worked. Near 1 and it did not.** ⛑ *There is a third outcome and it must not be read as success:*
+ratio near 0 but `distance` systematically longer than the standoff — that is the ray finding the
+wall behind a thin object, which is the case `sceneDepth` exists in this ladder to avoid and the
+case the mesh rung alone cannot. Unproven on hardware: it needs a tethered Debug run and then a
+TestFlight archive, per the build order.
 
 ---
 

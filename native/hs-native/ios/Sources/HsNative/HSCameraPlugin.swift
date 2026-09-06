@@ -389,9 +389,20 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
              */
             if let existing = self.arPreview {
                 let placed = existing.superview === superview
+                let mine = superview.subviews.firstIndex(of: existing) ?? Int.max
+                /*
+                 ⛑ **Above the capture preview as well as below the web view — three layers, two
+                 comparisons, and only one was being made.**
+
+                 The capture preview is now attached whenever the screen opens, including while a
+                 zone owns the lens. ⚑ *So "below the web view" stopped being sufficient the moment
+                 that changed*: an ARKit preview correctly below the page but **underneath a capture
+                 layer showing the last frame that session saw** is the 2026-08-21 black screen with
+                 an extra step — and `arPreviewKept` would have called it fine.
+                 */
                 let ordered = placed
-                    && (superview.subviews.firstIndex(of: existing) ?? Int.max)
-                     < (superview.subviews.firstIndex(of: web) ?? -1)
+                    && mine < (superview.subviews.firstIndex(of: web) ?? -1)
+                    && mine > (self.controller?.previewViewForOrdering.flatMap { superview.subviews.firstIndex(of: $0) } ?? -1)
                 if placed && ordered {
                     /*
                      ⛑ **Keeping the view must re-assert every condition that makes it VISIBLE, and
@@ -1086,6 +1097,9 @@ final class CameraController: NSObject {
     private var requestedLens: CameraLens?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var previewView: UIView?
+    /// ⚑ Read by  to keep the ARKit layer ABOVE this one. Exposed rather than made
+    /// internal so the ordering rule stays a question asked of the controller that owns the layer.
+    var previewViewForOrdering: UIView? { previewView }
     private weak var hostWebView: UIView?
     private var restoreOpaque: Bool?
 
@@ -1427,14 +1441,30 @@ final class CameraController: NSObject {
                              skips the work it did not think it owed. The rule is that **anything
                              which returns instead of attaching still owes what attaching asserts.**
                              */
-                            if webView.isOpaque {
-                                // Bookkept exactly as `attachPreview` does, so `stop()` still
-                                // restores it — a transparency nobody records is one nobody undoes.
-                                self.restoreOpaque = webView.isOpaque
-                                self.hostWebView = webView
-                                WebLayer.makeTransparent(webView)
-                                HSZoneLog.record("deferredMadeTransparent")
-                            }
+                            /*
+                             ⛑ **The capture preview is attached even though the session is stopped,
+                             and that is the fix for the black traverse.**
+
+                             ⚑ *Field 2026-09-06, with a screenshot:* a traverse running, `keeping
+                             1/1`, `16s` on the clock — **and a black viewfinder.** The frames were
+                             real (`kept 22, pairs 21` in the same log). Nothing was broken except
+                             that there was nowhere to draw.
+
+                             `attachPreview` had exactly ONE caller, in the branch below this one. So
+                             with a zone open, `start()` returned here and **no capture preview layer
+                             was ever created** — and the moment the traverse reclaims the lens, the
+                             capture session runs with no layer bound to it. *A stopped session
+                             behind a preview layer is black and harmless; a running session behind
+                             nothing is the same black and is a lost capture.*
+
+                             ⚑ **Attaching early is the right order**, not a workaround: the layer is
+                             free, it shows black exactly while the session is stopped, and the ARKit
+                             preview sits above it — which is the arrangement the whole stack already
+                             assumes. *The alternative — attach it at reclaim — puts view work on the
+                             path that must be fast, and adds a fourth caller to a rule that has
+                             already been missed once.*
+                             */
+                            self.attachPreview(behind: webView)
                             self.startStatusSampling()
                             completion(.success(self.capabilities(unmetAtStart: [])))
                         }

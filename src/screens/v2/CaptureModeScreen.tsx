@@ -654,7 +654,23 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
           setLevel={setNewLevel}
           typeId={newType}
           setTypeId={setNewType}
-          existingZones={zones.filter((z) => z.zoneId !== zone.zoneId).map((z) => ({ zoneId: z.zoneId, label: z.label }))}
+          /*
+           ⛑ **The room you are standing in is the room you came FROM — and it was the one excluded.**
+
+           ⚑ *Field 2026-09-06: "when entering the second zone, there was no 'Bedroom A' to choose
+           from where I came from."* This sheet creates the NEXT zone, and it filtered out
+           `zone.zoneId` — the current room. **The filter was written against self-reference**, which
+           is the right rule for editing a zone's own `enteredFrom` and exactly the wrong one here:
+           walking from the bedroom to the kitchen, the bedroom is the only answer that can be right,
+           and it was the only one missing.
+
+           *Adjacency is the one fact geometry cannot recover* — every zone mints its own ARKit
+           origin, so two plans are never in a common frame. **A door the concierge could have named
+           in one tap becomes a question the desk cannot answer at all.**
+
+           Nothing to filter: a zone that does not exist yet cannot be offered as its own origin.
+          */
+          existingZones={zones.map((z) => ({ zoneId: z.zoneId, label: z.label }))}
           onClose={() => setSwitching(false)}
           onCreate={(typeId, label, level, enteredFrom) =>
             createZone(typeId, label, {}, level, enteredFrom).then((id) => {

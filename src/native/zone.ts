@@ -20,6 +20,11 @@ export interface ZoneOpened {
   startedAt: string;
   mode: ZoneMode;
   unmet: string[];
+  /** ⚑ **May positions be taken** — the concierge's Pause, NOT whether ARKit is awake (it is asleep
+   *  almost always, by design). It rides the open answer because re-entering a zone *reuses* the
+   *  session rather than rebuilding it: a screen that assumed `true` here painted an armed strip
+   *  over a session refusing every position, and the wall in this file's header took the room. */
+  armed: boolean;
   meshSupported: boolean;
   roomPlanSupported: boolean;
 }

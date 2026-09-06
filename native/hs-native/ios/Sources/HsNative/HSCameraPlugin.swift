@@ -237,8 +237,13 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let focus = call.getObject("focusPoint").flatMap(Self.point)
         let metering = call.getObject("meteringPoint").flatMap(Self.point)
-        // Tri-state on purpose: absent means "keep deciding for me", true/false is the human
-        // overriding the measurement. A Bool with a default cannot express the first.
+        // ⚑ Optional on purpose: absent means *this call is about focus or metering*, true/false is
+        // the human overriding the measurement. A Bool with a default cannot express the first.
+        //
+        // ⛑ Absent does NOT mean "back to automatic", and this note used to say it did while the
+        // controller discarded the nil. Making it mean that would hang a torch decision on every
+        // tap-to-focus anyone later builds; the way back to automatic is a mode change or the end of
+        // the session, and the reason is recorded on `CameraController.torchOverride`.
         let torch = call.getBool("torchOverride")
         controller.adjust(focusPoint: focus, meteringPoint: metering, torchOverride: torch)
         call.resolve()
@@ -1089,6 +1094,24 @@ final class CameraController: NSObject {
 
     private var mode: CameraMode = .object
     private var goal = ModeGoal.of(.object)
+    /**
+     The concierge's tap, and it outranks the measurement — for the act it was made in, never for
+     the life of the process.
+
+     ⛑ **It used to be a one-way door** (audit 2026-09-06). `adjust` is the only writer and it only
+     ever wrote a value, so the first tap of a session ended the automatic torch until the app was
+     killed: `evaluateTorch` returns on this before any mode's policy is read, and
+     `applyCompanionVerdict` — the one honest exit built for the latch this file already removed
+     once — refuses to act while it is set. **`object`'s policy is `.never`, so the tap is the only
+     light there and the latch is invisible**, right up until it follows the concierge into Text and
+     puts a torch on every plate.
+
+     ⚑ **A tap answers the policy in force when it was made, so it dies with that policy**: cleared
+     where the mode actually changes (`apply(mode:)`) and where the session ends (`stop()`). Those
+     two events rather than a timer, because a torch that goes out on a clock in a room the
+     concierge has just called dark is the auto policy overruling them — and the 0.62 arm threshold,
+     which reads a dark mechanical room at 0.25–0.50, is the thing they were overruling.
+    */
     private var torchOverride: Bool?
     private var torchOn = false
 
@@ -1636,14 +1659,53 @@ final class CameraController: NSObject {
         statusTimer?.invalidate()
         statusTimer = nil
         stopTrackingRotation()
-        // A traverse outlives nothing. Left running, its locked exposure and latched torch would
-        // be inherited by the next session as settings nobody chose.
+        /* A traverse outlives nothing. Left running, its locked exposure and latched torch would
+           be inherited by the next session as settings nobody chose.
+
+           ⛑ **Forgetting the run is the app's half, and it was the only half being done** (audit
+           2026-09-06). The block below drops the `TraverseRun`; the *device* stayed on the leg's
+           `.custom` exposure, `.locked` focus and `.locked` white balance, because
+           `restoreContinuousModes` was reached from `stopTraverse` and from nowhere else — and
+           leaving the capture screen mid-leg goes through here, never through there.
+
+           ⚑ **White balance is the one that never healed.** `apply(mode:)` re-asserts continuous
+           exposure and focus, so those two forgive a mid-leg `stop()` at the next mode change.
+           `whiteBalanceMode` is written in exactly two places in this file — the lock in
+           `startTraverse` and the release in `restoreContinuousModes` — and `apply(mode:)` is not
+           one of them. This controller is a process-lifetime singleton that never lets go of
+           `device`, so one abandoned leg pinned the colour temperature of **every photograph taken
+           afterwards, for the life of the app**, with nothing on screen or in the log to say so.
+
+           Unconditional rather than `if isTraversing`: that flag is written on `visionQueue` and
+           would be read here on main, so the guarded form skips the restore on exactly the stale
+           read it cannot detect — and handing a torn-down camera back on auto is right whether or
+           not a leg was running. Stated over the teardown's exit state rather than over the
+           traverse, so the next lock somebody takes is released without a second caller learning
+           to. ⚑ And it runs **before** `setTorch(false)`, because `restoreContinuousModes` ends in
+           `evaluateTorch`: after it, a dark room relights the lamp on a session whose preview has
+           already gone — a colour cast traded for a torch nobody can reach. */
         visionQueue.async { [weak self] in
-            self?.traverse = nil
-            self?.isTraversing = false
-            self?.traverseRequestIds.removeAll()
+            guard let self else { return }
+            /* Only when there was a run. Most `stop()`s abandon nothing and have nothing to
+               report — but until now neither case reported anything, because `traverseStop` is
+               written by `stopTraverse` alone, so a leg ended by walking off the screen was
+               indistinguishable in the log from a leg that never started. */
+            if let run = self.traverse {
+                HSZoneLog.record("traverseAbandoned", [
+                    "kept": run.frames.count, "discarded": run.discarded, "pairs": run.pairs.count
+                ])
+            }
+            self.traverse = nil
+            self.isTraversing = false
+            self.traverseRequestIds.removeAll()
         }
+        restoreContinuousModes()
         motion.stopDeviceMotionUpdates()
+        // ⛑ And the tap outlives nothing either. `ensureController` keeps ONE controller for the
+        // life of the process, so an override left here is inherited by the next `start()` — the
+        // same settings-nobody-chose the line above refuses, arriving through a button somebody
+        // pressed in another room an hour ago. See `torchOverride`.
+        torchOverride = nil
         setTorch(false)
         sessionQueue.async { [weak self] in
             guard let self else { return }
@@ -1751,6 +1813,19 @@ final class CameraController: NSObject {
     }
 
     func apply(mode: CameraMode) -> Achieved {
+        /*
+         ⛑ **A forced torch is a statement about the ROOM, so a mode change does not end it.**
+
+         The first cut of this fix cleared the override on any real mode change. ⚑ *Adversarial
+         review found the trigger that makes that wrong:* `newContainer` calls `requestMode("object")`
+         **unconditionally on every new object container** — so a concierge working a dark mechanical
+         room, torch forced on, would lose it every time they opened the next piece of equipment, by
+         an act they did not perform and cannot see.
+
+         **The defect being fixed was "an override that can never be left", and `stop()` is the exit**
+         — leaving the capture screen ends it, as does a second tap. *That is enough of a door; a mode
+         change is the wrong one, because the mode is what the app changes on the concierge's behalf.*
+         */
         self.mode = mode
         self.goal = ModeGoal.of(mode)
         var unmet: [String] = []

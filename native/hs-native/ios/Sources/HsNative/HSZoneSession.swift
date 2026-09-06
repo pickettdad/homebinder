@@ -1,4 +1,9 @@
 import ARKit
+// ⚑ Explicit, as in every sibling that touches the AR primary camera (`HSArProbe`, `HSPlateAB`,
+// `HSControlProbe`, `HSLensProbe`): `configurableCaptureDeviceForPrimaryCamera` hands back an
+// `AVCaptureDevice`, and reading a member of it needs this module in scope rather than assumed
+// out of ARKit's own imports.
+import AVFoundation
 import Foundation
 import RoomPlan
 import simd
@@ -232,6 +237,13 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "mode": mode?.rawValue ?? Mode.positioning.rawValue,
             "unmet": [String](),
             "reused": true,
+            /* ⛑ **"Answers identically" has to include the arm state** (audit 2026-09-06). This is the
+               REUSE answer, and it left `armed` out — so a concierge who paused positioning, stepped
+               back to the zone screen and returned got a strip reset to *offer Pause* over a session
+               still refusing every position with `why: "paused"`. ⚑ `anchorAvailability` then told
+               them the room could be anchored while nothing in it could: the wall at the top of this
+               file, reached through the viewfinder instead of through a capture, and silent both ways. */
+            "armed": armed,
             "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
             "roomPlanSupported": RoomCaptureSession.isSupported
         ]
@@ -269,6 +281,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "startedAt": ISO8601DateFormatter().string(from: startedAt),
             "mode": Mode.positioning.rawValue,
             "unmet": [String](),
+            /* Read off the variable rather than written `true`, so this answer and `state()`'s reuse
+               answer cannot drift apart — which is the defect above with the sides swapped. */
+            "armed": armed,
             "meshSupported": ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
             "roomPlanSupported": RoomCaptureSession.isSupported
         ]
@@ -452,8 +467,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
          floorplan — took the camera away from AVFoundation on the first photograph and **never put
          anything in its place.** The viewfinder froze on one frame for the rest of the zone while
          the shutter, the containers and the filmstrip all kept working. *It used to be survivable
-         because `sleepSession()` handed the lens back within seconds; that function now has no
-         callers at all.*
+         because `sleepSession()` handed the lens back within seconds; that function has since been
+         deleted for want of a caller.*
 
          **The rule moves here because a rule kept in N callers holds until somebody writes N+1** —
          which is the same finding as `finishScan`, the roomWaiter, and `reclaimCamera`, and this is
@@ -735,6 +750,32 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let mapping = self.mappingWord(f)
             let tracking = HSArProbe.describe(f.camera.trackingState)
 
+            /*
+             ⛑ **The lamp is asked; it used to be asserted.** This entry hard-coded `"torch": false`,
+             so a still taken with the torch lit was filed as an unlit frame — and *labelled* one:
+             `storedFrameLabel` prints "no torch" straight off this field. **Nothing downstream can
+             recover it from the pixels**, so a wrong value here is permanent, and it is the lighting
+             provenance of the photograph the desk is about to judge.
+
+             ⚑ *A zone does not keep the torch off, and that is the whole of the defect.* The capture
+             session stops when the zone takes the lens, but `CameraController` keeps evaluating the
+             torch on its five-second status timer, and the torch button is live in a zone and still
+             reaches `adjust` — which needs the controller, not a running session. Both write the
+             SAME `AVCaptureDevice` ARKit is driving: `HSPlateAB` lights a plate through this very
+             accessor mid-session, so this is measured rather than argued.
+
+             The lamp, not `CameraController.torchOn` — that is only what was last *written*, and
+             `HSControlProbe` measured a write `isTorchActive` had not caught up with on the next
+             line. And read at delivery rather than stamped at request the way the torch pair stamps
+             `torchForRequest`: the pair stamps because it toggles the lamp between two queued
+             requests, and here there is one frame, no toggle in flight, and an exposure that happens
+             *after* the request — so delivery is the nearer instant. `nil` is the one unreadable
+             state, ARKit declining to hand its primary camera back for configuration, and every
+             probe in this package that has asked has been handed a device on this iPad.
+             */
+            let torchLit = ARWorldTrackingConfiguration
+                .configurableCaptureDeviceForPrimaryCamera?.isTorchActive ?? false
+
             /* ⚑ On-axis ray from THIS frame's transform. The optical axis is the one ray that needs
                no pixel-to-sensor mapping, so it is immune to the intrinsics misregistration reported
                between the stream and the high-resolution frame on some iPad generations. */
@@ -803,7 +844,10 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 var entry: [String: Any] = [
                     "path": url.path, "bytes": jpeg.count, "index": 0,
                     "exifOrientation": CameraController.exifOrientation(of: jpeg),
-                    "torch": false, "lens": "normal",
+                    // `lens` stays a constant and is not the same kind of claim: world tracking is
+                    // offered only the wide-angle device on this iPad (`HSLensProbe`, 2026-08-24),
+                    // which is why `emitStatus` reports `normal` for the whole of a zone.
+                    "torch": torchLit, "lens": "normal",
                 ]
                 if wantsText, let read = CameraController.readAccurately(jpeg: jpeg) { entry["ocr"] = read }
                 HSZoneLog.record("stillThroughArkit", [
@@ -864,7 +908,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         /* ⛑ **The lens goes back on EVERY path out of here, and it did not** (field 2026-08-23:
            the viewfinder freezing after a second shot, with the strip saying *hold still*).
 
-           The success path ended with `sleepSession()`. The failure path — tracking not settled in
+           The success path used to end with `sleepSession()`, deleted 2026-09-05 — see its tombstone below. The failure path — tracking not settled in
            time — returned early and skipped it, so ARKit kept the camera and the capture session
            never restarted. ⚑ **A frozen viewfinder was the app telling the truth about a lens
            nobody had given back.** The log said it in two lines: `cameraYielded` with no
@@ -947,8 +991,6 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         }
         let t = frame.camera.transform
         let p = t.columns.3
-        /* Measured against the pose held at `sleepSession`, before anything else moves. */
-        let resumeJump: Float? = sleptAt.map { simd_distance($0, SIMD3<Float>(p.x, p.y, p.z)) }
         var out: [String: Any] = [
             "positioned": true,
             "zoneId": zoneId,
@@ -975,31 +1017,6 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "intrinsics": (0..<3).flatMap { r in (0..<3).map { c in Double(frame.camera.intrinsics[c][r]) } },
             "imageWidth": Int(frame.camera.imageResolution.width),
             "imageHeight": Int(frame.camera.imageResolution.height),
-            /*
-             ⚑ **The one measurement that observes the failure directly, at the instant it happens.**
-
-             *Where the session went to sleep, against where it thinks it woke up.* Everything else
-             on this pose — `mapping`, `reinits`, `sinceInitSec` — **describes conditions**. This
-             one is the discontinuity itself: the concierge does not teleport, so a large
-             `resumeJumpM` over a short `sleepSec` is the estimate moving, not the person.
-
-             ⛑ **Recorded because my own diagnosis was wrong and could not be tested.** I read
-             *zero `relocalizing` in 109 wakes* as evidence the wake was rebuilding the world —
-             and it is a **tautology**: `initialWorldMap` and `sessionShouldAttemptRelocalization`
-             appear nowhere in this plugin, so relocalisation was never possible to observe. *I
-             diagnosed one forced-constant field and built a conclusion on a second one in the same
-             message.* And `HSArProbe` had already measured this exact cycle: **origin moved
-             0.00003 m and the mesh came back byte-identical.** A wake that rebuilt the world could
-             not do that.
-
-             So the wake is not the mechanism, and **the mechanism is now something a number can
-             settle rather than an argument.** The leading candidate is genuine VIO drift in a
-             degenerate room — positioning is the one mode that runs with `sceneReconstruction = []`,
-             so it is the one mode without the LiDAR that would disambiguate repeating parallel
-             pipes at 0.3–0.6 m.
-            */
-            "resumeJumpM": resumeJump.map { Double($0) } as Any,
-            "sleepSec": sleptWhen.map { Date().timeIntervalSince($0) } as Any,
             "mode": mode?.rawValue ?? "",
             "at": ISO8601DateFormatter().string(from: Date()),
             "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
@@ -1032,25 +1049,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         enter(.positioning)
     }
 
-    /** Where the camera was when the session went to sleep. See `resumeJump` — this is half of the
-     *  only measurement that observes the failure directly. */
-    private var sleptAt: SIMD3<Float>?
-    private var sleptWhen: Date?
+    /*
+     ⛑ **DELETED: `sleepSession()`, `sleptAt`, `sleptWhen`, and the two pose keys they fed —
+     `resumeJumpM` and `sleepSec`.** Named here because the 2026-09-02 diagnosis still prints those
+     columns, and a column that quietly stops appearing invites somebody to put the field back.
 
-    /**
-     ⛑ **Only `pause()` and `closeZone()` reach this now.**
-     *A zone that is open keeps its session running* — see `position()` for the measurements that
-     made that the design rather than an option.
-     */
-    private func sleepSession() {
-        if let c = session.currentFrame?.camera.transform.columns.3 {
-            sleptAt = SIMD3<Float>(c.x, c.y, c.z)
-        }
-        sleptWhen = Date()
-        session.pause()
-        paused = true
-        releaseCamera?()
-    }
+     `sleepSession()` was the only thing that ever set the pair, and **nothing has called it since
+     positioning stopped being a duty cycle** and the session started running for the life of the
+     zone. So every pose written after that shipped both keys as `nil as Any` — *present in the
+     payload and structurally absent in every row*, which reads as **no jump** rather than as **not
+     measured**. ⚑ Same class as the refusal variant's `tracking` before it was fixed: a field no
+     code path could populate. The TypeScript pose type mirrors this payload field for field and
+     never declared either key (`src/native/zone.ts`), so the contract had already moved on.
+
+     ⛑ Its own doc comment named `pause()` and `closeZone()` as the callers and **neither was one** —
+     both pause the session themselves, and `pause()` also hides the preview, which this never did.
+     *A caller list kept in a comment is not a caller list*, and this one kept a dead function
+     looking live across two audits.
+
+     ⚑ **And the question it was aimed at is settled, so the instrument is not worth rebuilding.**
+     `docs/POSE-DIAGNOSIS-2026-09-02.md` holds its one real reading — 0.24 mm across a 116-second
+     sleep — and Gate 1 measured the running session directly: 6.0 cm bounded over 46 minutes.
+    */
 
     /**
      ⚑ **Try to get the session back without touching the camera.**
@@ -1206,8 +1226,32 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
              the map every pose afterwards is corrected against. Re-entering positioning keeps that
              map, because `enter` only resets when the session actually died.
              */
-            _ = self.enter(.positioning)
-            self.showArPreview?(self.session)
+            /*
+             ⛑ **And only while RoomPlan is still the mode** (audit 2026-09-06).
+
+             ⚑ *`deliverRoom` clears `roomWaiter` on the `RoomBuilder` Task and calls it a runloop
+             turn later, on main.* A `setZoneMode("mesh")` arriving in that gap — Capacitor runs
+             plugin calls on its own `bridge` queue, so it genuinely can — finds nothing left to
+             supersede, `enter(.mesh)` runs, **and then this closure lands on top of it and takes
+             the session straight back out of mesh.** The concierge walks the room with the strip
+             still saying mesh, presses Finish, and `setMode(.positioning)` finds `mode` already
+             `.positioning` — so `harvestMesh` is skipped and the walk is discarded. *That is the
+             2026-09-05 symptom exactly — "clicked finish and looked like nothing registered" —
+             reached by a second road.*
+
+             ⚑ **The 30-second backstop below cannot cover this one**: it guards the waiter it still
+             holds, and this waiter was detached before it ever ran. So the rule lives on the action
+             it governs. *Both guards stay, because they decide different things:* the backstop
+             decides whether to answer the caller at all; this decides whether to steer the session.
+             */
+            if self.mode == .roomplan {
+                _ = self.enter(.positioning)
+                self.showArPreview?(self.session)
+            } else {
+                // ⚑ Recorded rather than silent — the line that would have named the bug above in
+                // a zone log instead of in an audit.
+                HSZoneLog.record("roomFinishedElsewhere", ["mode": self.mode?.rawValue ?? "none"])
+            }
             completion(out)
         }
         stopRoomCapture(keepSession: true)

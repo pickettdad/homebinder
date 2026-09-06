@@ -266,7 +266,8 @@ describe("keeping an existing preview", () => {
  * So the plain capture door took the camera away from AVFoundation on the first shutter press and
  * **never put anything in its place**: the viewfinder froze on one frame for the rest of the zone
  * while the shutter, containers, filmstrip and delete all kept working. *It used to be survivable
- * because `sleepSession()` handed the lens back within seconds — that function now has no callers.*
+ * because `sleepSession()` handed the lens back within seconds — that function has since been
+ * deleted for want of a caller.*
  *
  * The invariant is **where the rule lives**, not how many callers exist today.
  */

@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  roomShotAvailability,
   zoneGaps,
   ZONE_MODES,
   anchorAvailability,
@@ -265,5 +266,64 @@ describe("what a zone is missing, said while the concierge is still in it", () =
   it("names both when both are missing, and does not stop at the first", () => {
     const g = zoneGaps({ photos: 4, hasFloorplan: false, containers: [floating(3)] });
     expect(g.missing).toHaveLength(2);
+  });
+});
+
+/**
+ * ⛑ **A gate whose default is "refuse" fires hardest on the case it exists to serve.**
+ *
+ * The first design of this one read a tracking state that `openZone` never sets — opening a zone
+ * deliberately does not start ARKit — so it refused **at the zone onset the room shot is for**. An
+ * adversarial review caught it before it reached a walk.
+ *
+ * ⚑ The invariant asserted here is therefore about **absence, not about the list of refusals**: a
+ * question nobody has answered must never produce a refusal. That holds at four conditions and at
+ * forty.
+ */
+describe("may the room shot step out", () => {
+  it("allows when nothing is known — the zone-onset case it exists for", () => {
+    // Nothing has been reported yet: no tracking, no capabilities, no container. That is exactly the
+    // state one second after a zone is created, and it must not refuse.
+    expect(roomShotAvailability({}).canStepOut).toBe(true);
+  });
+
+  it("refuses only on facts positively known, never on unanswered ones", () => {
+    /* ⛑ `=== true` / `=== false` rather than truthy, so `undefined` is silent. Asserted as a rule
+       over every field rather than as a list of today's four. */
+    const fields = ["traversing", "hasUltraWide", "containerOpen"] as const;
+    for (const f of fields) {
+      expect(roomShotAvailability({ [f]: undefined }).canStepOut).toBe(true);
+    }
+    expect(roomShotAvailability({ traversing: true }).canStepOut).toBe(false);
+    expect(roomShotAvailability({ hasUltraWide: false }).canStepOut).toBe(false);
+    expect(roomShotAvailability({ containerOpen: true }).canStepOut).toBe(false);
+  });
+
+  it("says what to do, not only that it is refused", () => {
+    // A refusal a concierge cannot act on is one that gets ignored — the same rule anchorAvailability
+    // is written to.
+    for (const state of [
+      { traversing: true },
+      { hasUltraWide: false },
+      { zoneFailure: "Required sensor failed." },
+      { containerOpen: true },
+    ]) {
+      const out = roomShotAvailability(state);
+      expect(out.canStepOut).toBe(false);
+      expect(out.why).toBeTruthy();
+      expect(out.fix).toBeTruthy();
+    }
+  });
+
+  it("discloses the repeat cost rather than refusing it", () => {
+    /* ⚑ Owner ruling: a wait is acceptable, and blocking is for what cannot work. The handover is
+       measured safe — map byte-identical, origin 0.00003 m — so the second shot is a cost to state,
+       not a thing to prevent. Taking the choice away would be the app deciding for the room. */
+    const first = roomShotAvailability({ handoversThisZone: 0 });
+    expect(first.canStepOut).toBe(true);
+    expect(first.note).toBeUndefined();
+    const again = roomShotAvailability({ handoversThisZone: 2 });
+    expect(again.canStepOut).toBe(true);
+    expect(again.note).toMatch(/re-establishes/);
   });
 });

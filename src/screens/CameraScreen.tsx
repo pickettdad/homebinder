@@ -37,7 +37,7 @@ import { useVoiceRecorder } from "../capture/useVoiceRecorder";
 import { ConfirmSheet } from "../ui/bits";
 import { ZoneStrip } from "./ZoneStrip";
 import { FloorPlanView } from "./FloorPlanView";
-import { zoneMeasures } from "../native/zone";
+import { roomShotAvailability, zoneMeasures } from "../native/zone";
 import { bothUnits } from "../native/planGeometry";
 import type { ZoneMode, ZonePlan, ZonePosition } from "../native/zone";
 import {
@@ -375,6 +375,11 @@ export function CameraScreen({
    *  `beginTraverse` needs the lens state and is deliberately stable. */
   const statusRef = useRef<ModeStatusEvent | null>(null);
   statusRef.current = status;
+  /* ⛑ Refs, not the state values, because this file has now four times read React state inside a
+     callback that closed over an earlier render — `applyIntentLens` is the function that did it
+     first. Written every render exactly as `statusRef` above is. */
+  const traversingRef = useRef(false);
+  const zoneFailureRef = useRef<string | null>(null);
   const [openCapture, setOpenCapture] = useState<MediaRef | null>(null);
   /** Which frame of a filed capture is being looked at. Reset by opening a different one. */
   const [storedIndex, setStoredIndex] = useState(0);
@@ -846,6 +851,14 @@ export function CameraScreen({
    * the strip — a black viewfinder for a beat, a lost torch state, and a restart in the middle
    * of the auto-capture the concierge was lining up.
    */
+  /* ⛑ **One place, not six.** `setZoneFailure` has five call sites and `setTraversing` two; mirroring
+     into a ref beside each is the rule-kept-in-callers failure this repo names most often — it holds
+     until somebody writes the next setter. An effect over the values cannot be forgotten. */
+  useEffect(() => {
+    traversingRef.current = traversing;
+    zoneFailureRef.current = zoneFailure;
+  });
+
   const openRef = useRef<OpenContainer | null>(null);
   const zoneRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -1944,7 +1957,28 @@ export function CameraScreen({
      that does not exist yet.* This says what is true today rather than stalling on it.
      */
     if (zoneRef.current) {
-      if (intent === "room-shot") setZoneNote("1× in a zone — positioning holds the lens");
+      if (intent === "room-shot") {
+        /*
+         ⛑ **Decided by a predicate, not by a sentence written here** — the same reason
+         `globalCameraApplies` and `offersVerdict` are predicates: *doctrine inside a component
+         cannot be scanned or tested.*
+
+         ⚑ *The pre-built ultra-wide input now exists* (`inputsPrepared`, verified on device), so the
+         step-out is affordable for the first time. This tells the truth about it while the native
+         sequence is built: whether it could happen, and what it would cost.
+         */
+        const gate = roomShotAvailability({
+          traversing: traversingRef.current,
+          hasUltraWide: statusRef.current?.hasUltraWide,
+          zoneFailure: zoneFailureRef.current,
+          containerOpen: openRef.current != null,
+        });
+        setZoneNote(
+          gate.canStepOut
+            ? "1× for now — the wide frame is being built"
+            : `wide frame unavailable: ${gate.why} — ${gate.fix}`,
+        );
+      }
       return;
     }
     const deadline = Date.now() + 2500;

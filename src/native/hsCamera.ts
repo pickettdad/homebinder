@@ -171,6 +171,10 @@ export interface ModeStatusEvent {
   lensLocked: boolean;
   /** Whether this iPad has an ultra-wide at all. */
   lensAvailable: boolean;
+  /** ⚑ Whether a 107° frame is reachable on this device **at all** — not whether it can be reached
+   *  right now. `lensAvailable` is the second question and is false for the life of a zone by
+   *  design; conflating them makes one refusal mean *not now* and *not ever* at once. */
+  hasUltraWide?: boolean;
   /** ⚑ ARKit holds the lens for the life of the zone. `sessionRunning` is true and the capture
    *  session's own is not — see the native comment: the question is *is the camera live*. */
   cameraHeldByZone?: boolean;

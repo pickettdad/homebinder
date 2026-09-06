@@ -2334,6 +2334,20 @@ final class CameraController: NSObject {
                control.** */
             "lensLocked": zoneOwnsCamera || goal.lensLocked,
             "lens": zoneOwnsCamera ? CameraLens.normal.rawValue : lens.rawValue,
+            /*
+             ⚑ **Whether this iPad HAS an ultra-wide, which is not the same question as whether the
+             lens can be switched right now.**
+
+             `lensAvailable` answers *can I swap this instant* and is false for the whole life of a
+             zone, by design. **The room shot needs the other question** — is a 107° frame reachable
+             at all, ever — because the answer decides whether to offer a step-out or to say plainly
+             that this device cannot widen. ⛑ *Two facts under one flag is how a refusal ends up
+             meaning "not now" and "not ever" at once, and a concierge cannot act on either.*
+
+             Read from the prepared inputs rather than probed here: those are built at launch and are
+             the same objects a swap would use, so **the thing consulted is the thing that governs.**
+             */
+            "hasUltraWide": preparedInputs[.wide] != nil,
             "lensAvailable": zoneOwnsCamera
                 ? false
                 : AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,

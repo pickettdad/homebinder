@@ -258,6 +258,63 @@ export function anchorAvailability(state: {
 }
 
 /**
+ * ⚑ **May the room shot step out for its wide frame right now — and what does it cost?**
+ *
+ * The room shot needs a **107°** frame; ARKit's device is pinned to **64.7°** and, while world
+ * tracking runs, to a zoom range of exactly `[1.0, 1.0]` — measured, `ZOOM-FLOOR-RESULT-2026-09-06`.
+ * **So the frame costs a camera handover**, and this decides whether to take one.
+ *
+ * ⛑ **The first design of this gate refused at the zone onset it was built for**, and the reason is
+ * worth keeping: it read a tracking state that `openZone` never sets, because opening a zone
+ * deliberately does not start ARKit. *A gate whose default is "refuse" fires hardest on the case it
+ * exists to serve.* **So this refuses only on facts that are positively known**, and is silent on
+ * absence.
+ *
+ * ⚑ **And it refuses rarely, because the handover is measured as safe** — `HSArProbe`: the map came
+ * back byte-identical, the origin moved 0.00003 m, no relocalisation. *What it costs is time, not
+ * the room.* The owner's ruling is the shape this encodes: *"since room shot only happens once or
+ * twice per room at the onset, we can accept a wait if needed… block its use mid zone if it could
+ * throw things off."* **Blocking is for what cannot work; the wait is disclosed, not prevented.**
+ */
+export function roomShotAvailability(state: {
+  /** Positively known to be running, from the native return. Absent means nobody has said. */
+  traversing?: boolean;
+  /** Positively known absent on this device. Absent means nobody has asked yet. */
+  hasUltraWide?: boolean;
+  /** The zone session's last reported failure, if any. */
+  zoneFailure?: string | null;
+  /** An object container the concierge has open. */
+  containerOpen?: boolean;
+  /** Handovers already spent in this zone — for disclosure, never for refusal. */
+  handoversThisZone?: number;
+}): { canStepOut: boolean; why?: string; fix?: string; note?: string } {
+  /* ⛑ Each of these is a fact that makes the step-out IMPOSSIBLE, not merely unwise — and each is
+     `=== true/false` rather than truthy, so an unanswered question never refuses. */
+  if (state.traversing === true) {
+    return { canStepOut: false, why: "a trace is running", fix: "Stop the trace, then take the room shot" };
+  }
+  if (state.hasUltraWide === false) {
+    return { canStepOut: false, why: "this iPad has no ultra-wide lens", fix: "The 1× room shot is still positioned" };
+  }
+  if (state.zoneFailure) {
+    return { canStepOut: false, why: state.zoneFailure, fix: "Restart positioning first — a step-out cannot recover it" };
+  }
+  /* ⚑ A room shot is a shot of the ROOM. Filing one into an open object would say the room belongs
+     to the object — and the fix is one tap, which is what makes this worth refusing rather than
+     silently re-targeting. */
+  if (state.containerOpen === true) {
+    return { canStepOut: false, why: "an object is open", fix: "Close the object first — a room shot belongs to the room" };
+  }
+  /* ⛑ Disclosed, not refused, and the distinction is the owner's ruling. The handover is safe; it
+     costs a few seconds of re-establishing tracking on the way back. Saying so on the second and
+     later shots lets a concierge decide; refusing would take that from them. */
+  const spent = state.handoversThisZone ?? 0;
+  return spent > 0
+    ? { canStepOut: true, note: `stepping out again — positioning re-establishes each time (${spent} so far)` }
+    : { canStepOut: true };
+}
+
+/**
  * Does this container have a real position, and does it need one?
  *
  * ⚑ **At least one frame per container carries a measured position; everything else inherits it.**

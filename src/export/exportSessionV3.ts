@@ -48,6 +48,20 @@ function groupSlug(state: SessionStateV2, group: string): string {
   );
 }
 
+/**
+ ⚑ **What makes one zone's archive distinguishable from another's — a function, so it can be tested.**
+
+ See the block at its call site for the failure. In short: the filename is a KEY to the export screen,
+ the label is not unique, and the app itself proposes `bedroom` for every bedroom.
+
+ The label stays, because a human picks these files out of a Files listing and an opaque id would be
+ unique and unusable. `_misc` has no zone and needs no disambiguation — there is only ever one.
+ */
+export function exportGroupTag(state: SessionStateV2, group: string): string {
+  const slug = groupSlug(state, group);
+  return group === "_misc" ? slug : `${slug}-${group.slice(-6)}`;
+}
+
 export async function planExportV3(args: {
   state: SessionStateV2;
   events: V2SessionEvent[];
@@ -104,10 +118,29 @@ export async function planExportV3(args: {
     }
     if (current.length) chunks.push(current);
 
-    const slug = groupSlug(state, group);
+    /*
+     ⛑ **The zone's own id, because a filename built from a LABEL is not unique and the export
+     screen treats it as a key.**
+
+     ⚑ *Found in pre-flight for a two-bedroom walk, which is exactly the shape that triggers it.*
+     `groupSlug` slugs the zone label; the living-space type's default label is literally "bedroom"
+     and the zone sheet prefills it, so **two bedrooms produce two zips with an identical name.**
+     `ExportV2Screen` then resolves `plan.files.find((f) => f.name === name)` and keys its save
+     statuses by name — **so saving either row zips the FIRST zone twice, flips both rows to shared,
+     and Finish records a verified export.**
+
+     The failure is the worst available shape: **zone B's photographs, floorplan JSON and mesh JSON
+     never leave the iPad, while the manifest lists every one of them with a sha256.** The desk
+     receives a complete-looking record and an archive missing a whole room, and the integrity sweep
+     cannot see it — *it checks the device's store, not the zip.*
+
+     `zoneId` is a uuidv7, so its last six characters are random. The label stays in the name because
+     a human picks these files out of a Files listing; the id is what makes two of them distinct.
+     */
+    const tag = exportGroupTag(state, group);
     chunks.forEach((chunk, i) => {
       const suffix = chunks.length > 1 ? `-part${i + 1}` : "";
-      const name = `housesteady-${shortId}-${slug}${suffix}.zip`;
+      const name = `housesteady-${shortId}-${tag}${suffix}.zip`;
       files.push({
         name,
         bytes: chunk.reduce((sum, m) => sum + m.bytes, 0),

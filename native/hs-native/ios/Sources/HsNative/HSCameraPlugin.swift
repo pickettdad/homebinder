@@ -365,8 +365,38 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let superview = web.superview else {
                 HSZoneLog.record("arPreviewSkipped", ["why": "web view has no superview"]); return
             }
-            guard self.arPreview == nil else {
-                HSZoneLog.record("arPreviewSkipped", ["why": "one is already attached"]); return
+            /*
+             ⛑ **"A preview object exists" is not "a preview is on screen", and that gap was the
+             black mesh screen** (field 2026-09-05: *"mesh was black screen the whole time"*).
+
+             The old guard returned on existence alone. ⚑ *The log shows why that is not enough:*
+             the preview attached during the floorplan went in at **`index: 1` of 3 subviews**, and by
+             the time mesh opened the screen had re-mounted and the host's hierarchy was **2 subviews
+             deep** — so the view still existed, still had a session behind it, and was **no longer in
+             the stack being drawn.** Every fact the guard checked was true and the screen was black.
+
+             *And the asymmetry is what hid it:* leaving a scan mode detaches and re-attaches, so
+             positioning and RoomPlan always got a fresh view and only mesh — which is entered, not
+             left — inherited the stale one.
+
+             So the check is what actually governs: **is it in the current superview, and is it still
+             below the web view.** If it is, keep it. If it is not, take it down and build it again.
+             */
+            if let existing = self.arPreview {
+                let placed = existing.superview === superview
+                let ordered = placed
+                    && (superview.subviews.firstIndex(of: existing) ?? Int.max)
+                     < (superview.subviews.firstIndex(of: web) ?? -1)
+                if placed && ordered {
+                    HSZoneLog.record("arPreviewKept", ["index": superview.subviews.firstIndex(of: existing) ?? -1])
+                    return
+                }
+                HSZoneLog.record("arPreviewRehomed", [
+                    "placed": placed, "ordered": ordered,
+                    "was": existing.superview.map { String(describing: type(of: $0)) } ?? "none",
+                ])
+                existing.removeFromSuperview()
+                self.arPreview = nil
             }
             /* ⛑ **Drawn from the frames rather than handed to `ARSCNView`, after two rounds of
                black screens** (field 2026-08-22 and 08-23).

@@ -70,6 +70,25 @@ export type ZonePosition =
       reinits?: number;
       /** Seconds since that re-establishment — the other half of *how old is this pose's frame*. */
       sinceInitSec?: number;
+      /**
+       * ⛑ **Which world origin this pose was measured from, and it is not the same question as
+       * `reinits`.**
+       *
+       * ⚑ *Owner, 2026-09-05:* **"floorplan positioning is needed to line up with captures, because
+       * the desk uses both to place object containers in the room."** They do line up — re-entering
+       * positioning after RoomPlan re-establishes *tracking* and keeps the *frame*, so a re-init
+       * costs a second and changes nothing about where the origin is.
+       *
+       * **A reset does change it**, and it fires when a session genuinely dies. *The failure is
+       * silent in the worst possible way:* the poses still look like poses, still in metres, and are
+       * measured from somewhere else entirely.
+       *
+       * So: **equal epochs are comparable; different epochs must not be combined.** The floorplan
+       * and the mesh carry the same field, which is what makes the check possible at the desk rather
+       * than a matter of trust. An honest orphan beats false continuity — the standing rule.
+       */
+      originEpoch?: number;
+
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */
       featurePoints?: number;

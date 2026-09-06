@@ -154,3 +154,33 @@ describe("what a mode change costs", () => {
     expect(ZONE_SRC).toMatch(/lastConfigSignature = next == \.roomplan \? nil : signature/);
   });
 });
+
+/**
+ * ⛑ **Which world origin a measurement belongs to — the fact that decides whether the desk may
+ * combine a floorplan with a photograph.**
+ *
+ * ⚑ *Owner, 2026-09-05:* **"floorplan positioning is needed to line up with captures, because the
+ * desk uses both to place object containers in the room."** They do line up: `run(config,
+ * options: [])` keeps the origin, so re-entering positioning after RoomPlan re-establishes tracking
+ * and never the frame. **`.resetTracking` does change the frame**, and it fires on a session that
+ * genuinely died — *silently, because the poses still look like poses and are simply measured from
+ * somewhere else.*
+ *
+ * The invariant is **not** that resets never happen. It is that **a reset is distinguishable from a
+ * re-init at the desk**, on the plan, the mesh and every pose alike.
+ */
+describe("which origin a measurement belongs to", () => {
+  it("advances the epoch only on a reset, never on a plain re-init", () => {
+    // ⚑ The whole distinction. Tying it to `reinitCount` would make every mode change look like a
+    // new coordinate frame and the desk would refuse work that is perfectly comparable.
+    expect(ZONE_SRC).toMatch(/if mustReset \{ originEpoch \+= 1 \}/);
+    expect(ZONE_SRC).not.toMatch(/reinitCount \+= 1\s*\n\s*originEpoch \+= 1/);
+  });
+
+  it("stamps it on the pose, the floorplan and the mesh alike", () => {
+    /* ⛑ All three or none: an epoch on the poses with none on the plan tells the desk which
+       photographs agree with each other and nothing about whether they agree with the room. */
+    const stamps = ZONE_SRC.match(/"originEpoch": (?:self\.)?originEpoch/g) ?? [];
+    expect(stamps.length).toBeGreaterThanOrEqual(4); // capture, position, plan, mesh (empty + full)
+  });
+});

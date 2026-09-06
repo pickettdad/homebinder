@@ -416,6 +416,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             failure = nil
             mode = next
             modeStartedAt = Date()
+            showArPreview?(session)
             return unmet
         }
         failure = nil
@@ -439,6 +440,27 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         mode = next
         modeStartedAt = Date()
         paused = false
+        /*
+         ⛑ **The function that TAKES the lens is the function that hands the screen over.**
+
+         ⚑ *Audit 2026-09-06, confirmed high by three independent lenses.* `enter` calls
+         `needCamera?()` unconditionally at the top — which stops the capture session — and
+         `showArPreview` lived in **five callers**: `setMode` twice, `retry`, `startRoomPlan`, and
+         the RoomPlan waiter. **`wake()` was caller six and did not have it.**
+
+         `wake()` is the path `position()` uses, so the ordinary capture door — not mesh, not
+         floorplan — took the camera away from AVFoundation on the first photograph and **never put
+         anything in its place.** The viewfinder froze on one frame for the rest of the zone while
+         the shutter, the containers and the filmstrip all kept working. *It used to be survivable
+         because `sleepSession()` handed the lens back within seconds; that function now has no
+         callers at all.*
+
+         **The rule moves here because a rule kept in N callers holds until somebody writes N+1** —
+         which is the same finding as `finishScan`, the roomWaiter, and `reclaimCamera`, and this is
+         the fourth time. `attachArPreview` keeps an existing correctly-placed view, so calling it
+         here costs a comparison on the paths that already had it.
+         */
+        showArPreview?(session)
         return unmet
     }
 
@@ -454,12 +476,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
          It cannot be silent. The waiter is fired here with what is known, so the loss lands as a
          refusal the export carries rather than as an absence nobody can date.
          */
-        if let waiter = roomWaiter, next != .roomplan {
-            roomWaiter = nil
-            HSZoneLog.record("roomSuperseded", ["by": next.rawValue])
-            waiter(["captured": false,
-                    "why": roomError ?? "the floorplan was still finishing when \(next.rawValue) was opened"])
-        }
+        if next != .roomplan { supersedeRoomPlan(because: "\(next.rawValue) was opened") }
         if mode == .roomplan, next != .roomplan { stopRoomCapture(keepSession: true) }
         // Leaving a scan mode: give the lens and the screen back before anything else happens.
         if next == .positioning {
@@ -627,6 +644,16 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         session.pause()
         paused = true
         armed = false
+        /*
+         ⛑ **The screen goes back with the lens, and it did not.**
+
+         ⚑ *Audit 2026-09-06.* `releaseCamera?()` restarts the capture session and re-attaches ITS
+         preview — underneath ARKit's, which is still in the hierarchy showing **the last frame
+         before the session paused.** A frozen picture over a live one is worse than a black screen:
+         it looks like a working viewfinder aimed at the wrong thing. **Every other exit from a mode
+         hides it — `closeZone` and `setMode` both do; pause was the one that did not.**
+         */
+        hideArPreview?()
         // Give the lens back the instant we stop needing it — the capture session is what the
         // concierge is looking through.
         releaseCamera?()
@@ -1087,11 +1114,37 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      that matters at the other end: it ends the scan and **hands the session back alive**, which is
      what lets the floorplan be a bounded job without costing the zone its coordinate space.
      */
+    /**
+     ⛑ **A plan still being finalised is either honoured or recorded — never dropped.**
+
+     Fires the pending waiter with what is known, so an interrupted floorplan lands as a refusal the
+     export carries rather than as an absence nobody can date. ⚑ **A function rather than a repeated
+     block**, because the same rule written into two call sites has already been missed by a third.
+     */
+    private func supersedeRoomPlan(because why: String) {
+        guard let waiter = roomWaiter else { return }
+        roomWaiter = nil
+        retiringRoomCapture = nil
+        HSZoneLog.record("roomSuperseded", ["because": why])
+        waiter(["captured": false, "why": roomError ?? "the floorplan was still finishing when \(why)"])
+    }
+
     func startRoomPlan() -> [String: Any] {
         guard RoomCaptureSession.isSupported else {
             return ["started": false, "why": "RoomPlan unsupported on this device"]
         }
         guard mode != nil else { return ["started": false, "why": "no zone open"] }
+        /*
+         ⛑ **Another caller of the same rule, and it did not have it** (audit 2026-09-06).
+
+         `setMode` supersedes a `roomWaiter` still waiting; **starting a second scan did not** — so
+         pressing Finish, backing out, and starting the floorplan again leaves the first waiter armed
+         over a session that has been reconfigured, and its 30-second backstop later reports a
+         failure for a scan nobody is running. ⚑ *`capturedRoom = nil` below then discards the first
+         plan outright.* This is the third caller of a rule that has now been written twice; it lives
+         in `supersedeRoomPlan` so the fourth cannot miss it.
+         */
+        supersedeRoomPlan(because: "a new floorplan was started")
         capturedRoom = nil
         roomError = nil
         enter(.roomplan)

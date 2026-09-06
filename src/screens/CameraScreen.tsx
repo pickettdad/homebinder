@@ -498,8 +498,19 @@ export function CameraScreen({
       // and the whole failure of 2026-08-21 was a state nobody could see they were in.
       if (typeof e.zoneFailed === "string") {
         setZoneFailure(String(e.zoneFailed));
-        setScanning(false);
-        setMeshing(false);
+        /*
+         ⛑ **The scan flags stay, because the native session's mode does** (audit 2026-09-06).
+
+         Clearing them said *you are no longer meshing* while `HSZoneSession.mode` was still `.mesh`
+         — and `retry()` re-enters whatever `mode` holds, so the session came back **into mesh with
+         the UI showing no Finish button.** ⚑ *The walked geometry was then unreachable: nothing but
+         Finish harvests it, and it is discarded when the zone closes.*
+
+         A failure is a thing to recover from, not a thing that silently ends the job the concierge
+         was doing. The banner already says what went wrong and offers the retry; the mode belongs to
+         the session and is restored with it.
+        */
+        setZoneMode((prev) => prev);
       }
     });
     void (async () => {
@@ -773,7 +784,6 @@ export function CameraScreen({
    *  choice: the desk still ranks every position it receives, and a Text frame is always sampled
    *  whatever this holds. Session-scoped and never persisted — a container positioned on a previous
    *  visit is a different visit's fact. */
-  const positionedContainers = useRef<Set<string>>(new Set());
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
@@ -892,7 +902,7 @@ export function CameraScreen({
           recoverable: zoneStill.recoverable ?? true,
         });
       }
-      const result: CaptureResult =
+      const result: CaptureResult | null =
         zoneStill?.ok && zoneStill.frames?.length
           ? {
               frames: zoneStill.frames,
@@ -906,7 +916,26 @@ export function CameraScreen({
               at: new Date().toISOString(),
               position: zoneStill.position,
             }
-          : await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
+          : /*
+             ⛑ **The fallback is only honest when there is a capture session to fall back TO**
+             (audit 2026-09-06, confirmed high by two lenses).
+
+             Inside a zone ARKit holds the lens and the capture session is **stopped**. So a refused
+             `captureStill` fell through to `captureFrames()`, which asks a stopped session for a
+             photograph — *the door the concierge pressed does nothing, and the refusal that was
+             recorded describes the first failure rather than this one.*
+
+             ⚑ **A refusal the concierge can act on beats a fallback that cannot work.** `captureStill`
+             refuses on tracking that has not settled, which is exactly the state *hold still and look
+             at something with detail* fixes.
+            */
+            zoneRef.current
+            ? null
+            : await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
+      if (!result) {
+        showToast(zoneStill?.why ?? "could not take that photograph — hold still and try again");
+        return;
+      }
       /*
         ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
 
@@ -949,16 +978,31 @@ export function CameraScreen({
          every frame would have sampled a position and the change would have done nothing at all
          while reading as though it had. ⚑ *A stale closure is the same shape as a stale ARFrame:
          a value that is confidently the wrong one.* */
-      const containerId = openRef.current?.pinId ?? null;
-      const isPlate = statusRef.current?.mode === "text";
-      const needsPosition =
-        containerId === null || isPlate || !positionedContainers.current.has(containerId);
-      const position = needsPosition
-        ? await takePosition().catch(
-            () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-          )
-        : undefined;
-      if (containerId && position?.positioned) positionedContainers.current.add(containerId);
+      /*
+       ⛑ **The sampling rate is retired, and the comment above said exactly when it would be:**
+       *"this goes away entirely under decision one — if ARKit holds the lens for a zone there is no
+       wake, no pause, and every frame can carry a position."* **ARKit holds the lens now.** The
+       2–3 second pause that priced this out does not exist; `captureStill` returns in 60–90 ms with
+       the pose already in it.
+
+       ⚑ *Left in place it was still costing poses.* The 2026-09-06 export shows **one or two
+       captures in every zone with no `position` key at all** — the second and later frames of each
+       container, inheriting an anchor the manifest never says they inherit. **A missing field and a
+       deliberate inheritance are indistinguishable to the desk**, which is the same absence-versus-
+       refusal problem the block above exists to prevent.
+
+       ⚑ **And the frame's own pose is better than a second call, not merely cheaper.**
+       `zoneStill.position` is measured from *the high-resolution frame that became this photograph*
+       — same instant, same camera model. `takePosition()` asks a different frame milliseconds later
+       and answers a slightly different question. *The pose that describes the picture is the one
+       taken from the picture.*
+      */
+      const fromShutter = result.position;
+      const position =
+        fromShutter ??
+        (await takePosition().catch(
+          () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+        ));
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);

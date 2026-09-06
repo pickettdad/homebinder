@@ -736,6 +736,23 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self?.drawArPreview(buffer, anchors, camera)
             }
             made.hideArPreview = { [weak self] in self?.detachArPreview() }
+            /*
+             ⛑ **The outgoing zone is CLOSED, not dropped** (audit 2026-09-06, confirmed high).
+
+             This replaced `self.zone` with the new session and let the old one go. ⚑ *`zoneOwnsCamera`
+             is cleared by exactly one thing — the outgoing session's `releaseCamera`, fired from its
+             `closeZone`* — so walking from one room to the next stranded the flag at **true forever.**
+             From then on `reclaimCamera` refuses for a zone that no longer exists, the capture
+             session can never restart, and `start()` takes the deferred branch in every remaining
+             room of the walk.
+
+             *It also leaks the ARKit session:* the old `HSZoneSession` keeps running its
+             configuration and its delegate against a camera the new one is trying to take.
+             */
+            if let outgoing = self.zone {
+                HSZoneLog.record("zoneReplaced", ["for": id])
+                _ = outgoing.closeZone()
+            }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())
             }
@@ -1370,6 +1387,31 @@ final class CameraController: NSObject {
                     if self.zoneOwnsCamera {
                         HSZoneLog.record("startDeferredToZone", ["mode": mode.rawValue])
                         DispatchQueue.main.async {
+                            /*
+                             ⛑ **Deferring the SESSION is not deferring the transparency, and this
+                             branch owed one** (audit 2026-09-06 — a regression I introduced with the
+                             ownership guard).
+
+                             `stop()` unconditionally restores the host web view to **opaque white**
+                             on the way out. Transparency is re-asserted in exactly one place on the
+                             capture path — `attachPreview` — and this early return sits above it. So
+                             leaving a zone's viewfinder and coming back left the page opaque over an
+                             ARKit preview that was still attached and still being fed frames: **a
+                             blank white viewfinder with the app's own chrome drawn on top**, and a
+                             zone log that reads perfectly healthy.
+
+                             ⚑ *Same shape as the `arPreviewKept` bug two days ago:* a fast path that
+                             skips the work it did not think it owed. The rule is that **anything
+                             which returns instead of attaching still owes what attaching asserts.**
+                             */
+                            if webView.isOpaque {
+                                // Bookkept exactly as `attachPreview` does, so `stop()` still
+                                // restores it — a transparency nobody records is one nobody undoes.
+                                self.restoreOpaque = webView.isOpaque
+                                self.hostWebView = webView
+                                WebLayer.makeTransparent(webView)
+                                HSZoneLog.record("deferredMadeTransparent")
+                            }
                             self.startStatusSampling()
                             completion(.success(self.capabilities(unmetAtStart: [])))
                         }

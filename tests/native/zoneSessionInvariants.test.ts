@@ -202,10 +202,19 @@ describe("which origin a measurement belongs to", () => {
  * that a backstop **reports** rather than steers.
  */
 describe("a floorplan that is still finalising", () => {
-  it("records the loss when another mode supersedes it", () => {
-    // Fired with what is known, so the absence lands as a refusal the export carries.
-    expect(ZONE_SRC).toMatch(/if let waiter = roomWaiter, next != \.roomplan \{/);
+  it("records the loss, from every path that could cause it", () => {
+    /* ⛑ **Asserted as one rule with all its callers, not as a code shape.** The first cut of this
+       test matched the inline block in `setMode` — so when a *second* caller was found (starting a
+       new floorplan over a pending one) and the rule was moved into a function, the test failed on
+       the fix. ⚑ *A test that pins an implementation argues against improving it.*
+
+       The rule: **a pending delivery is honoured or recorded, never dropped** — and it lives in one
+       function so a third caller cannot miss it. */
+    expect(ZONE_SRC).toMatch(/private func supersedeRoomPlan\(because why: String\)/);
     expect(ZONE_SRC).toMatch(/roomSuperseded/);
+    const callers = ZONE_SRC.match(/supersedeRoomPlan\(because:/g) ?? [];
+    // Both known entry points: another mode opening, and another floorplan starting.
+    expect(callers.length).toBeGreaterThanOrEqual(2);
   });
 
   it("lets the backstop report but never steer a session that moved on", () => {
@@ -244,5 +253,57 @@ describe("keeping an existing preview", () => {
        same row — an instrument that agrees with the bug. */
     const keep = /arPreviewKept", \[[\s\S]*?\]\)/.exec(PLUGIN_SRC)?.[0] ?? "";
     expect(keep).toMatch(/webOpaque/);
+  });
+});
+
+/**
+ * ⛑ **The function that takes the lens is the function that hands the screen over.**
+ *
+ * ⚑ *Audit 2026-09-06, confirmed high by three independent lenses.* `enter()` calls `needCamera?()`
+ * unconditionally — which stops the capture session — while `showArPreview` lived in **five
+ * callers**. `wake()`, the path an ordinary photograph takes through `position()`, was caller six.
+ *
+ * So the plain capture door took the camera away from AVFoundation on the first shutter press and
+ * **never put anything in its place**: the viewfinder froze on one frame for the rest of the zone
+ * while the shutter, containers, filmstrip and delete all kept working. *It used to be survivable
+ * because `sleepSession()` handed the lens back within seconds — that function now has no callers.*
+ *
+ * The invariant is **where the rule lives**, not how many callers exist today.
+ */
+describe("taking the lens and handing over the screen", () => {
+  it("shows the preview from enter(), the one place that always takes the camera", () => {
+    const enterFn = /private func enter\(_ next: Mode[\s\S]*?\n    \}/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(enterFn).not.toBe("");
+    expect(enterFn).toMatch(/needCamera\?\(\)/);
+    // Both exits: the unchanged fast path and the full run. A fast path that skips the handover is
+    // the arPreviewKept bug again.
+    expect((enterFn.match(/showArPreview\?\(session\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("hides it wherever the lens goes back, pause included", () => {
+    /* ⛑ pause() restarts the capture session and re-attaches ITS preview — underneath ARKit's,
+       still showing the last frame before the pause. A frozen picture over a live one reads as a
+       working viewfinder aimed at the wrong thing, which is worse than black. */
+    const pauseFn = /func pause\(\) -> \[String: Any\] \{[\s\S]*?\n    \}/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(pauseFn).not.toBe("");
+    expect(pauseFn).toMatch(/hideArPreview\?\(\)/);
+    expect(pauseFn).toMatch(/releaseCamera\?\(\)/);
+  });
+});
+
+/**
+ * ⛑ **Camera ownership is released by whoever takes the session away.**
+ *
+ * `openZone` replaced `self.zone` and let the outgoing session go. ⚑ *`zoneOwnsCamera` is cleared by
+ * exactly one thing — the outgoing session's `releaseCamera`, fired from its `closeZone`* — so
+ * walking from one room to the next stranded the flag at **true for the rest of the app's life**,
+ * and every later room took the deferred branch with a camera nobody could reclaim.
+ */
+describe("replacing a zone", () => {
+  it("closes the outgoing session rather than dropping it", () => {
+    const PLUGIN_SRC = readFileSync(PLUGIN, "utf8");
+    const openFn = /func openZone\(_ call: CAPPluginCall\)[\s\S]*?\n    \}\n/.exec(PLUGIN_SRC)?.[0] ?? "";
+    expect(openFn).not.toBe("");
+    expect(openFn).toMatch(/outgoing\.closeZone\(\)/);
   });
 });

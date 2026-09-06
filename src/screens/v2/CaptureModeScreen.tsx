@@ -342,6 +342,9 @@ export function CaptureModeScreen({ zoneId }: { zoneId?: string }) {
     photos: zone.photos.length + liveContainers.reduce((n, p) => n + p.photos.length, 0),
     hasFloorplan: zone.photos.some((m) => m.intent === "floorplan"),
     containers: liveContainers.map((p) => ({ number: p.number, frames: p.photos.map((m) => ({ position: m.position as never })) })),
+    // ⛑ The filed mesh, not the act of meshing — see `zoneGaps`. Geometry accumulates whether or not
+    // anybody pressed the button; this asks whether any of it was kept.
+    meshFiled: zone.photos.some((m) => m.intent === "mesh"),
   });
 
   return (

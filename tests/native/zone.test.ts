@@ -243,6 +243,25 @@ describe("what a zone is missing, said while the concierge is still in it", () =
     expect(g.missing.join(" ")).toMatch(/take one more photo/);
   });
 
+  /**
+   * ⛑ **Geometry accumulates for free and is kept only on request** — so the room that never asked
+   * is indistinguishable from the room that had nothing to keep.
+   *
+   * ⚑ Since positioning runs reconstruction continuously, `harvestMesh` reads everything the zone
+   * built, and it runs at one moment only: Finish mesh. **The button is not "start scanning", it is
+   * the only "keep it".** A zone left without it discards a deliverable that already existed.
+   */
+  it("says when a room's geometry was never kept, and only for a room somebody worked in", () => {
+    const worked = { photos: 12, hasFloorplan: true, containers: [anchored] };
+    expect(zoneGaps({ ...worked, meshFiled: false }).missing.join(" ")).toMatch(/Finish mesh/);
+    expect(zoneGaps({ ...worked, meshFiled: true }).complete).toBe(true);
+    // ⛑ Absent is not false. A caller that cannot answer the question must not trip the warning —
+    // that is how a diagnostic starts firing on every room and stops being read.
+    expect(zoneGaps(worked).complete).toBe(true);
+    // And never on a room nobody has started, whatever the mesh says.
+    expect(zoneGaps({ photos: 0, hasFloorplan: false, containers: [], meshFiled: false }).complete).toBe(true);
+  });
+
   it("names both when both are missing, and does not stop at the first", () => {
     const g = zoneGaps({ photos: 4, hasFloorplan: false, containers: [floating(3)] });
     expect(g.missing).toHaveLength(2);

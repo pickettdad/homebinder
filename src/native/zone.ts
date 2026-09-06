@@ -196,12 +196,32 @@ export function zoneGaps(zone: {
   photos: number;
   hasFloorplan: boolean;
   containers: { number: number; frames: { position?: ZonePosition }[] }[];
+  /**
+   ⛑ **Whether this zone's accumulated geometry has been filed — and it is not the same question as
+   "did the concierge use mesh mode".**
+
+   ⚑ *Since positioning runs `sceneReconstruction` continuously, the iPad builds geometry from the
+   moment the zone opens, in every mode.* `harvestMesh` reads **all** of it, and it runs at exactly
+   one moment: leaving mesh mode via Finish. **So Finish is not a "start scanning" button — it is
+   the only "keep it" button**, and a zone left without pressing it discards everything the walk
+   built, silently and for free.
+
+   *This is the absence-versus-refusal distinction again*: a room with no geometry because nobody
+   meshed and a room with no geometry because the concierge forgot are the same file.
+   */
+  meshFiled?: boolean;
 }): { complete: boolean; missing: string[] } {
   const missing: string[] = [];
   // Only a zone somebody actually photographed can be missing anything. An untouched zone is not
   // incomplete, it is unstarted, and saying otherwise would fire on every room before it is walked.
   if (zone.photos === 0) return { complete: true, missing };
   if (!zone.hasFloorplan) missing.push("no floorplan — scan the room");
+  /* ⚑ Gated on the zone having been worked in at all (`photos > 0`, above), so it never fires on a
+     room somebody walked through. The instruction is the whole point: the fix is one tap and it is
+     unavailable once the concierge has left. */
+  if (zone.meshFiled === false) {
+    missing.push("the room's 3D scan has not been kept — tap Mesh, then Finish mesh");
+  }
   /* ⛑ **Named, not counted, and the field asked for exactly this.** *"It says 3 objects the desk
      cannot place, but then doesn't really say what they are or what to do."* ⚑ A number is a
      verdict; a list is an instruction. **The concierge is standing in the room and can fix an

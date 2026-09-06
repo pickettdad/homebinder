@@ -58,6 +58,23 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     /// One per zone. Everything in the zone is positioned against this object's origin.
     private let session = ARSession()
     private var roomCapture: RoomCaptureSession?
+    /**
+     ⛑ **The stopped scan, held until it has delivered — because `stop()` is not the end of it.**
+
+     ⚑ *Field 2026-09-05, and it is intermittent by construction, which is why it took two walks.*
+     `stopRoomCapture` set `roomCapture = nil` on the line after `stop()`. **`stop()` is asynchronous
+     — RoomPlan keeps processing and then calls `didEndWith`** — so dropping the only strong reference
+     to the session immediately leaves whether that callback ever arrives up to whatever else happens
+     to retain it.
+
+     The log shows both outcomes an hour apart with identical user actions: one scan went
+     `roomPlanStopping` → `roomDidEnd` in **10 ms**, and the other went `roomPlanStopping` → *nothing
+     at all*, thirty seconds to the backstop, **four walls and three doors scanned and discarded.**
+
+     **Same class as every other one-ended operation in this file:** the stop was accounted for and
+     the delivery was not. Cleared in `deliverRoom`, which is the moment the scan is genuinely over.
+     */
+    private var retiringRoomCapture: RoomCaptureSession?
     private var capturedRoom: CapturedRoom?
     private var roomError: String?
     /// ⛑ The completion the fixed 2.5-second wait was standing in for. See `stopRoomPlan`.
@@ -1092,6 +1109,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
 
     private func stopRoomCapture(keepSession: Bool) {
         guard let capture = roomCapture else { return }
+        // ⚑ Held BEFORE the stop, not after: the callback can arrive on the next runloop turn.
+        retiringRoomCapture = capture
         capture.stop(pauseARSession: !keepSession)
         roomCapture = nil
     }
@@ -1168,6 +1187,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     }
 
     private func deliverRoom(_ out: [String: Any]) {
+        // The scan is genuinely over here — this is the callback the reference was being held for.
+        retiringRoomCapture = nil
         HSZoneLog.record("roomDelivered", ["captured": out["captured"] ?? false, "why": out["why"] ?? "", "walls": (out["walls"] as? [[String: Any]])?.count ?? 0])
         guard let waiter = roomWaiter else {
             HSZoneLog.record("roomDeliveredLate", ["note": "nobody was still waiting"])

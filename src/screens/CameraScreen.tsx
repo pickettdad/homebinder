@@ -1455,10 +1455,22 @@ export function CameraScreen({
          Text mode inherited from the previous object's plate is close-focused, spot-metered and
          lens-locked — settings chosen for a job this frame is not doing. Painted from the return,
          as everything on this screen must be. */
-      if (statusRef.current && statusRef.current.mode !== "object") {
-        const achieved = await requestMode("object").catch(() => null);
-        if (achieved && achieved.mode !== "object") showToast(`mode stayed ${achieved.mode}`);
-      }
+      /*
+       ⛑ **Asked for unconditionally, because the condition could only ever fail open.**
+
+       This read `statusRef.current && statusRef.current.mode !== "object"` — so a status that had
+       not arrived, or one stale by a frame, skipped the reset **silently and looked identical to a
+       mode that was already correct.** Field 2026-09-05: *"when clicking new object container, mode
+       should default to object mode capture"* — reported for the second time, on a container opened
+       while the previous shot was a Concern, and the Concern stuck.
+
+       ⚑ **Fourth instance of one shape in this file** — a decision gated on device state read from
+       the React side, which is absent exactly when the screen has just re-mounted. `requestMode` is
+       idempotent and costs a bridge call; the check it replaces cost a mislabelled capture. *The
+       frame is still painted from the RETURN and never from the request.*
+       */
+      const achieved = await requestMode("object").catch(() => null);
+      if (achieved && achieved.mode !== "object") showToast(`mode stayed ${achieved.mode}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not start an object here");
     }

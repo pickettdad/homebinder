@@ -20,12 +20,26 @@ titled **For David**, written for a non-programmer: what changed in field/inspec
 terms, what decisions are needed from him and in what plain-language form, and what
 happens next. Technical detail goes above that section, never in it.
 
-**Verification budget.** The owner budgets API and usage spend during the build.
-Default to single-session work with self-review; do not launch multi-agent
-workflows/fleets unless the owner explicitly opts in for a specific task. Quality
-still ships: CI gates stay green, and claims are verified before they're reported.
-(The in-product inspection AI is exempt — it earns money; pick the best working
-option there.)
+**Verification budget — loosened by the owner 2026-09-05, and the reason it existed is the
+reason it can go.** *"We should loosen that rule; it was there to slow things down on doing a
+whole bunch of things at once in the beginning"* and *"I turned on ultracode so that we could
+go big with agents."* The old wording demanded an explicit opt-in for every fleet. **That was a
+brake on breadth while nothing was proven yet — not a standing objection to spend** — and the
+build is past the stage it protected.
+
+**So: fan out by default for verification.** Audits, adversarial review, multi-lens sweeps over
+code the field has already broken. This repo has the receipts — the stale-closure sampling bug
+was found by a workflow audit and not by reading — and **the field walks are the expensive
+resource now, not the tokens.** *A defect a fleet finds on the Mac is a walk the owner does not
+have to repeat.*
+
+⛑ **What the rule was actually guarding is still guarded: do not parallelise the *build*.**
+Several agents writing the same subsystem at once is how a session loses track of what landed,
+and this repo has twice been bitten by an edit reported as applied that was not. **Fan out to
+find; converge to fix.**
+
+*Unchanged:* CI gates stay green, and claims are verified before they are reported. The
+in-product inspection AI remains exempt — it earns money; pick the best working option there.
 
 **Config discipline.** `src/config/checklists.generated.ts` is generated from
 `docs/CHECKLIST-MASTER.md` (`npm run gen:checklists`) — never hand-edit it; CI fails

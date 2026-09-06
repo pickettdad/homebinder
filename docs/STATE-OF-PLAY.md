@@ -47,8 +47,22 @@ per-axis ratio surface/camera:  x 1.53   y 1.04   z 1.30
 **All near 1, none near 0.** A ray hitting the same physical object would barely move — the ratio
 would be ~0. **The surface tracks the observer**, and the standoff barely changed (0.867 → 0.936 m).
 
+**⚑ The subject was a table lamp** (owner, 2026-09-06), and that sharpens the diagnosis rather than
+confirming the first reading of it. Checking the rest of the export: `surface.distance` across the
+current build runs **0.333 m to 2.982 m, stdev 0.701** — *not* a constant. **So the ray is hitting
+something real. It is hitting the wrong something.**
+
+⛑ **A lamp is ~0.15 m across and thin. `.estimatedPlane` finds the big background plane — the wall or
+the table behind it — never the small object in front.** Two standing positions give two points on
+that background, which is exactly the 1:1 tracking. *And it generalises to everything this app
+photographs: a valve, a nameplate, a shutoff, a lamp. **Planes miss precisely the objects that matter.***
+
 *The session's own doctrine already said the answer:* **"A plane is a guess at a surface; the mesh IS
 the surface."** The raycast never used the mesh.
+
+⚑ **The lamp raises `sceneDepth` above the mesh as the likely winner.** LiDAR measures the nearest
+thing at the centre pixel; mesh reconstruction is poor on thin geometry and may not contain the lamp
+at all. **Nearest-surface-along-the-ray is the requirement, not any-surface.**
 
 **A workflow is designing the fix** (three approaches — manual mesh ray/triangle, layered fallback
 that records its source, sceneDepth unprojection — judged and synthesised). Requirements: **one

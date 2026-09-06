@@ -118,6 +118,17 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             lensProbe = probe
             probe.run { _ in self.lensProbe = nil }
         }
+        /* ⚑ **The zoom floor — the one measurement that decides whether the room-shot handover has
+           to exist at all.** See `HSZoomFloor`. Two minutes, and a negative is as useful as a
+           positive because it retires an option rather than leaving it to be re-argued. */
+        if CommandLine.arguments.contains("--hs-zoom-floor"), #available(iOS 16.0, *) {
+            let probe = HSZoomFloor()
+            zoomFloor = probe
+            probe.run { result in
+                print("HS-ZOOM-FLOOR RESULT \(result["VERDICT"] ?? "?")")
+                self.zoomFloor = nil
+            }
+        }
         if CommandLine.arguments.contains("--hs-ar-probe") {
             let probe = HSArProbe()
             arProbe = probe
@@ -324,6 +335,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
+    private var zoomFloor: AnyObject?
     private var arProbe: HSArProbe?
 
     private var bench: HSBench?

@@ -20,12 +20,47 @@ titled **For David**, written for a non-programmer: what changed in field/inspec
 terms, what decisions are needed from him and in what plain-language form, and what
 happens next. Technical detail goes above that section, never in it.
 
-**Verification budget.** The owner budgets API and usage spend during the build.
-Default to single-session work with self-review; do not launch multi-agent
-workflows/fleets unless the owner explicitly opts in for a specific task. Quality
-still ships: CI gates stay green, and claims are verified before they're reported.
-(The in-product inspection AI is exempt — it earns money; pick the best working
-option there.)
+**Verification budget — loosened by the owner 2026-09-05, and the reason it existed is the
+reason it can go.** *"We should loosen that rule; it was there to slow things down on doing a
+whole bunch of things at once in the beginning"* and *"I turned on ultracode so that we could
+go big with agents."* The old wording demanded an explicit opt-in for every fleet. **That was a
+brake on breadth while nothing was proven yet — not a standing objection to spend** — and the
+build is past the stage it protected.
+
+**So: fan out by default for verification.** Audits, adversarial review, multi-lens sweeps over
+code the field has already broken. This repo has the receipts — the stale-closure sampling bug
+was found by a workflow audit and not by reading — and **the field walks are the expensive
+resource now, not the tokens.** *A defect a fleet finds on the Mac is a walk the owner does not
+have to repeat.*
+
+⛑ **What the rule was actually guarding is still guarded: do not parallelise the *build*.**
+Several agents writing the same subsystem at once is how a session loses track of what landed,
+and this repo has twice been bitten by an edit reported as applied that was not. **Fan out to
+find; converge to fix.**
+
+⚑ **Ultracode on IS the instruction — confirmed by the owner 2026-09-06.** *"Confirming that if I
+have ultracode turned on, then that means utilize the fleet."* **Do not ask; do not weigh it against
+cost.** The toggle is the owner's standing decision for the session, and a turn that reasons its way
+back to working solo has ignored an instruction rather than exercised judgement.
+
+*Unchanged:* CI gates stay green, and claims are verified before they are reported. The
+in-product inspection AI remains exempt — it earns money; pick the best working option there.
+
+**Positioning error is MEASURED and the word for it is not "drift" (owner correction 2026-09-06).**
+`docs/GATE1-RESULT-2026-09-04.md` is the answer: **6.0 cm maximum over 45 minutes against a 10 cm
+go/no-go**, plateauing near 5 cm and wandering — 3.0 → 4.3 → 4.9 → 5.3 → 5.2 → 4.5 → 4.5 → 6.0.
+**That is bounded error, not drift**, and the document says so in those words.
+
+⛑ **So do not propose measuring it again.** This session read an inconclusive pair of field captures
+— inconclusive because the owner had *moved 0.77 m between them* — and asked for a fresh
+tape-on-the-floor drift test. *The owner had already walked 45 minutes to produce exactly that
+number.* **Re-asking for a measurement the repo holds is the same failure as reconstructing the build
+sequence: a second copy of an answer, obtained at the owner's cost.**
+
+⚑ **The general form:** before asking the field for a number, check whether a gate already bought it.
+Gate 0 (4.5 cm), Gate 1 (6.0 cm bounded, thermal nominal, 9%/46 min) and the plate A/B are results,
+not history. *And when a capture pair cannot answer a question, the finding is "this pair cannot
+answer it" — never "let us measure the thing we measured."*
 
 **Config discipline.** `src/config/checklists.generated.ts` is generated from
 `docs/CHECKLIST-MASTER.md` (`npm run gen:checklists`) — never hand-edit it; CI fails

@@ -44,6 +44,8 @@ import {
   adjustCamera,
   cameraAvailable,
   captureFrames,
+  captureStill,
+  retryZoneSession,
   captureWantsRetake,
   positionForSibling,
   projectionFor,
@@ -60,7 +62,6 @@ import {
   framesTurnedFromStamp,
   takePosition,
   openZone,
-  closeZone,
   onZone,
   pauseZone,
   resumeZone,
@@ -91,6 +92,7 @@ import {
   type TextBoxesEvent,
   type TraverseProgressEvent,
   type TraverseResult,
+  type ZoneStillResult,
 } from "../native/hsCamera";
 
 const MODE_BUTTONS: { mode: CameraMode; glyph: string; hint: string }[] = [
@@ -287,11 +289,17 @@ function ContextFilmstrip({
   model,
   label,
   onOpen,
+  onHold,
 }: {
   model: ReturnType<typeof stripModel>;
   label: string;
   onOpen: (capture: MediaRef) => void;
+  /** ⛑ Long press, the SAME gesture the container strip uses. See `onHold` there — one gesture
+   *  learned once beats two places to look, and the field could not find the delete at all. */
+  onHold: (capture: MediaRef) => void;
 }) {
+  const held = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
   return (
     <div className="flex flex-col gap-1">
       <p className="px-1 text-xs text-slate-400">
@@ -316,7 +324,18 @@ function ContextFilmstrip({
               key={capture.mediaId}
               type="button"
               aria-label="Open capture"
-              onClick={() => onOpen(capture)}
+              onPointerDown={() => {
+                fired.current = false;
+                held.current = setTimeout(() => {
+                  fired.current = true;
+                  onHold(capture);
+                }, 600);
+              }}
+              onPointerUp={() => held.current && clearTimeout(held.current)}
+              onPointerLeave={() => held.current && clearTimeout(held.current)}
+              /* ⛑ **A press that became a hold is not also a tap.** Otherwise deleting a capture
+                 opens it on the way past, and the viewer appears over the confirmation. */
+              onClick={() => { if (!fired.current) onOpen(capture); }}
               className="h-16 w-16 shrink-0 overflow-hidden rounded-lg ring-1 ring-slate-600"
             >
               <MediaThumb mediaId={capture.mediaId} mime={capture.mime} className="h-full w-full object-cover" />
@@ -479,8 +498,19 @@ export function CameraScreen({
       // and the whole failure of 2026-08-21 was a state nobody could see they were in.
       if (typeof e.zoneFailed === "string") {
         setZoneFailure(String(e.zoneFailed));
-        setScanning(false);
-        setMeshing(false);
+        /*
+         ⛑ **The scan flags stay, because the native session's mode does** (audit 2026-09-06).
+
+         Clearing them said *you are no longer meshing* while `HSZoneSession.mode` was still `.mesh`
+         — and `retry()` re-enters whatever `mode` holds, so the session came back **into mesh with
+         the UI showing no Finish button.** ⚑ *The walked geometry was then unreachable: nothing but
+         Finish harvests it, and it is discarded when the zone closes.*
+
+         A failure is a thing to recover from, not a thing that silently ends the job the concierge
+         was doing. The banner already says what went wrong and offers the retry; the mode belongs to
+         the session and is restored with it.
+        */
+        setZoneMode((prev) => prev);
       }
     });
     void (async () => {
@@ -604,9 +634,20 @@ export function CameraScreen({
   }, [zoneOpen, startAction]);
 
   const finishScan = useCallback(async () => {
-    setScanning(false);
+    /* ⛑ **The scan is not over when the button is pressed; it is over when the plan arrives.**
+
+       Field 2026-09-05: Finish was pressed, the screen said done, and the concierge opened mesh
+       fourteen seconds later — **while RoomPlan was still finalising.** Starting the next mode
+       re-ran the `ARSession` underneath it and the plan was never delivered at all: four walls,
+       three doors and one window, scanned and gone, with nothing on screen ever saying so.
+
+       ⚑ *`setScanning(false)` on the first line is what made that possible.* It cleared the only
+       state telling the concierge something was still happening, a full second before the plan
+       existed. The strip now says what it is doing until the plan actually lands. */
     setRoomProgress(null);
+    setZoneNote("filing the floorplan…");
     const plan = await stopRoomPlan().catch(() => ({ captured: false, why: "failed" }) as ZonePlan);
+    setScanning(false);
     setPlan(plan);
     setZoneMode("positioning");
     /* ⚑ The plan reported as the numbers somebody can price from, not as a count of surfaces.
@@ -663,6 +704,33 @@ export function CameraScreen({
   }, [zoneId, capturePhotoV2]);
 
   /**
+   * ⛑ **Leaving by the back button finishes the scan; it does not abandon it.**
+   *
+   * Field 2026-09-05: *"I backed out of mesh and went to do the captures, and the top label still
+   * said mesh."* ⚑ **Only the finish buttons returned the session to positioning**, so a concierge
+   * who left any other way carried mesh mode into every capture that followed — and the native
+   * session agreed with the label, which is the part that mattered: those photographs were taken by
+   * a session still configured to reconstruct a room.
+   *
+   * **Finishing rather than discarding is the deliberate half.** The alternative — drop the mode,
+   * drop the geometry — loses a walk somebody actually did because they used the wrong exit.
+   * *`finishMesh` already files nothing when nothing was built, so an abandoned scan costs a
+   * function call and a real one is saved.*
+   *
+   * ⚑ The ref is written in an effect and read in an unmount cleanup, because a cleanup closes over
+   * the render that created it — and reading `meshing` directly here is exactly the stale-state
+   * mistake this file has now made three times.
+   */
+  const leaveRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    leaveRef.current = () => {
+      if (meshing) void finishMesh();
+      else if (scanning) void finishScan();
+    };
+  });
+  useEffect(() => () => leaveRef.current(), []);
+
+  /**
    * ⚑ Rebuild rather than resume. A failed `ARSession` cannot be revived by `run(config)` — that is
    * what made every mode after a failure inherit the corpse — so this closes the zone and opens it
    * again, which is the one thing that was previously only achievable by relaunching the app.
@@ -671,19 +739,31 @@ export function CameraScreen({
     if (!zoneId) return;
     setZoneFailure(null);
     setZoneNote("restarting positioning…");
-    await closeZone().catch(() => {});
-    try {
-      const out = await openZone(zoneId);
+    /*
+      ⛑ **Re-run in place. This used to close and reopen the zone, and that was data loss.**
+
+      `openZone` mints a fresh ARKit origin, so every pose already taken in the room would be
+      silently re-based against a different one — *the record keeps them, they look fine, and they
+      are measured from somewhere else.* **A recovery that corrupts what it recovers is worse than
+      the failure it recovers from.**
+
+      The native side re-runs the existing session without touching the camera, because a
+      `sensorFailed` inside a zone is contention that has usually cleared by the time anyone reacts.
+    */
+    const retried: { ok: boolean; mode?: string; why?: string } = await retryZoneSession().catch(
+      () => ({ ok: false, why: "retry failed" }),
+    );
+    if (retried.ok) {
       setZoneOpen(true);
-      setZoneMode(out.mode);
-      setZonePaused(true);
+      if (retried.mode) setZoneMode(retried.mode as ZoneMode);
+      setZonePaused(false);
       setZoneNote(null);
-    } catch (e) {
-      // ⚑ Clear the "restarting…" line on the way out. It stayed on screen forever when the retry
-      // failed, which reads as *still trying* — the one thing it was not doing.
-      setZoneNote(null);
-      setZoneFailure(e instanceof Error ? e.message : "positioning unavailable");
+      return;
     }
+    // ⚑ Clear the "restarting…" line either way. It stayed on screen forever when the retry failed,
+    // which reads as *still trying* — the one thing it was not doing.
+    setZoneNote(null);
+    setZoneFailure(retried.why ?? "positioning unavailable");
   }, [zoneId]);
 
   const togglePause = useCallback(async () => {
@@ -704,7 +784,6 @@ export function CameraScreen({
    *  choice: the desk still ranks every position it receives, and a Text frame is always sampled
    *  whatever this holds. Session-scoped and never persisted — a container positioned on a previous
    *  visit is a different visit's fact. */
-  const positionedContainers = useRef<Set<string>>(new Set());
   const autoRef = useRef(true);
   useEffect(() => {
     autoRef.current = autoCapture;
@@ -791,7 +870,72 @@ export function CameraScreen({
         first one where the wrong value silently corrupts the record rather than the experience.
       */
       const targetAtShutter = openRef.current;
-      const result = await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
+      /*
+        ⚑ **Inside a zone, the photograph comes out of the tracking session.**
+
+        This is the whole positioning rebuild at its point of use. The ordinary shutter is an
+        AVFoundation capture and ARKit cannot hold the lens at the same time, so every in-zone
+        photograph used to cost a handover — **6.3 s, of which 4.9 s was ARKit re-establishing
+        tracking** — and the pose it produced was dead-reckoned, because 1.4 s awake against 20–116 s
+        asleep never builds a map. *The 2026-08-30 export showed where that ends: poses three metres
+        below the floor.*
+
+        Measured continuously with the full load: **6.0 cm of return-to-reference error over 46
+        minutes, and it stops growing.** Shutter latency **p50 78 ms** against 6.3 s.
+
+        ⛑ **A refusal falls back to the ordinary shutter rather than failing the capture.** Tracking
+        limited, no frame yet, a capture already in flight — *the concierge gets their photograph and
+        the record gets an honest refusal instead of a fabricated pose.* The refusal is evented, so
+        the desk sees a gap rather than an absence.
+      */
+      const zoneStill = zoneRef.current
+        ? await captureStill({ text: statusRef.current?.mode === "text" }).catch(
+            () => ({ ok: false, why: "capture failed" }) as ZoneStillResult,
+          )
+        : null;
+      if (zoneStill && !zoneStill.ok) {
+        void recordRefusal({
+          act: "capture",
+          zoneId: zoneRef.current ?? undefined,
+          pinId: targetAtShutter?.pinId,
+          why: zoneStill.why ?? "still refused",
+          recoverable: zoneStill.recoverable ?? true,
+        });
+      }
+      const result: CaptureResult | null =
+        zoneStill?.ok && zoneStill.frames?.length
+          ? {
+              frames: zoneStill.frames,
+              mode: (statusRef.current?.mode ?? "object") as CameraMode,
+              torchUsed: false,
+              bracketed: false,
+              deskewed: false,
+              torchPaired: false,
+              lens: "normal" as const,
+              rotationAngle: 0,
+              at: new Date().toISOString(),
+              position: zoneStill.position,
+            }
+          : /*
+             ⛑ **The fallback is only honest when there is a capture session to fall back TO**
+             (audit 2026-09-06, confirmed high by two lenses).
+
+             Inside a zone ARKit holds the lens and the capture session is **stopped**. So a refused
+             `captureStill` fell through to `captureFrames()`, which asks a stopped session for a
+             photograph — *the door the concierge pressed does nothing, and the refusal that was
+             recorded describes the first failure rather than this one.*
+
+             ⚑ **A refusal the concierge can act on beats a fallback that cannot work.** `captureStill`
+             refuses on tracking that has not settled, which is exactly the state *hold still and look
+             at something with detail* fixes.
+            */
+            zoneRef.current
+            ? null
+            : await captureFrames({ wideSibling: pendingIntentRef.current === "room-shot" });
+      if (!result) {
+        showToast(zoneStill?.why ?? "could not take that photograph — hold still and try again");
+        return;
+      }
       /*
         ⚑ **The position is taken at the shutter, and a refusal is recorded as a refusal.**
 
@@ -834,16 +978,31 @@ export function CameraScreen({
          every frame would have sampled a position and the change would have done nothing at all
          while reading as though it had. ⚑ *A stale closure is the same shape as a stale ARFrame:
          a value that is confidently the wrong one.* */
-      const containerId = openRef.current?.pinId ?? null;
-      const isPlate = statusRef.current?.mode === "text";
-      const needsPosition =
-        containerId === null || isPlate || !positionedContainers.current.has(containerId);
-      const position = needsPosition
-        ? await takePosition().catch(
-            () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
-          )
-        : undefined;
-      if (containerId && position?.positioned) positionedContainers.current.add(containerId);
+      /*
+       ⛑ **The sampling rate is retired, and the comment above said exactly when it would be:**
+       *"this goes away entirely under decision one — if ARKit holds the lens for a zone there is no
+       wake, no pause, and every frame can carry a position."* **ARKit holds the lens now.** The
+       2–3 second pause that priced this out does not exist; `captureStill` returns in 60–90 ms with
+       the pose already in it.
+
+       ⚑ *Left in place it was still costing poses.* The 2026-09-06 export shows **one or two
+       captures in every zone with no `position` key at all** — the second and later frames of each
+       container, inheriting an anchor the manifest never says they inherit. **A missing field and a
+       deliberate inheritance are indistinguishable to the desk**, which is the same absence-versus-
+       refusal problem the block above exists to prevent.
+
+       ⚑ **And the frame's own pose is better than a second call, not merely cheaper.**
+       `zoneStill.position` is measured from *the high-resolution frame that became this photograph*
+       — same instant, same camera model. `takePosition()` asks a different frame milliseconds later
+       and answers a slightly different question. *The pose that describes the picture is the one
+       taken from the picture.*
+      */
+      const fromShutter = result.position;
+      const position =
+        fromShutter ??
+        (await takePosition().catch(
+          () => ({ positioned: false, why: "no zone open" }) as ZonePosition,
+        ));
       // Assume Use: it goes straight into the filmstrip. No confirm sheet — that was only ever an
       // artefact of the OS camera finishing its own job.
       setShots((prev) => [result, ...prev]);
@@ -1340,10 +1499,22 @@ export function CameraScreen({
          Text mode inherited from the previous object's plate is close-focused, spot-metered and
          lens-locked — settings chosen for a job this frame is not doing. Painted from the return,
          as everything on this screen must be. */
-      if (statusRef.current && statusRef.current.mode !== "object") {
-        const achieved = await requestMode("object").catch(() => null);
-        if (achieved && achieved.mode !== "object") showToast(`mode stayed ${achieved.mode}`);
-      }
+      /*
+       ⛑ **Asked for unconditionally, because the condition could only ever fail open.**
+
+       This read `statusRef.current && statusRef.current.mode !== "object"` — so a status that had
+       not arrived, or one stale by a frame, skipped the reset **silently and looked identical to a
+       mode that was already correct.** Field 2026-09-05: *"when clicking new object container, mode
+       should default to object mode capture"* — reported for the second time, on a container opened
+       while the previous shot was a Concern, and the Concern stuck.
+
+       ⚑ **Fourth instance of one shape in this file** — a decision gated on device state read from
+       the React side, which is absent exactly when the screen has just re-mounted. `requestMode` is
+       idempotent and costs a bridge call; the check it replaces cost a mislabelled capture. *The
+       frame is still painted from the RETURN and never from the request.*
+       */
+      const achieved = await requestMode("object").catch(() => null);
+      if (achieved && achieved.mode !== "object") showToast(`mode stayed ${achieved.mode}`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not start an object here");
     }
@@ -2411,6 +2582,7 @@ export function CameraScreen({
           <ContextFilmstrip
             model={strip}
             label={zone?.label ?? "zone"}
+            onHold={(capture) => setConfirmDelete(capture)}
             /* Shot this visit → the full reviewer, with its exposure stack and 1:1. Filed earlier →
                the flat viewer, which is all the record can offer. The strip does not need to know
                the difference; the tap resolves it. */

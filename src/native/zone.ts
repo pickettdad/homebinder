@@ -70,6 +70,25 @@ export type ZonePosition =
       reinits?: number;
       /** Seconds since that re-establishment — the other half of *how old is this pose's frame*. */
       sinceInitSec?: number;
+      /**
+       * ⛑ **Which world origin this pose was measured from, and it is not the same question as
+       * `reinits`.**
+       *
+       * ⚑ *Owner, 2026-09-05:* **"floorplan positioning is needed to line up with captures, because
+       * the desk uses both to place object containers in the room."** They do line up — re-entering
+       * positioning after RoomPlan re-establishes *tracking* and keeps the *frame*, so a re-init
+       * costs a second and changes nothing about where the origin is.
+       *
+       * **A reset does change it**, and it fires when a session genuinely dies. *The failure is
+       * silent in the worst possible way:* the poses still look like poses, still in metres, and are
+       * measured from somewhere else entirely.
+       *
+       * So: **equal epochs are comparable; different epochs must not be combined.** The floorplan
+       * and the mesh carry the same field, which is what makes the check possible at the desk rather
+       * than a matter of trust. An honest orphan beats false continuity — the standing rule.
+       */
+      originEpoch?: number;
+
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */
       featurePoints?: number;
@@ -137,16 +156,23 @@ export interface ZonePlan {
 export function zoneGaps(zone: {
   photos: number;
   hasFloorplan: boolean;
-  containers: { frames: { position?: ZonePosition }[] }[];
+  containers: { number: number; frames: { position?: ZonePosition }[] }[];
 }): { complete: boolean; missing: string[] } {
   const missing: string[] = [];
   // Only a zone somebody actually photographed can be missing anything. An untouched zone is not
   // incomplete, it is unstarted, and saying otherwise would fire on every room before it is walked.
   if (zone.photos === 0) return { complete: true, missing };
-  if (!zone.hasFloorplan) missing.push("no floorplan");
-  const unplaceable = zone.containers.filter((c) => !containerAnchorState(c.frames).anchored).length;
-  if (unplaceable > 0) {
-    missing.push(`${unplaceable} object${unplaceable === 1 ? "" : "s"} the desk cannot place`);
+  if (!zone.hasFloorplan) missing.push("no floorplan — scan the room");
+  /* ⛑ **Named, not counted, and the field asked for exactly this.** *"It says 3 objects the desk
+     cannot place, but then doesn't really say what they are or what to do."* ⚑ A number is a
+     verdict; a list is an instruction. **The concierge is standing in the room and can fix an
+     object they can identify** — and cannot fix a count. */
+  const unplaceable = zone.containers.filter((c) => !containerAnchorState(c.frames).anchored);
+  if (unplaceable.length > 0) {
+    const names = unplaceable.map((c) => `#${c.number}`).join(", ");
+    missing.push(
+      `object${unplaceable.length === 1 ? "" : "s"} ${names} — take one more photo of each, standing still`,
+    );
   }
   return { complete: missing.length === 0, missing };
 }

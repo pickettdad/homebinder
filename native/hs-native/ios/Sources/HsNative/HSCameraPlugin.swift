@@ -57,6 +57,8 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "pauseZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "captureStill", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "retryZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "zoneLog", returnType: CAPPluginReturnPromise)
@@ -340,6 +342,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// black screen the field reported. The scan modes get a view fed by the session that actually
     /// owns the camera.
     private var arPreview: UIView?
+    private let previewQueue = DispatchQueue(label: "ca.housesteady.camera.preview", qos: .userInteractive)
+    /// ⛑ One draw at a time; a frame arriving mid-draw is dropped rather than queued. See
+    /// `drawArPreview` — a preview is about *now*, and a backlog only makes the picture later.
+    private var previewBusy = false
     /// Only restored if we were the ones who made it transparent — see `attachArPreview`.
     private var restoreOpaqueForAr = false
 
@@ -359,8 +365,63 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let superview = web.superview else {
                 HSZoneLog.record("arPreviewSkipped", ["why": "web view has no superview"]); return
             }
-            guard self.arPreview == nil else {
-                HSZoneLog.record("arPreviewSkipped", ["why": "one is already attached"]); return
+            /*
+             ⛑ **"A preview object exists" is not "a preview is on screen", and that gap was the
+             black mesh screen** (field 2026-09-05: *"mesh was black screen the whole time"*).
+
+             The old guard returned on existence alone. ⚑ *The log shows why that is not enough:*
+             the preview attached during the floorplan went in at **`index: 1` of 3 subviews**, and by
+             the time mesh opened the screen had re-mounted and the host's hierarchy was **2 subviews
+             deep** — so the view still existed, still had a session behind it, and was **no longer in
+             the stack being drawn.** Every fact the guard checked was true and the screen was black.
+
+             *And the asymmetry is what hid it:* leaving a scan mode detaches and re-attaches, so
+             positioning and RoomPlan always got a fresh view and only mesh — which is entered, not
+             left — inherited the stale one.
+
+             So the check is what actually governs: **is it in the current superview, and is it still
+             below the web view.** If it is, keep it. If it is not, take it down and build it again.
+             */
+            if let existing = self.arPreview {
+                let placed = existing.superview === superview
+                let ordered = placed
+                    && (superview.subviews.firstIndex(of: existing) ?? Int.max)
+                     < (superview.subviews.firstIndex(of: web) ?? -1)
+                if placed && ordered {
+                    /*
+                     ⛑ **Keeping the view must re-assert every condition that makes it VISIBLE, and
+                     placement is only one of them.**
+
+                     ⚑ *Second black mesh screen, 2026-09-05, and my own fix caused it.* The check
+                     asked *is it in the right place* — it was, `arPreviewKept index: 0` — and
+                     returned before the transparency block below, **which is the other precondition
+                     and the one that had changed.** The capture path makes the host opaque again when
+                     it tears its own preview down, so a scan entered afterwards sat correctly placed
+                     behind an opaque page. The comment below has warned about exactly this since
+                     2026-08-21 and the early return skipped it.
+
+                     *The general form, and this is the third time this week:* **a fast path that
+                     re-checks one precondition and inherits the rest is a fast path that is wrong
+                     whenever a different one moved.**
+                     */
+                    if web.isOpaque {
+                        self.restoreOpaqueForAr = true
+                        WebLayer.makeTransparent(web)
+                    }
+                    HSZoneLog.record("arPreviewKept", [
+                        "index": superview.subviews.firstIndex(of: existing) ?? -1,
+                        // ⚑ Logged because it is what governs. The old line recorded what was
+                        // checked, so the black screen and a working one printed the same row.
+                        "webOpaque": web.isOpaque,
+                    ])
+                    return
+                }
+                HSZoneLog.record("arPreviewRehomed", [
+                    "placed": placed, "ordered": ordered,
+                    "was": existing.superview.map { String(describing: type(of: $0)) } ?? "none",
+                ])
+                existing.removeFromSuperview()
+                self.arPreview = nil
             }
             /* ⛑ **Drawn from the frames rather than handed to `ARSCNView`, after two rounds of
                black screens** (field 2026-08-22 and 08-23).
@@ -422,12 +483,30 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
      **a dense enough dusting shows a gap just as well as every point would, and leaves the room
      visible underneath it, which matters because the concierge is also navigating by this.**
      */
-    private func drawArPreview(_ frame: ARFrame) {
+    /**
+     ⛑ **Never on the caller's thread.** `ARSession`'s delegate is the MAIN thread, and this method
+     builds a `CGImage` from a 12 MP-class buffer and rasterises up to 5,500 mesh triangles over it.
+     ⚑ *Doing that on main at 20 Hz is the same defect that froze the app through `analyse` — the
+     delegate cannot fire again while it runs, so the session stops delivering frames and the screen
+     stops updating, which reads as a crash.*
+
+     A frame arriving while one is drawing is **dropped**, not queued: a preview is about *now*, and
+     a backlog only makes the picture later.
+     */
+    private func drawArPreview(_ buffer: CVPixelBuffer, _ anchors: [ARMeshAnchor], _ camera: ARCamera) {
+        guard arPreview != nil, !previewBusy else { return }
+        previewBusy = true
+        previewQueue.async { [weak self] in
+            self?.renderArPreview(buffer, anchors, camera)
+            self?.previewBusy = false
+        }
+    }
+
+    private func renderArPreview(_ buffer: CVPixelBuffer, _ anchors: [ARMeshAnchor], _ camera: ARCamera) {
         guard arPreview != nil else { return }
-        let ci = CIImage(cvPixelBuffer: frame.capturedImage).oriented(.right)
+        let ci = CIImage(cvPixelBuffer: buffer).oriented(.right)
         guard let base = arPreviewContext.createCGImage(ci, from: ci.extent) else { return }
 
-        let anchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
         guard !anchors.isEmpty else {
             DispatchQueue.main.async { [weak self] in self?.arPreview?.layer.contents = base }
             return
@@ -456,10 +535,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
          * Filled rather than stroked because the question is *is this surface captured*, and a
          * translucent film answers it at a glance where an outline asks to be interpreted.
          */
-        let cam = frame.camera.transform.columns.3
+        let cam = camera.transform.columns.3
         let camPos = SIMD3<Float>(cam.x, cam.y, cam.z)
         // World → camera space, so "is this behind me" is one multiply and a sign test.
-        let viewMatrix = simd_inverse(frame.camera.transform)
+        let viewMatrix = simd_inverse(camera.transform)
         let near = anchors.sorted {
             let a = $0.transform.columns.3, b = $1.transform.columns.3
             return simd_distance(camPos, SIMD3<Float>(a.x, a.y, a.z))
@@ -504,7 +583,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                        at the frame edge and keeps every remaining shape honest. */
                     let camSpace = viewMatrix * world
                     guard camSpace.z < -0.05 else { ok = false; break }
-                    let screen = frame.camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
+                    let screen = camera.projectPoint(SIMD3<Float>(world.x, world.y, world.z),
                                                            orientation: .portrait,
                                                            viewportSize: size)
                     guard screen.x.isFinite, screen.y.isFinite,
@@ -643,12 +722,37 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                both hold the rear camera: run them together and ARKit is refused with `sensorFailed`
                while the preview freezes — both seen in the field 2026-08-21. The zone session asks
                for the camera, uses it, and gives it straight back. */
-            made.needCamera = { [weak self] in self?.controller?.yieldCamera() }
-            made.releaseCamera = { [weak self] in self?.controller?.reclaimCamera() }
+            made.needCamera = { [weak self] in
+                self?.controller?.takeCameraForZone()
+            }
+            made.releaseCamera = { [weak self] in self?.controller?.giveCameraBackFromZone() }
+            /* ⚑ ARKit's frames go to the SAME analysis the capture session feeds. See
+               `CameraController.analyse` and `HSZoneSession.onAnalysisFrame`: one pipeline, one set
+               of thresholds, two sources. */
+            made.onAnalysisFrame = { [weak self] buffer in self?.controller?.analyseAsync(buffer) }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
-            made.onPreviewFrame = { [weak self] frame in self?.drawArPreview(frame) }
+            made.onPreviewFrame = { [weak self] buffer, anchors, camera in
+                self?.drawArPreview(buffer, anchors, camera)
+            }
             made.hideArPreview = { [weak self] in self?.detachArPreview() }
+            /*
+             ⛑ **The outgoing zone is CLOSED, not dropped** (audit 2026-09-06, confirmed high).
+
+             This replaced `self.zone` with the new session and let the old one go. ⚑ *`zoneOwnsCamera`
+             is cleared by exactly one thing — the outgoing session's `releaseCamera`, fired from its
+             `closeZone`* — so walking from one room to the next stranded the flag at **true forever.**
+             From then on `reclaimCamera` refuses for a zone that no longer exists, the capture
+             session can never restart, and `start()` takes the deferred branch in every remaining
+             room of the walk.
+
+             *It also leaks the ARKit session:* the old `HSZoneSession` keeps running its
+             configuration and its delegate against a camera the new one is trying to take.
+             */
+            if let outgoing = self.zone {
+                HSZoneLog.record("zoneReplaced", ["for": id])
+                _ = outgoing.closeZone()
+            }
             let out = made.openZone(id) { [weak self] event in
                 self?.notifyListeners("zone", data: self?.js(event) ?? JSObject())
             }
@@ -685,6 +789,30 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         if #available(iOS 17.0, *) { withZone(c) { $0.pause() } } } }
     @objc func resumeZone(_ call: CAPPluginCall) { requireZone(call) { c in
         if #available(iOS 17.0, *) { withZone(c) { $0.resume() } } } }
+    /**
+     ⚑ **A photograph taken through the tracking session**, with the pose of the frame it came from.
+     See `HSZoneSession.captureStill`. Falls back to nothing: a caller that gets `ok: false` should
+     use the ordinary shutter and will get no pose, which is the honest outcome.
+     */
+    /** ⚑ Re-run the session in place. See `HSZoneSession.retry` — never a close-and-reopen, which
+     *  would mint a new origin and silently invalidate every pose already taken in this zone. */
+    @objc func retryZone(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let z = zone else {
+            call.resolve(["ok": false, "why": "no zone open"]); return
+        }
+        call.resolve(js(z.retry()))
+    }
+
+    @objc func captureStill(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let z = zone else {
+            call.resolve(["ok": false, "why": "no zone open"]); return
+        }
+        z.captureStill(text: call.getBool("text") ?? false) { [weak self] out in
+            guard let self else { return }
+            call.resolve(self.js(out))
+        }
+    }
+
     @objc func takePosition(_ call: CAPPluginCall) { requireZone(call) { c in
         if #available(iOS 17.0, *) { withZone(c) { $0.position() } } } }
     @objc func startRoomPlan(_ call: CAPPluginCall) { requireZone(call) { c in
@@ -929,6 +1057,10 @@ final class CameraController: NSObject {
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "ca.housesteady.camera.session")
     private let visionQueue = DispatchQueue(label: "ca.housesteady.camera.vision")
+    /// ⛑ One analysis at a time; a frame arriving while one runs is DROPPED, never queued. See
+    /// `analyseAsync` — a backlog of stale frames would fire the shutter for a plate the concierge
+    /// has already walked away from.
+    fileprivate var analysisBusy = false
     /// Deskew, JPEG writes and the accurate OCR pass. Off main because a 12 MP read is most of a
     /// second, and off `visionQueue` because that one is feeding the live loop.
     private let processingQueue = DispatchQueue(label: "ca.housesteady.camera.processing")
@@ -1230,6 +1362,61 @@ final class CameraController: NSObject {
             }
             self.sessionQueue.async {
                 do {
+                    /*
+                     ⛑ **The ownership hole, and it was the only path without a guard.**
+
+                     `reclaimCamera` refuses while a zone holds the lens. **This does not go through
+                     `reclaimCamera`** — opening the capture screen calls `start()`, which configured
+                     and started the capture session unconditionally. With a zone open that is ARKit
+                     being shoved off the sensor, and the field log shows it four times in ninety
+                     seconds: `cameraToZone` → `presetReasserted` → **`sessionFailed: Required sensor
+                     failed`** → a forced re-init with a **new world origin**. ⚑ *That is the
+                     "positioning stopped — tap to restart it" the concierge kept meeting, and six
+                     re-inits is six origins, which is the drift problem coming back in by a side
+                     door.*
+
+                     ⚑ **Checked here, inside the queue block, not at the call site** — this hop is
+                     asynchronous, so a check made before it says what was true then, not what is
+                     true when the camera is actually touched.
+
+                     While the zone owns the lens there is nothing to start: **ARKit is the camera**,
+                     its preview is already on screen, and stills go through `captureStill`. Attaching
+                     the capture session's own preview layer over it would show exactly the black
+                     rectangle the field reported, because that layer has no running session behind it.
+                     */
+                    if self.zoneOwnsCamera {
+                        HSZoneLog.record("startDeferredToZone", ["mode": mode.rawValue])
+                        DispatchQueue.main.async {
+                            /*
+                             ⛑ **Deferring the SESSION is not deferring the transparency, and this
+                             branch owed one** (audit 2026-09-06 — a regression I introduced with the
+                             ownership guard).
+
+                             `stop()` unconditionally restores the host web view to **opaque white**
+                             on the way out. Transparency is re-asserted in exactly one place on the
+                             capture path — `attachPreview` — and this early return sits above it. So
+                             leaving a zone's viewfinder and coming back left the page opaque over an
+                             ARKit preview that was still attached and still being fed frames: **a
+                             blank white viewfinder with the app's own chrome drawn on top**, and a
+                             zone log that reads perfectly healthy.
+
+                             ⚑ *Same shape as the `arPreviewKept` bug two days ago:* a fast path that
+                             skips the work it did not think it owed. The rule is that **anything
+                             which returns instead of attaching still owes what attaching asserts.**
+                             */
+                            if webView.isOpaque {
+                                // Bookkept exactly as `attachPreview` does, so `stop()` still
+                                // restores it — a transparency nobody records is one nobody undoes.
+                                self.restoreOpaque = webView.isOpaque
+                                self.hostWebView = webView
+                                WebLayer.makeTransparent(webView)
+                                HSZoneLog.record("deferredMadeTransparent")
+                            }
+                            self.startStatusSampling()
+                            completion(.success(self.capabilities(unmetAtStart: [])))
+                        }
+                        return
+                    }
                     try self.configureSession()
                     self.session.startRunning()
                     DispatchQueue.main.async {
@@ -1326,6 +1513,22 @@ final class CameraController: NSObject {
      so coming back is `startRunning()` rather than a rebuild — which is why the handover is
      milliseconds and not the nine seconds that would come from tearing the input down.
      */
+    /// ⚑ The zone takes the lens and keeps it. See `zoneOwnsCamera`.
+    func takeCameraForZone() {
+        zoneOwnsCamera = true
+        // ⚑ Logged, because "did the new ownership code run at all" was a question two smoke tests
+        // could not answer — the absence of `reclaimRefused` was ambiguous between *never called*
+        // and *never reached*.
+        HSZoneLog.record("cameraToZone", ["owns": true])
+        yieldCamera()
+    }
+
+    /// The two moments a person actually asked for the lens back: pausing, and closing the zone.
+    func giveCameraBackFromZone() {
+        zoneOwnsCamera = false
+        reclaimCamera()
+    }
+
     func yieldCamera() {
         /* ⛑ **Synchronous, and asynchronous was the intermittent "Required sensor failed"**
            (field 2026-08-23).
@@ -1341,7 +1544,24 @@ final class CameraController: NSObject {
         HSZoneLog.record("cameraYielded", ["running": session.isRunning])
     }
 
+    /**
+     ⚑ **Refused while a zone holds the lens.**
+
+     The zone session now runs for the life of a room rather than for the instant a pose is taken,
+     so *"give the camera back"* stopped being a safe request. ⛑ Smoke test 2026-09-05: five
+     `Required sensor failed` in nine minutes, a nine-second preset restore, a black screen — **and
+     zero photographs through the tracking session** — because something reclaimed the lens, ARKit
+     failed, the failure handler released the lens again, and round it went.
+
+     *Ownership is a fact about the zone, not a race between two callers.*
+     */
+    private(set) var zoneOwnsCamera = false
+
     func reclaimCamera() {
+        guard !zoneOwnsCamera else {
+            HSZoneLog.record("reclaimRefused", ["reason": "zone owns the camera"])
+            return
+        }
         /* ⛑ **Synchronous, for the same reason `yieldCamera` is — and leaving this one async is why
            switching to Text froze the viewfinder** (field 2026-08-23).
 
@@ -1873,7 +2093,15 @@ final class CameraController: NSObject {
         var payload: [String: Any] = [
             "mode": mode.rawValue,
             "unmet": unmet,
-            "sessionRunning": sessionRunning,
+            /* ⛑ **The camera can be running without OUR session running, and the field read the
+               difference as a fault.** Inside a zone ARKit holds the lens for the life of the room,
+               so `session.isRunning` is false while the camera is very much on — and a viewfinder
+               that says *stopped* over a live preview is a lie told confidently.
+
+               ⚑ *The question this field answers is "is the camera live", not "is my object
+               running."* Ownership is the other half of the answer and it ships beside it. */
+            "sessionRunning": sessionRunning || zoneOwnsCamera,
+            "cameraHeldByZone": zoneOwnsCamera,
             "torchOn": torchOn,
             "torchOverridden": torchOverride != nil,
             "lightScore": lightScore(),
@@ -1907,9 +2135,17 @@ final class CameraController: NSObject {
             // The glass in use, what this mode defaults to, and whether the concierge may change
             // it. All three, because "wide is off" and "wide is not allowed here" are different
             // sentences and a single boolean would say neither.
-            "lens": lens.rawValue,
-            "lensLocked": goal.lensLocked,
-            "lensAvailable": AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,
+            /* ⛑ **Inside a zone the lens cannot change, and saying otherwise is how a photograph
+               came back "wide" after a room shot.** World tracking is offered only the wide-angle
+               device on this iPad — thirteen formats, zero ultra-wide (`HSLensProbe`, 2026-08-24) —
+               so while the zone holds the camera there is exactly one piece of glass and no choice
+               to report. **A control offering a lens the photograph cannot have is worse than no
+               control.** */
+            "lensLocked": zoneOwnsCamera || goal.lensLocked,
+            "lens": zoneOwnsCamera ? CameraLens.normal.rawValue : lens.rawValue,
+            "lensAvailable": zoneOwnsCamera
+                ? false
+                : AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,
             // ⚑ Whether the per-frame instruments are being measured at all. During a traverse the
             // frame callback belongs to the accumulator, so motion is not sampled — and a stale
             // number sitting there unlabelled is what the 2026-08-16 panels showed.
@@ -2333,7 +2569,10 @@ final class CameraController: NSObject {
      decidable from two JPEGs, so the number is now in the capture payload and the next run
      answers it by showing rather than by argument. Absent tag means 1 by specification.
      */
-    private static func exifOrientation(of jpeg: Data) -> Int {
+    /* ⛑  so the zone session can stamp the SAME orientation on a still it took itself.
+       Two implementations of "which way up is this JPEG" is how a frame ends up sideways in one
+       path and upright in the other, with nothing saying which is right. */
+    static func exifOrientation(of jpeg: Data) -> Int {
         guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let value = properties[kCGImagePropertyOrientation] as? Int
@@ -4153,6 +4392,51 @@ final class CameraController: NSObject {
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        analyse(pixelBuffer)
+    }
+
+    /**
+     ⚑ **One analysis pipeline, two possible sources of frames.**
+
+     This used to live inside `captureOutput` and be reachable only from the `AVCaptureSession`.
+     ⛑ **The moment ARKit began holding the camera for the life of a zone, that made live text
+     recognition dead inside every room** — the nameplate mode's auto-capture had nothing to read,
+     and the field found it the same evening.
+
+     *The fix is a second caller, not a second implementation.* `HSZoneSession` feeds ARKit's own
+     `capturedImage` here at the same cadence, so the motion window, the stillness threshold, the
+     character floor, the marginal-read verdict and the emitted payload are **one set of numbers**
+     rather than two that drift. **Two implementations of "is this plate readable" is exactly the
+     defect this file has paid for twice.**
+     */
+    /**
+     ⛑ **OFF the caller's thread, and getting that wrong froze the app on its first frame.**
+
+     `analyse` runs `VNImageRequestHandler.perform` **synchronously**. Under the capture session that
+     was fine: the sample-buffer delegate already runs on a background queue. ⚑ **`ARSession`'s
+     delegate runs on the MAIN thread** — so feeding ARKit's frames straight in put a full Vision
+     text recognition on the main thread at frame rate, and the first one blocked it hard enough
+     that `didUpdate` could never fire again. *Field 2026-09-05: frozen after one capture, and the
+     zone log simply stops mid-sentence at the first position.*
+
+     **A frame is dropped rather than queued when one is already in flight.** *A backlog of stale
+     frames is worse than a gap:* the motion window and the stability trigger are about **now**, and
+     analysing a frame from four seconds ago would fire the shutter for a plate the concierge has
+     already walked away from.
+
+     `busy` is written from two queues and deliberately not locked — the worst case is one extra or
+     one missed frame at 5 Hz, and a lock on the main thread to protect a boolean is the disease.
+     */
+    func analyseAsync(_ pixelBuffer: CVPixelBuffer) {
+        guard !analysisBusy else { return }
+        analysisBusy = true
+        visionQueue.async { [weak self] in
+            self?.analyse(pixelBuffer)
+            self?.analysisBusy = false
+        }
+    }
+
+    func analyse(_ pixelBuffer: CVPixelBuffer) {
         frameCounter += 1
 
         /*

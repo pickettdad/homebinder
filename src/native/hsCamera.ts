@@ -171,6 +171,9 @@ export interface ModeStatusEvent {
   lensLocked: boolean;
   /** Whether this iPad has an ultra-wide at all. */
   lensAvailable: boolean;
+  /** ⚑ ARKit holds the lens for the life of the zone. `sessionRunning` is true and the capture
+   *  session's own is not — see the native comment: the question is *is the camera live*. */
+  cameraHeldByZone?: boolean;
   /** ⚑ Whether `motion` is being sampled at all. False during a traverse, where the frame callback
    *  belongs to the accumulator — and a stale number sitting there unlabelled is exactly what the
    *  2026-08-16 panels showed for nineteen minutes. */
@@ -562,6 +565,17 @@ export interface TraverseProgressEvent {
   discarded?: number;
 }
 
+/** What `captureStill` returns. `ok: false` carries `why` and nothing else. */
+export interface ZoneStillResult {
+  ok: boolean;
+  why?: string;
+  recoverable?: boolean;
+  latencyMs?: number;
+  frames?: CaptureFrame[];
+  position?: ZonePosition;
+  mode?: string;
+}
+
 export interface CaptureResult {
   frames: CaptureFrame[];
   mode: CameraMode;
@@ -640,6 +654,8 @@ interface NativeCamera {
     torchOverride?: boolean;
   }): Promise<void>;
   capture(options?: { wideSibling?: boolean }): Promise<CaptureResult>;
+  captureStill(options: { text: boolean }): Promise<ZoneStillResult>;
+  retryZone(): Promise<{ ok: boolean; mode?: string; unmet?: string[]; why?: string }>;
   startTraverse(options: { continuesFrom?: string }): Promise<TraverseStarted>;
   stopTraverse(): Promise<TraverseResult>;
   /** The device bench — see `src/dev/deviceBench.ts`. Dev-bench only; it takes the camera to
@@ -813,6 +829,34 @@ export function projectionFor(capture: { frames: { lens?: CameraLens }[]; at: st
  */
 export const captureFrames = (options?: { wideSibling?: boolean }) =>
   requireCamera().capture(options);
+
+/**
+ * ⚑ **A photograph taken THROUGH the tracking session, carrying the pose of its own frame.**
+ *
+ * The ordinary shutter is an AVFoundation capture, and ARKit cannot hold the lens at the same time —
+ * so every in-zone photograph used to cost a handover: **6.3 s, of which 4.9 s was ARKit
+ * re-establishing tracking**, producing a pose that was dead-reckoned because the session was never
+ * awake long enough to build a map.
+ *
+ * This one is delivered out-of-band by ARKit while tracking continues. Measured on device:
+ * **p50 78 ms, p95 278 ms, 4032×3024**, and on the hardest plate in the house it read a serial the
+ * AVFoundation path dropped the first character of, three times out of three.
+ *
+ * ⛑ **`ok: false` is a real answer, not an error.** Tracking limited, no frame yet, a capture
+ * already in flight — the caller falls back to the ordinary shutter and gets a photograph with no
+ * pose, *which is the honest outcome rather than a fabricated one.*
+ */
+export const captureStill = (options: { text: boolean }) => requireCamera().captureStill(options);
+
+/**
+ * ⚑ **Re-run the zone session in place, keeping its origin.**
+ *
+ * ⛑ The retry used to be a close-and-reopen. **That mints a new world origin, so every pose already
+ * taken in the room is silently re-based against a different one** — the record keeps them, they
+ * look fine, and they are measured from somewhere else. *A recovery that corrupts what it recovers
+ * is worse than the failure.*
+ */
+export const retryZoneSession = () => requireCamera().retryZone();
 
 /**
  * Ask for a mode; get back the mode ACHIEVED and what could not be reached.

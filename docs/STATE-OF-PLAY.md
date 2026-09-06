@@ -58,6 +58,38 @@ walk settles it.*
 **Still wrong after this walk:** the room shot produced **no wide sibling at all** (lens histogram
 across 82 media: `{normal: 76, absent: 6}`) — a workflow is designing the handover.
 
+## ⚑ The room shot's wide frame — it existed, and it cost the position every time
+
+**Owner, 2026-09-06: *"we did have room shot that took the wide angle and then the normal after. From
+what I saw it worked and then it was gone."* He is right, and the earlier export proves it** — 5
+`wide` frames, room shots filed as pairs at one timestamp: `primary lens=wide` + `insurance
+lens=normal`.
+
+⛑ **And every one of them carries this:**
+
+```
+primary   lens=wide    positioned=false   why="Required sensor failed."
+insurance lens=normal  position=null
+```
+
+⚑ **`Required sensor failed` is ARKit being refused the camera.** The lens swap knocked world tracking
+off the sensor on every room shot — so the pair arrived with **no position at all**, on either frame.
+*The picture worked and the thing the desk places with was destroyed to get it.*
+
+**So the continuous-session rebuild did not break the room shot. It removed the thing that was
+breaking tracking, and the wide frame went with it.** ⛑ *"It never worked" was wrong; so is "it
+worked". It produced two photographs and no pose.*
+
+**What the owner is asking for — wide for the visual placement, normal immediately after carrying the
+position and the raycast — has never existed in any build.** It is buildable, and the traverse is the
+proof: a deliberate yield and a deliberate reclaim, `kept 22 / 24 / 21` frames with none discarded and
+`originEpoch` unchanged. **The old room shot's swap was not deliberate — it collided.**
+
+⚠️ **Open before any of it is built:** `minAvailableVideoZoomFactor` and `constituentDevices` on the
+ARKit-configured device **have never been read**. The device *type* was measured twice; the zoom floor
+never once. *If a virtual dual-wide reports a sub-1.0 floor, the viewfinder and the capture both widen
+with no handover, no second session and no pre-build* — and the whole problem disappears.
+
 ## ⛑ Operational rules the walk established
 
 - **Press Floorplan once you are standing in the room.** Creating a zone starts nothing — the ARKit

@@ -38,6 +38,36 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
     private var done: (([String: Any]) -> Void)?
     private var out: [String: Any] = [:]
 
+    /**
+     ⛑ **Sampled across a walk, not at an instant — the first run's whole failure in one word.**
+
+     ⚑ *It read `rawFeaturePoints` once before and once after and got 9 → 2, from a stationary iPad
+     on a desk.* Against Gate 1's median of **229** that is not a measurement of anything. **Feature
+     count swings wildly with where the camera happens to point**, so a single pair compares two
+     accidents. The median over a walk compares two conditions.
+     */
+    private func sample(_ seconds: Double, every step: Double = 0.25,
+                        _ done: @escaping ([Int], [String]) -> Void) {
+        var points: [Int] = []
+        var states: [String] = []
+        var left = Int(seconds / step)
+        func tick() {
+            let f = session.currentFrame
+            points.append(f?.rawFeaturePoints?.points.count ?? -1)
+            states.append(HSArProbe.describe(f?.camera.trackingState ?? .notAvailable))
+            left -= 1
+            if left <= 0 { done(points, states) }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + step) { tick() } }
+        }
+        tick()
+    }
+
+    /// ⚑ The median, not the mean: one frame pointed at a blank wall should not move the answer.
+    private func median(_ xs: [Int]) -> Int {
+        let v = xs.filter { $0 >= 0 }.sorted()
+        return v.isEmpty ? -1 : v[v.count / 2]
+    }
+
     func run(_ completion: @escaping ([String: Any]) -> Void) {
         done = completion
         HSZoneLog.record("exposureLockProbe", ["stage": "start"])
@@ -79,9 +109,6 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
              sleeping build. Sampled before and after, so the comparison is against this room rather
              than against a remembered number.
              */
-            self.out["before.featurePoints"] = self.session.currentFrame?.rawFeaturePoints?.points.count ?? -1
-            self.out["before.tracking"] = HSArProbe.describe(self.session.currentFrame?.camera.trackingState ?? .notAvailable)
-
             // What the device SAYS it supports while ARKit holds it. Support is not permission, so
             // both are recorded and the attempt below is what settles it.
             self.out["supports.customExposure"] = d.isExposureModeSupported(.custom)
@@ -101,6 +128,14 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
                asks for something easier answers an easier question. */
             let wantISO = min(max(400, d.activeFormat.minISO), d.activeFormat.maxISO)
             let wantDur = CMTime(value: 1, timescale: 60)
+            // ⚑ Eight seconds of walking on AUTO first, so the comparison is against this room under
+            // the same motion rather than against a remembered number from another one.
+            HSZoneLog.record("exposureLockProbe", ["stage": "sampling auto — keep walking"])
+            self.sample(8) { autoPts, autoStates in
+            self.out["auto.featurePoints"] = autoPts
+            self.out["auto.medianFeatures"] = self.median(autoPts)
+            self.out["auto.tracking"] = Array(Set(autoStates)).sorted()
+            self.out["auto.iso"] = Double(d.iso)
             do {
                 try d.lockForConfiguration()
                 if d.isExposureModeSupported(.custom) {
@@ -118,7 +153,13 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
             /* ⛑ **Read back after a settle, never immediately.** `setExposureModeCustom` is
                asynchronous, and a value read on the next line is the value we asked for rather than
                the one the device reached — which is the mistake this repo names most often. */
+            // Settle, then eight more seconds of walking under the lock.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                HSZoneLog.record("exposureLockProbe", ["stage": "sampling locked — keep walking"])
+                self.sample(8) { lockPts, lockStates in
+                self.out["locked.featurePoints"] = lockPts
+                self.out["locked.medianFeatures"] = self.median(lockPts)
+                self.out["locked.tracking"] = Array(Set(lockStates)).sorted()
                 let reachedISO = Double(d.iso)
                 let reachedDur = CMTimeGetSeconds(d.exposureDuration)
                 self.out["after.exposureMode"] = "\(d.exposureMode.rawValue)"
@@ -131,12 +172,10 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
 
                 /* ⚑ Read after the same settle the exposure gets, so tracking has had the locked
                    stream for as long as the numbers above describe. */
-                let after = self.session.currentFrame?.rawFeaturePoints?.points.count ?? -1
-                self.out["after.featurePoints"] = after
-                self.out["after.tracking"] = HSArProbe.describe(self.session.currentFrame?.camera.trackingState ?? .notAvailable)
-                let before = self.out["before.featurePoints"] as? Int ?? -1
-                if before > 0 && after >= 0 {
-                    self.out["featurePointsRatio"] = Double(after) / Double(before)
+                let autoMed = self.out["auto.medianFeatures"] as? Int ?? -1
+                let lockMed = self.out["locked.medianFeatures"] as? Int ?? -1
+                if autoMed > 0 && lockMed >= 0 {
+                    self.out["featurePointsRatio"] = Double(lockMed) / Double(autoMed)
                 }
                 let isoHeld = abs(reachedISO - Double(wantISO)) / Double(wantISO) < 0.15
                 let durHeld = abs(reachedDur - CMTimeGetSeconds(wantDur)) / CMTimeGetSeconds(wantDur) < 0.25
@@ -146,9 +185,9 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
                 /* ⛑ **Two questions, two answers, and the verdict says both.** A lock that takes
                    while halving the feature count has not answered yes — it has answered "yes, and
                    here is what it costs", which is a different sentence and the one that decides. */
-                let tracked = self.out["after.tracking"] as? String ?? "?"
+                let tracked = (self.out["locked.tracking"] as? [String])?.joined(separator: "/") ?? "?"
                 let ratio = self.out["featurePointsRatio"] as? Double
-                let costNote = ratio.map { String(format: " · features ×%.2f (%d → %d), tracking %@", $0, before, after, tracked) } ?? " · features unmeasured"
+                let costNote = ratio.map { String(format: " · median features ×%.2f (%d → %d over 8 s walking each), tracking %@", $0, autoMed, lockMed, tracked) } ?? " · features unmeasured"
                 self.out["VERDICT"] = modeHeld && isoHeld && durHeld
                     ? "YES — ARKit permits the exposure lock" + costNote
                     : "NO — ARKit overrode the lock (mode \(d.exposureMode.rawValue), iso \(Int(reachedISO)) vs \(Int(wantISO)), \(String(format: "%.4f", reachedDur))s vs \(String(format: "%.4f", CMTimeGetSeconds(wantDur)))s)"
@@ -162,8 +201,10 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
                     d.unlockForConfiguration()
                 }
                 self.finish()
-            }
-        }
+                }   // sample(8) locked
+                }   // asyncAfter settle
+            }       // sample(8) auto
+        }           // asyncAfter session warm-up
     }
 
     private func finish() {

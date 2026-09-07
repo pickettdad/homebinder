@@ -1,4 +1,4 @@
-# Can the traverse keep its exposure lock under ARKit? **Yes — and the cost is unmeasured.**
+# Can the traverse keep its exposure lock under ARKit? **Yes, and it costs tracking nothing.**
 
 **Measured on device, iPad Pro 11-inch (3rd gen), 2026-09-06, tethered.** `--hs-exposure-lock`,
 `HSExposureLock.swift`. Raw: `Documents/hs-exposure-lock.json`.
@@ -23,7 +23,37 @@ Asked for the traverse's own values — **1/60 s at ISO 400**, inside the metere
 ⛑ **And the change is real rather than coincidental: ISO moved from 1472 on auto to 400 on the
 lock.** *The device was metering a dim room at 1472 and did what it was told.*
 
-## ⚠️ But the first cut of this probe measured the easy half
+## ⚑ ANSWERED, walking, 2026-09-07 — **the lock does not starve tracking**
+
+**Two eight-second windows of the same walk through the same furnished basement, the second under the
+traverse's own lock (1/60 s, ISO 400). `rawFeaturePoints` sampled every 250 ms; median compared,
+because one frame pointed at a blank wall must not move the answer.**
+
+| | auto | **locked** |
+|---|---|---|
+| median features | 361 | **420** |
+| tracking | `normal` throughout | ✅ **`normal` throughout** |
+| ISO | 346 | 400 |
+
+```
+auto:   137, 80, 69, 49, 42, 77, 138, 199, 222, … 453, 460, 454, 465, 453
+locked: 381, 392, 390, 409, 420, 432, … 464, 467, 421, … 305, 302, 309, 311, 261, 229, 196
+```
+
+⛑ **The ratio says ×1.16 and I am not claiming the lock helped.** The auto window caught **ARKit's
+start-up ramp** — it climbs from 42 to 465 across those eight seconds, so the median it produces is
+below its own steady state. *A number that flatters the conclusion is the one to distrust hardest.*
+
+⚑ **What decides it is the band, not the ratio: locked features sit at roughly 400–465, which is
+auto's steady state, and tracking held `normal` in both windows.** The traverse's exposure lock and
+ARKit's world tracking are **not in tension.** The posed traverse is clear to build.
+
+⚠️ **One honest wobble, named rather than smoothed:** the locked series drifts 464 → 196 over its last
+four seconds. Most likely where the camera was pointing or a change of pace at the end of a walk;
+**it is not evidence of the lock degrading, and it is not evidence against it either.** Worth watching
+in the first real posed traverse.
+
+## ⚠️ Why the first cut of this probe proved nothing
 
 **An adversarial audit named the omission and it is the load-bearing one.** The probe proved the lock
 *takes* and never asked **what it costs ARKit's tracking** — and ARKit extracts its features from the

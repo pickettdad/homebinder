@@ -708,8 +708,41 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         guard mode != nil else { return ["paused": false, "why": "no zone open"] }
         // Save before going quiet: this is the natural moment, and a crash while paused should cost
         // nothing at all.
-        saveWorldMap()
+        /*
+         ⛑ **Timed and LEFT IN PLACE — the step-out's nine seconds is measured across a window that
+         contains all of this and logged none of it.**
+
+         `roomShotStepOut → cameraReclaimed` spans a world-map save, an `ARSession.pause()`, a preview
+         teardown and the whole of `reclaimCamera`. With one row at each end **every one of them is a
+         suspect**, and the field's 9.00 s could belong to any.
+
+         ⚑ *`saveWorldMap` is the only thing in that window whose behaviour depends on elapsed time.*
+         It is gated at one save per 120 s, and in `.positioning` the per-frame saver never fires — so
+         a step-out at t=16 extracts a map and a step-out at t=54 is refused, **which is exactly the
+         first-slow / second-fast shape the field reported.** `getCurrentWorldMap` returns as soon as
+         it is enqueued, but the `session.pause()` on the next line — and therefore ARKit's release of
+         the camera — may queue behind the extraction. That is a mechanism, not a measurement, which is
+         the whole reason for these two clocks.
+
+         ⛑ **Measured, not removed.** The map is the zone's insurance against losing its coordinate
+         space to a crash. It has no reader today — `worldMapPath` and `zoneMapSaved` appear nowhere in
+         `src/` or `tests/` — but *insurance nobody has cashed is not insurance nobody needs*, and
+         **deleting a save to test a hypothesis spends the world to buy a number.** `mapRequested` plus
+         `arPauseMs` settles it on this device in one walk, and *then* the save can move to a moment
+         nobody is waiting on.
+        */
+        let mapFrom = CACurrentMediaTime()
+        // ⚑ The RETURN, not the call: the 120-second gate is the variable, and a row that only said
+        // "called" would read identically on the slow step-out and the fast one.
+        let mapRequested = saveWorldMap()
+        let mapMs = (CACurrentMediaTime() - mapFrom) * 1000
+        let arFrom = CACurrentMediaTime()
         session.pause()
+        HSZoneLog.record("zonePaused", [
+            "mapRequested": mapRequested,
+            "mapMs": mapMs,
+            "arPauseMs": (CACurrentMediaTime() - arFrom) * 1000,
+        ])
         paused = true
         armed = false
         /*

@@ -2147,6 +2147,29 @@ export function CameraScreen({
          requested is the failure this file is written against, and it is how twenty plates get shot
          in the wrong mode.*
         */
+        /*
+         ⛑ **Said before the call, because the app is not *seeming* frozen during it — it IS.**
+
+         ⚑ *Owner, 2026-09-06: "first click on roomshot took about 9 seconds again … I thought the app
+         had frozen."* He was right, and that is a stronger statement than impatience.
+         `roomShotStepOut` runs its whole body on the native **main thread**, and `reclaimCamera`'s
+         `sessionQueue.sync` blocks it for the length of the camera handover — **deliberately**,
+         because the asynchronous version left the viewfinder dead for good (2026-08-23). Nine seconds
+         of a blocked main thread is a screen that cannot repaint and touches that do nothing, so **no
+         spinner can animate through it and none is offered here.**
+
+         What can be done is tell the concierge what the wait is for, one frame before the thread goes.
+         ⚑ **The yield is load-bearing, not decoration:** without it this note is queued behind the very
+         block it announces and paints *after* the wait it was written for — a message that arrives
+         when it is no longer true. Same shape as `setZoneNote("filing the floorplan…")` above: an
+         announced wait is a working app, an unannounced one is a broken one, and from the outside the
+         concierge cannot tell them apart.
+
+         ⚠️ This does not make the wait shorter and must never be mistaken for having done so. The nine
+         seconds is being attributed by `cameraReclaimed`'s new `ms` / `startRunningMs` / `nth`.
+        */
+        setZoneNote("taking the lens back for the wide frame…");
+        await new Promise((resolve) => setTimeout(resolve, 0));
         const out = await roomShotStepOut().catch(() => ({ ok: false, wide: false, why: "step-out failed" }));
         if (!out.ok || !out.wide) {
           setZoneNote(`could not reach the wide lens${out.why ? ` — ${out.why}` : ""}`);

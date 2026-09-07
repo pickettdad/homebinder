@@ -1730,7 +1730,29 @@ final class CameraController: NSObject {
                         return
                     }
                     try self.configureSession()
+                    /*
+                     ⛑ **Timed, because this is the CONTROL for the room shot's nine seconds and the
+                     repo has never held it.**
+
+                     This is the process's first acquisition of the rear camera and it happens with
+                     **no ARKit client in existence** — `HSZoneSession` is not constructed until
+                     `openZone`. ⚑ If it returns in milliseconds, the nine seconds belongs specifically
+                     to taking the lens back *from ARKit*: the expensive thing is a **handover**, not a
+                     start, and no amount of warming AVFoundation at launch can buy it back. If it
+                     returns at nine seconds, the cost is this app's first camera acquisition full stop
+                     and a launch-time warm-up pays it outright. **Two different plans, and this row
+                     picks one.**
+
+                     *Nobody has reported a nine-second wait opening the capture screen* — which is an
+                     absence of complaint, not a measurement, and this repo has already paid for
+                     treating one as the other.
+                    */
+                    let coldStart = CACurrentMediaTime()
                     self.session.startRunning()
+                    HSZoneLog.record("captureSessionStarted", [
+                        "ms": (CACurrentMediaTime() - coldStart) * 1000,
+                        "preset": self.session.sessionPreset.rawValue,
+                    ])
                     DispatchQueue.main.async {
                         self.attachPreview(behind: webView)
                         let achieved = self.apply(mode: mode)
@@ -1867,10 +1889,18 @@ final class CameraController: NSObject {
            that was still held and was refused. ⚑ **A handover that does not wait is not a handover**
            — and it failed intermittently, which is the worst kind, because whether it worked
            depended on how busy the session queue happened to be. */
+        let yieldBegan = CACurrentMediaTime()
         sessionQueue.sync {
             if session.isRunning { session.stopRunning() }
         }
-        HSZoneLog.record("cameraYielded", ["running": session.isRunning])
+        /* ⚑ The other end of the same arbitration, and it has been just as blind. A nine-second
+           `stopRunning` at zone open would be invisible in exactly the way the nine-second
+           `startRunning` was — *a handover has two ends* is this file's oldest lesson, and it applies
+           to the instrument as much as to the operation it measures. */
+        HSZoneLog.record("cameraYielded", [
+            "running": session.isRunning,
+            "ms": (CACurrentMediaTime() - yieldBegan) * 1000,
+        ])
     }
 
     /**
@@ -1885,6 +1915,26 @@ final class CameraController: NSObject {
      *Ownership is a fact about the zone, not a race between two callers.*
      */
     private(set) var zoneOwnsCamera = false
+
+    /**
+     ⚑ **Which handover this is, since launch — because the nine seconds is an ORDINAL and no row
+     could say so.**
+
+     *Field 2026-09-06, two room-shot step-outs in one launch, one zone, one code path:*
+     `roomShotStepOut 16.16 → cameraReclaimed 25.16` = **9.00 s**, then `54.02 → 54.47` = **0.45 s**.
+     ⛑ Three explanations fit that pair and they have three different fixes — *paid once per launch*,
+     *paid once per capture-session lifetime*, and *gated on `saveWorldMap`'s 120-second floor* — and
+     **`cameraReclaimed` carried no ordinal and no duration, so it could not tell them apart.** That is
+     how two days went to the preset restore, which was real and was not this.
+
+     ⚠️ *And "once per launch" is already contradicted:* the synchronous preset restore measured
+     **9.3 s on all three handovers in one run** (2026-08-30, quoted below). So something gates it;
+     this counter plus a third room shot taken more than two minutes after the first is what names the
+     gate, and neither is available from a two-sample log.
+
+     `sessionQueue`-only, like everything else this controller keeps there.
+     */
+    private var reclaimCount = 0
 
     func reclaimCamera() {
         guard !zoneOwnsCamera else {
@@ -1902,6 +1952,21 @@ final class CameraController: NSObject {
 
            ⚑ **I made the outbound handover synchronous a day ago and left its twin behind.** A
            handover has two ends and only one of them was waiting. */
+        /*
+         ⛑ **Two clocks, because "9.00 s between two log lines" cannot say WHICH nine seconds.**
+
+         `sessionQueue` is serial, so this `sync` is two costs wearing one number: *waiting out
+         whatever is already on the queue*, and *the acquisition itself*. ⚑ They have opposite fixes —
+         a queue wait is ours to remove, an arbitration wait is not — and every attribution this file
+         has made so far was made without separating them.
+
+         Same reason `presetRestored` was made to carry its own number. **That number is what ended the
+         last round of guessing, and it ended it by disagreeing with the guess.**
+        */
+        let reclaimBegan = CACurrentMediaTime()
+        var startRunningMs = 0.0
+        var wasRunning = true
+        var nth = 0
         sessionQueue.sync {
             /*
              ⛑ **ARKit hands the lens back on ITS format, and that is the whole regression.**
@@ -1925,9 +1990,48 @@ final class CameraController: NSObject {
              here, on the way back in, inside a configuration block — and **read back afterwards**,
              because the thing consulted must be the thing that governs.
             */
+            wasRunning = session.isRunning
+            let acquireFrom = CACurrentMediaTime()
             if !session.isRunning { session.startRunning() }
+            startRunningMs = (CACurrentMediaTime() - acquireFrom) * 1000
+            reclaimCount += 1
+            nth = reclaimCount
         }
-        HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
+        /*
+         ⚑ **The number, on every reclaim — because this cost has now been MOVED three times and has
+         never once gone down.**
+
+         Four measurements, four *different* AVFoundation calls, one state (*ARKit has configured the
+         shared device and just let go*): the synchronous preset write at **9.3 s** (2026-08-30, three
+         handovers in one run); `AVCaptureDeviceInput(device:)` at **9,006 / 9,008 ms** (`HSArProbe`,
+         `docs/ZONE-SESSION-MEASURED-2026-08-19.md` §2); the async preset write at **9,004.5 ms**
+         (field 2026-09-06); and now `startRunning()` at **9.00 s** (field, same day). ⛑ *Three of those
+         land within 6 ms of each other, on three unrelated operations, in two different processes.*
+         **Work varies; a deadline does not** — this reads as one fixed wait, inherited by whichever
+         call is first to force the back camera off ARKit's `activeFormat`. Pre-building the input
+         handed it to the preset write; yielding the preset write handed it here. *Neither removed it.*
+
+         ⚑ **The prediction that makes this row worth its line:** a fix aimed at `startRunning` will
+         relocate the wait into `swapLens`'s `commitConfiguration`, which falls **outside** the
+         `roomShotStepOut → cameraReclaimed` window the field reads, and will look exactly like
+         success. `lensSwap` now carries `ms` for precisely that reason. *A duration is the only
+         instrument that can tell a fix from a relocation.*
+
+         Computed always and printed always: it is a duration, never a verdict, so runs under different
+         conditions stay comparable.
+        */
+        HSZoneLog.record("cameraReclaimed", [
+            "running": session.isRunning,
+            // The span the concierge actually feels: queue wait plus acquisition, one number.
+            "ms": (CACurrentMediaTime() - reclaimBegan) * 1000,
+            // ⚑ And the one call inside it. If `ms` is nine seconds and this is milliseconds, the cost
+            // is queue wait and every comment in this method is looking at the wrong call.
+            "startRunningMs": startRunningMs,
+            // ⛑ True when there was nothing to start. A fast row then means *no work* rather than
+            // *fast work* — two different findings wearing one number.
+            "wasRunning": wasRunning,
+            "nth": nth,
+        ])
         /*
          ⛑ **The restore is asynchronous, and that is a correction to yesterday's correction.**
 
@@ -2139,6 +2243,15 @@ final class CameraController: NSObject {
     /// can never diverge in what they do to the session. *Two functions that each half-do a swap is
     /// how one of them forgets the preset.*
     private func swapLens(to wanted: CameraLens, using newInput: AVCaptureDeviceInput) -> Bool {
+        /* ⛑ **Timed, because the nine seconds MOVES and this is where it moves next.**
+
+           Setting `sessionPreset = .photo` is what takes a session back out of input priority, and it
+           has measured **9,004.5 ms** doing exactly that (field 2026-09-06). This method performs the
+           same write inside its own transaction — which is why `skipNextPresetRestore` yields to it.
+           ⚑ **So a change that makes `cameraReclaimed` fast without making the step-out fast will show
+           up here and nowhere else**, because `lensSwap` is logged after the window the field reads.
+           *Three fixes have now relocated this cost; the fourth must not be able to hide.* */
+        let swapBegan = CACurrentMediaTime()
         let previous = videoInput
         session.beginConfiguration()
         if let previous { session.removeInput(previous) }
@@ -2171,6 +2284,9 @@ final class CameraController: NSObject {
         session.commitConfiguration()
         HSZoneLog.record("lensSwap", [
             "to": wanted.rawValue,
+            // ⚑ The whole configuration transaction, preset write included — the trap door under the
+            // next fix. See `swapBegan`.
+            "ms": (CACurrentMediaTime() - swapBegan) * 1000,
             // Read back AFTER commit. The thing consulted must be the thing that governs.
             "preset": session.sessionPreset.rawValue,
             "restored": session.sessionPreset == .photo,

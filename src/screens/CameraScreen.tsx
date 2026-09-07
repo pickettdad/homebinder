@@ -45,6 +45,9 @@ import {
   cameraAvailable,
   captureFrames,
   captureStill,
+  roomShotAbort,
+  roomShotCapture,
+  roomShotStepOut,
   retryZoneSession,
   captureWantsRetake,
   positionForSibling,
@@ -89,6 +92,7 @@ import {
   type CaptureResult,
   type FrameState,
   type ModeStatusEvent,
+  type CaptureFrame,
   type TextBoxesEvent,
   type TraverseProgressEvent,
   type TraverseResult,
@@ -741,6 +745,10 @@ export function CameraScreen({
   const leaveRef = useRef<() => void>(() => {});
   useEffect(() => {
     leaveRef.current = () => {
+      /* ⛑ **The step-out's other end**, beside the traverse's below for the same reason. Leaving
+         mid-frame with the lens on the ultra-wide and ARKit paused is a room that records nothing
+         while showing a working viewfinder — and `abort` is the only thing that wakes it. */
+      if (steppedOutRef.current) void roomShotAbort().catch(() => {});
       if (meshing) void finishMesh();
       else if (scanning) void finishScan();
       /* ⛑ **Walking out mid-trace still owes the lens back.** The back button never reaches
@@ -859,6 +867,13 @@ export function CameraScreen({
     zoneFailureRef.current = zoneFailure;
   });
 
+  /** ⚑ Stepped out on the ultra-wide, ARKit paused, waiting for the concierge to frame and press. */
+  const [steppedOut, setSteppedOut] = useState(false);
+  const steppedOutRef = useRef(false);
+  useEffect(() => {
+    steppedOutRef.current = steppedOut;
+  }, [steppedOut]);
+
   const openRef = useRef<OpenContainer | null>(null);
   const zoneRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -906,6 +921,26 @@ export function CameraScreen({
         first one where the wrong value silently corrupts the record rather than the experience.
       */
       const targetAtShutter = openRef.current;
+      /*
+       ⛑ **Stepped out for a room shot: the shutter means something else entirely.**
+
+       ⚑ The camera is on the ultra-wide and ARKit is paused, so neither ordinary path applies —
+       `captureStill` would refuse a paused session (it now does so explicitly) and `captureFrames`
+       would ask a session the zone had stopped. **`roomShotCapture` is the only correct act here**,
+       and it owns the whole far end natively: the 107° frame, the lens home, ARKit woken and waited
+       for, then the positioned 1×.
+
+       *Handled before `targetAtShutter` is used and before any other branch* — a room shot belongs
+       to the room, and the gate refuses to step out with a container open precisely so this cannot
+       land inside one.
+      */
+      const steppedOutZone = zoneRef.current;
+      if (steppedOutRef.current && steppedOutZone) {
+        const out = await roomShotCapture().catch(() => ({ ok: false, why: "the step-out failed" }));
+        setSteppedOut(false);
+        await fileRoomShot(out, steppedOutZone);
+        return;
+      }
       /*
         ⚑ **Inside a zone, the photograph comes out of the tracking session.**
 
@@ -1611,6 +1646,93 @@ export function CameraScreen({
     }
   }, [capturePhotoV2, recorder.state, toggleVoice, cycleVoice, handLens]);
 
+  /**
+   ⛑ **Two frames, one capture — the wide is what the desk looks at, the 1× is what it measures.**
+
+   ⚑ *The owner's order, verbatim:* **"wide angle first, we need it for desk to use for visual room
+   placements, and the normal lens right after so it knows the position and where it was looking via
+   raycast."** So the **wide frame is the primary** — which is also the 2026-08-16 ruling that the
+   room shot's primary stays the frame he framed — and the 1× rides beside it as the sibling that
+   carries the pose, the surface and the raycast.
+
+   ⛑ **And the wide frame's own matrix does not describe it**, which is exactly what `projectionFor`
+   exists to say. *A 107° frame whose pose was measured on a 65° camera is honest about where the
+   iPad was and dishonest about what the pixels show, and only the record can carry that distinction
+   — a reader cannot infer it.*
+
+   ⚠️ **A refused pose is filed as a refusal, never as an absence.** If tracking did not settle in
+   time the wide frame still lands, and the reason lands with it — a gap the desk can date rather
+   than one it cannot.
+   */
+  const fileRoomShot = useCallback(
+    async (out: { ok?: boolean; wide?: unknown; primary?: unknown; why?: string; settled?: boolean }, zoneId: string) => {
+      const wide = (out.wide ?? {}) as { frames?: CaptureFrame[]; error?: string };
+      const primary = (out.primary ?? {}) as { ok?: boolean; frames?: CaptureFrame[]; position?: ZonePosition; why?: string };
+      const wideFrame = wide.frames?.[0];
+      if (!out.ok || !wideFrame) {
+        setZoneNote(`room shot failed: ${out.why ?? wide.error ?? "no wide frame"}`);
+        void recordRefusal({ act: "room-shot", zoneId, why: out.why ?? wide.error ?? "no wide frame", recoverable: true });
+        return;
+      }
+      const pose = primary.position;
+      if (!pose?.positioned) {
+        void recordRefusal({
+          act: "position", zoneId,
+          why: primary.why ?? "positioning did not settle after the step-out",
+          recoverable: true,
+        });
+      }
+      const oneX = primary.frames?.[0];
+      /* ⛑ **One id for the pair, because they are one press.** It is also what makes the wide
+         frame's `projectableFrame` resolvable: *"my matrix does not describe me — it describes the
+         frame with THIS id"* is only an instruction if the id exists on something. */
+      const captureId = new Date().toISOString();
+      await capturePhotoV2(
+        { kind: "zone", id: zoneId },
+        await frameBlob(wideFrame),
+        "image/jpeg",
+        undefined,
+        "room-shot",
+        {
+          frame: { captureId, role: "primary", torch: false, lens: "wide" },
+          /* ⚑ The wide frame carries the pose it was taken beside, and says its matrix does not
+             describe it. Absent projection would read as "this matrix is fine for this image". */
+          position: pose?.positioned
+            ? {
+                ...pose,
+                projection: {
+                  projectable: false,
+                  why: "107° frame; the pose was measured on the 1× camera beside it",
+                  // ⚑ Not null: the projectable frame EXISTS and is in this same capture. Null would
+                  // say "nothing here can be projected", which is the opposite of the truth.
+                  projectableFrame: oneX ? { captureId, lens: "normal" } : null,
+                },
+              }
+            : pose,
+          siblings: oneX
+            ? [{
+                blob: await frameBlob(oneX),
+                mime: "image/jpeg",
+                frame: { captureId, role: "evidence", torch: false, lens: "normal" },
+                /* ⚑ **`projectable: true` here, and the type is what insisted.** `CapturePositionMeta`
+                   requires a projection on every positioned pose, and the 1× frame is the one case
+                   where the answer is unambiguously yes: **the pose was measured on this camera, from
+                   this frame.** *Its wide partner carries the same pose and says `false`, which is the
+                   whole reason the field exists — one pose, two frames, one of which it describes.* */
+                position: pose?.positioned ? { ...pose, projection: { projectable: true } } : pose,
+              }]
+            : [],
+        },
+      ).catch(() => {});
+      setZoneNote(
+        pose?.positioned
+          ? `room shot · wide + positioned 1×${out.settled === false ? " (tracking was slow to settle)" : ""}`
+          : `room shot · wide filed, position refused — ${primary.why ?? "tracking did not settle"}`,
+      );
+    },
+    [capturePhotoV2, recordRefusal],
+  );
+
   const newContainer = useCallback(async () => {
     const currentZone = zoneRef.current;
     if (!currentZone) return;
@@ -1973,11 +2095,36 @@ export function CameraScreen({
           zoneFailure: zoneFailureRef.current,
           containerOpen: openRef.current != null,
         });
-        setZoneNote(
-          gate.canStepOut
-            ? "1× for now — the wide frame is being built"
-            : `wide frame unavailable: ${gate.why} — ${gate.fix}`,
-        );
+        if (!gate.canStepOut) {
+          setZoneNote(`wide frame unavailable: ${gate.why} — ${gate.fix}`);
+          void recordRefusal({
+            act: "room-shot", zoneId: zoneRef.current ?? undefined,
+            why: gate.why ?? "step-out refused", recoverable: true,
+          });
+          return;
+        }
+        /*
+         ⛑ **The step-out itself.** ARKit's device is 64.7° and pinned to `[1.0, 1.0]` while world
+         tracking runs, so the 107° frame costs a yield — measured, not chosen
+         (`docs/ZOOM-FLOOR-RESULT-2026-09-06.md`).
+
+         ⚑ **Painted from the return.** `wide` is the lens the swap actually reached, read back off
+         the controller after `commitConfiguration`. *A viewfinder that says wide because a swap was
+         requested is the failure this file is written against, and it is how twenty plates get shot
+         in the wrong mode.*
+        */
+        const out = await roomShotStepOut().catch(() => ({ ok: false, wide: false, why: "step-out failed" }));
+        if (!out.ok || !out.wide) {
+          setZoneNote(`could not reach the wide lens${out.why ? ` — ${out.why}` : ""}`);
+          void recordRefusal({
+            act: "lens", zoneId: zoneRef.current ?? undefined,
+            why: out.why ?? "the ultra-wide could not be reached", recoverable: true,
+          });
+          void roomShotAbort().catch(() => {});
+          return;
+        }
+        setSteppedOut(true);
+        setZoneNote(gate.note ?? "wide — frame the room, then press the shutter");
       }
       return;
     }

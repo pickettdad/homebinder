@@ -58,6 +58,12 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "captureStill", returnType: CAPPluginReturnPromise),
+        /* ⚑ Three acts, because the middle one is a person framing a room — see `roomShotStepOut`.
+           A method absent from THIS list is a method JS cannot call however well it is written, and
+           that is a silent failure at the bridge rather than a compile error. */
+        CAPPluginMethod(name: "roomShotStepOut", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "roomShotCapture", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "roomShotAbort", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "retryZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
@@ -355,6 +361,9 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
     private var zoomFloor: AnyObject?
+    /// ⚑ The step-out window, owned natively so a second shutter press cannot enter it half-open.
+    private var roomShotOut = false
+    private var roomShotWideReached = false
     private var arProbe: HSArProbe?
 
     private var bench: HSBench?
@@ -848,6 +857,124 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["ok": false, "why": "no zone open"]); return
         }
         call.resolve(js(z.retry()))
+    }
+
+    /*
+     ═══ THE ROOM SHOT'S STEP-OUT ═══════════════════════════════════════════════════════════════
+
+     ⛑ **Three acts, because the middle one is the concierge framing a shot and no single call can
+     contain a person looking at a room.**
+
+     ⚑ *Why a step-out at all, and it is measured rather than assumed.* ARKit configures the plain
+     wide-angle device at **64.7°** and, while world tracking runs, pins its zoom range to exactly
+     `[1.0, 1.0]` — `docs/ZOOM-FLOOR-RESULT-2026-09-06.md`. The ultra-wide's **107.3°** is reachable
+     only by swapping the input, which means yielding the lens. *The field's own words:* **"it's hard
+     to know what is in the capture if you can't see it in the wide view."**
+
+     ⛑ **And the last build that did this DESTROYED THE POSE.** Every room shot in the 2026-09-05
+     export carries `positioned: false, why: "Required sensor failed"` on the wide frame and
+     `position: null` on its partner. `Required sensor failed` is ARKit being refused the camera:
+     **that swap collided, it did not yield.** The difference here is that every step is deliberate
+     and ordered, and the traverse is the existence proof that a deliberate yield keeps the room —
+     `kept 22 / 24 / 21` frames, `originEpoch` unchanged, across a two-zone walk.
+
+     **The state lives here, not in JS.** `roomShotOut` is written before the first `await` any caller
+     could interleave with, so a second shutter press cannot enter a half-open window — an adversarial
+     review of an earlier design found exactly that hole, a guard read once at entry and never set.
+     */
+    @objc func roomShotStepOut(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let zone else { call.reject("no zone open"); return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard !self.roomShotOut else { call.resolve(self.js(["ok": false, "why": "already stepped out"])); return }
+            // ⚑ Set BEFORE anything that yields, so no second entry can pass the guard above.
+            self.roomShotOut = true
+            let before = zone.state()
+            HSZoneLog.record("roomShotStepOut", ["from": String(describing: before["mode"] ?? "?")])
+            /* The yield, in the traverse's proven order: save the map, pause ARKit, disarm, take the
+               AR preview down, hand the lens back. `pause()` does all five. */
+            _ = zone.pause()
+            let achieved = self.controller?.requestLens(.wide)
+            /* ⛑ **Read back off the controller, not off `Achieved`.** `Achieved` carries the MODE and
+               what could not be met — it has never carried the lens, and asking it would have been a
+               value invented to answer a question. The controller's `lens` is set by the swap itself,
+               after `commitConfiguration`, which is the only place that knows. */
+            let got = self.controller?.currentLens ?? .normal
+            self.roomShotWideReached = got == .wide
+            HSZoneLog.record("roomShotWide", ["reached": got.rawValue, "unmet": achieved?.unmet ?? []])
+            call.resolve(self.js([
+                "ok": true,
+                // ⚑ Painted from the return, never the ask. A viewfinder that says "wide" because a
+                // swap was requested is the failure this whole file is written against.
+                "wide": self.roomShotWideReached,
+                "lens": got.rawValue,
+            ]))
+        }
+    }
+
+    /**
+     ⛑ **The far end: the wide frame, then the lens back, then the positioned 1× frame.**
+
+     ⚑ **Order is the deliverable.** The owner asked for it precisely: *"wide angle first, we need it
+     for desk to use for visual room placements, and the normal lens right after so it knows the
+     position and where it was looking via raycast."* The wide frame is taken while AVFoundation holds
+     the lens; the 1× is taken by `captureStill` **after** ARKit has it back and tracking has settled,
+     so it carries a real pose, a real surface and a real raycast.
+
+     ⛑ **A bounded wait, and a refusal rather than a silent continue.** If tracking does not return,
+     the wide frame is still filed and the pose is recorded as refused with its reason — *an absence
+     reads as nobody tried; a refusal reads as this was attempted and here is why.*
+     */
+    @objc func roomShotCapture(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let zone else { call.reject("no zone open"); return }
+        guard let controller else { call.reject("camera is not running"); return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.roomShotOut else {
+                call.resolve(self?.js(["ok": false, "why": "not stepped out"]) ?? JSObject()); return
+            }
+            controller.capture(wideSibling: false) { result in
+                let wide: [String: Any]
+                switch result {
+                case .success(let payload): wide = payload
+                case .failure(let error): wide = ["error": error.localizedDescription]
+                }
+                HSZoneLog.record("roomShotWideTaken", ["ok": wide["error"] == nil])
+                DispatchQueue.main.async {
+                    // Back to 1× BEFORE the lens goes home: ARKit is offered only the wide-angle
+                    // device, and handing back mid-swap is how the old build met `sensorFailed`.
+                    _ = controller.requestLens(.normal)
+                    _ = zone.resume()
+                    /* ⚑ The zone re-takes the lens lazily, inside `captureStill`'s own path — the
+                       same route every ordinary photograph uses. Nothing bespoke re-establishes
+                       tracking here, so there is one way it can be wrong rather than two. */
+                    zone.captureStill(text: false) { still in
+                        self.roomShotOut = false
+                        self.roomShotWideReached = false
+                        HSZoneLog.record("roomShotDone", [
+                            "wide": wide["error"] == nil,
+                            "positioned": (still["position"] as? [String: Any])?["positioned"] as? Bool ?? false,
+                            "why": still["why"] ?? "",
+                        ])
+                        call.resolve(self.js(["ok": true, "wide": wide, "primary": still]))
+                    }
+                }
+            }
+        }
+    }
+
+    /// ⛑ The back button, the failure path, and anything else that leaves. **A step-out has two ends
+    /// and this is the one that gets forgotten** — seven instances of that class in this codebase.
+    @objc func roomShotAbort(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *) else { call.resolve(); return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.roomShotOut else { call.resolve(); return }
+            HSZoneLog.record("roomShotAborted")
+            _ = self.controller?.requestLens(.normal)
+            _ = self.zone?.resume()
+            self.roomShotOut = false
+            self.roomShotWideReached = false
+            call.resolve()
+        }
     }
 
     @objc func captureStill(_ call: CAPPluginCall) {

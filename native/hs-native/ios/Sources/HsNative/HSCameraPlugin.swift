@@ -2804,10 +2804,15 @@ final class CameraController: NSObject {
     /**
      ⚑ **What ARKit's world tracking will actually give us — the whole list, not a yes/no.**
 
-     The traverse is ruled wide, and pose requires an `ARSession`, so whether world tracking offers
-     the ultra-wide decides whether pose is reachable without giving up the lens ruling. Apple's
-     only documented ultra-wide example is a **face**-tracking session, which is suggestive and not
-     dispositive — so it is enumerated rather than assumed.
+     ⚠️ **Corrected 2026-09-07, and this probe's premise was wrong.** It read *"the traverse is
+     ruled wide, so whether world tracking offers the ultra-wide decides whether pose is reachable"* —
+     but the wide ruling was overturned on 2026-08-30 by measurement (texture 1.1–1.99 across 31
+     frames, all discarded), and `lensPolicyFor` has returned `normal` for a traverse ever since.
+
+     ⚑ **So the question this probe was built to answer had already dissolved.** ARKit configures
+     `builtInWideAngleCamera` — *exactly the lens a traverse now wants* — which is why the posed
+     traverse costs no handover at all. The enumeration below is still worth keeping; its framing was
+     an argument for an obstacle that no longer existed.
 
      ⚑ **Every format, with its device, resolution and frame rate**, because a binary answer would
      hide the third option: something between normal and ultra-wide, or ultra-wide at a reduced

@@ -612,11 +612,19 @@ export function CameraScreen({
           await applyIntentLens("room-shot");
           setPendingIntent("room-shot");
         } else if (startAction === "traverse") {
-          /* ⛑ **Armed, not started.** The lens goes wide because that is what a traverse wants —
-             `lensPolicyFor` already rules it, and it MUST be applied before `startTraverse`, which
-             locks exposure, focus and white balance and refuses a swap mid-run. But the run itself
-             waits for the concierge to press: *a traverse that began the instant the screen opened
-             would record the walk to the pipe rather than the pipe.* */
+          /* ⛑ **Armed, not started.** The lens is applied before `startTraverse`, which locks
+             exposure, focus and white balance and refuses a swap mid-run. The run itself waits for
+             the concierge to press: *a traverse that began the instant the screen opened would
+             record the walk to the pipe rather than the pipe.*
+
+             ⚠️ **Corrected 2026-09-07: the lens goes to NORMAL, not wide.** This said wide "because
+             that is what a traverse wants" — overturned by field measurement on 2026-08-30, where
+             wide scored **texture 1.1–1.99 across 31 frames and every one was discarded**.
+             `lensPolicyFor` has returned `normal` for a traverse ever since, and its test asserts it.
+             ⚑ *A comment that argues for the opposite of what the code does is worse than none: it
+             is an argument a future change will believe.* Three files carried this one, and it was
+             load-bearing in the wrong direction — the lens objection to a posed traverse rested on
+             it, and ARKit takes the wide-angle device, which is exactly the lens a traverse wants. */
           await applyIntentLens("traverse");
         } else if (startAction === "document") {
           /* ⚑ The door that READS. Document mode finds the page, flattens it and runs accurate

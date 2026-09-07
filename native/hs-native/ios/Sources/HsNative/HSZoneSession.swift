@@ -378,6 +378,30 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         case .roomplan:
             // RoomPlan configures the session itself; we only ensure it has one to configure.
             config.planeDetection = [.horizontal, .vertical]
+            /*
+             ⛑ **Reconstruction asked for during the floorplan too, because the floorplan is the
+             longest walk of the zone and it was building nothing.**
+
+             ⚑ *Field 2026-09-06, and the owner's challenge is what found it:* his first room shot
+             came back `surface: none` — depth thin at `0 of 121`, and `meshFrom: live` with nothing
+             to hit. **His photographs show why depth refused**: the centre of that frame is the far
+             end of a basement, well past LiDAR's ~5 m, while the second shot's centre is a bookshelf
+             and measured **4.55 m**. *The depth reading was right both times.* **The mesh fallback
+             was not there to catch it.**
+
+             This case set `planeDetection` and nothing else, so **a 168-second floorplan walk
+             accumulated no geometry at all** — reconstruction began only when positioning took over,
+             thirteen seconds before the room shot. *The one capture the desk lays a room out from is
+             taken at the exact moment the mesh is emptiest.*
+
+             ⚠️ **RoomPlan may override this**, since it runs its own configuration over the session
+             we hand it. Setting it costs nothing if so, and `harvestMesh`'s anchor count after a
+             floorplan-only zone is what will say — asked rather than assumed, and the answer is a
+             row in the log rather than a belief.
+             */
+            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                config.sceneReconstruction = .mesh
+            }
         /*
          ⛑ **Mesh and positioning are ONE configuration, and writing them as two was the cost.**
 

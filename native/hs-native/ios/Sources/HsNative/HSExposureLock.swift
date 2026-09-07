@@ -62,6 +62,26 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
                 self.finish(); return
             }
 
+            /*
+             ⛑ **What the lock COSTS ARKit's tracking, which is the half that decides this.**
+
+             ⚠️ *The first cut of this probe measured only whether the lock takes.* An adversarial
+             audit named the omission and it is the load-bearing one: **ARKit's world tracking
+             extracts its features from the same image stream the lock is changing.** A 1/60 s shutter
+             in a dim mechanical room could starve VIO during the one act where the camera is moving —
+             *or it could help, because 1/15 s while walking is motion blur, and blur destroys feature
+             matching faster than noise does.* **Either way it must be measured, not reasoned about.**
+             *A probe that answers "does the lock take" and not "what does it cost the thing we need
+             the lock for" has measured the easy half.*
+
+             The instrument already exists two files away — `rawFeaturePoints`, which `position()`
+             stamps on every pose and Gate 1 sampled at a median of **229** against 0–9 in the old
+             sleeping build. Sampled before and after, so the comparison is against this room rather
+             than against a remembered number.
+             */
+            self.out["before.featurePoints"] = self.session.currentFrame?.rawFeaturePoints?.points.count ?? -1
+            self.out["before.tracking"] = HSArProbe.describe(self.session.currentFrame?.camera.trackingState ?? .notAvailable)
+
             // What the device SAYS it supports while ARKit holds it. Support is not permission, so
             // both are recorded and the attempt below is what settles it.
             self.out["supports.customExposure"] = d.isExposureModeSupported(.custom)
@@ -109,13 +129,28 @@ final class HSExposureLock: NSObject, ARSessionDelegate {
                 self.out["asked.iso"] = Double(wantISO)
                 self.out["asked.durationS"] = CMTimeGetSeconds(wantDur)
 
+                /* ⚑ Read after the same settle the exposure gets, so tracking has had the locked
+                   stream for as long as the numbers above describe. */
+                let after = self.session.currentFrame?.rawFeaturePoints?.points.count ?? -1
+                self.out["after.featurePoints"] = after
+                self.out["after.tracking"] = HSArProbe.describe(self.session.currentFrame?.camera.trackingState ?? .notAvailable)
+                let before = self.out["before.featurePoints"] as? Int ?? -1
+                if before > 0 && after >= 0 {
+                    self.out["featurePointsRatio"] = Double(after) / Double(before)
+                }
                 let isoHeld = abs(reachedISO - Double(wantISO)) / Double(wantISO) < 0.15
                 let durHeld = abs(reachedDur - CMTimeGetSeconds(wantDur)) / CMTimeGetSeconds(wantDur) < 0.25
                 let modeHeld = d.exposureMode == .custom || d.exposureMode == .locked
                 /* ⚑ One word, computed once. A reader should not have to re-derive the verdict from
                    six numbers and reach a different answer than the next reader. */
+                /* ⛑ **Two questions, two answers, and the verdict says both.** A lock that takes
+                   while halving the feature count has not answered yes — it has answered "yes, and
+                   here is what it costs", which is a different sentence and the one that decides. */
+                let tracked = self.out["after.tracking"] as? String ?? "?"
+                let ratio = self.out["featurePointsRatio"] as? Double
+                let costNote = ratio.map { String(format: " · features ×%.2f (%d → %d), tracking %@", $0, before, after, tracked) } ?? " · features unmeasured"
                 self.out["VERDICT"] = modeHeld && isoHeld && durHeld
-                    ? "YES — ARKit permits the exposure lock; a traverse could run on ARKit frames and keep its texture"
+                    ? "YES — ARKit permits the exposure lock" + costNote
                     : "NO — ARKit overrode the lock (mode \(d.exposureMode.rawValue), iso \(Int(reachedISO)) vs \(Int(wantISO)), \(String(format: "%.4f", reachedDur))s vs \(String(format: "%.4f", CMTimeGetSeconds(wantDur)))s)"
 
                 // Put it back. A probe that leaves the camera somewhere else is a probe that changed

@@ -1,4 +1,4 @@
-# Can the traverse keep its exposure lock under ARKit? **Yes.**
+# Can the traverse keep its exposure lock under ARKit? **Yes — and the cost is unmeasured.**
 
 **Measured on device, iPad Pro 11-inch (3rd gen), 2026-09-06, tethered.** `--hs-exposure-lock`,
 `HSExposureLock.swift`. Raw: `Documents/hs-exposure-lock.json`.
@@ -22,6 +22,33 @@ Asked for the traverse's own values — **1/60 s at ISO 400**, inside the metere
 
 ⛑ **And the change is real rather than coincidental: ISO moved from 1472 on auto to 400 on the
 lock.** *The device was metering a dim room at 1472 and did what it was told.*
+
+## ⚠️ But the first cut of this probe measured the easy half
+
+**An adversarial audit named the omission and it is the load-bearing one.** The probe proved the lock
+*takes* and never asked **what it costs ARKit's tracking** — and ARKit extracts its features from the
+same image stream the lock is changing. *A 1/60 s shutter in a dim mechanical room could starve VIO
+during the one act where the camera is moving. It could equally help, because 1/15 s while walking is
+motion blur, and blur destroys feature matching faster than noise does.*
+
+**Re-run with `rawFeaturePoints` sampled either side:**
+
+```
+before.featurePoints  9      before.tracking  normal    before.iso  1597
+after.featurePoints   2      after.tracking   normal    after.iso    400
+featurePointsRatio    0.22
+```
+
+⛑ **A 78% drop — and the run is not representative, so it settles nothing.** Nine feature points
+*before* the lock is already near-zero: Gate 1's median was **229**. This was a stationary iPad on a
+desk pointed at something almost textureless, which is neither the room nor the motion a traverse
+happens in.
+
+⚑ **What it does establish is that the question is real and the instrument now asks it.** *The next
+run of this probe belongs in a room, walking* — the traverse's own condition — and the number to watch
+is the ratio, not the absolute. **If features hold near 1.0 while walking a textured room, the posed
+traverse is safe to build. If they collapse, the lock and the pose are in genuine tension and that is
+a design decision rather than an implementation one.**
 
 ## Why this decides something large
 

@@ -146,6 +146,16 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         /* ⚑ **The zoom floor — the one measurement that decides whether the room-shot handover has
            to exist at all.** See `HSZoomFloor`. Two minutes, and a negative is as useful as a
            positive because it retires an option rather than leaving it to be re-argued. */
+        /* ⚑ **The exposure lock — the one measurement the owner's traverse idea turns on.** See
+           `HSExposureLock`. Same shape as the zoom floor: ask the device, not the documentation. */
+        if CommandLine.arguments.contains("--hs-exposure-lock"), #available(iOS 16.0, *) {
+            let probe = HSExposureLock()
+            exposureLock = probe
+            probe.run { result in
+                print("HS-EXPOSURE-LOCK RESULT \(result["VERDICT"] ?? "?")")
+                self.exposureLock = nil
+            }
+        }
         if CommandLine.arguments.contains("--hs-zoom-floor"), #available(iOS 16.0, *) {
             let probe = HSZoomFloor()
             zoomFloor = probe
@@ -361,6 +371,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
     private var zoomFloor: AnyObject?
+    private var exposureLock: AnyObject?
     /// ⚑ The step-out window, owned natively so a second shutter press cannot enter it half-open.
     private var roomShotOut = false
     private var roomShotWideReached = false

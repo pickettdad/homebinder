@@ -756,6 +756,26 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            burst that queues is honest where a dropped frame is not. */
         guard !stillInFlight else { completion(["ok": false, "why": "a capture is already in flight"]); return }
 
+        /*
+         ⛑ **A paused session is refused HERE, so no caller can read a frame out of one.**
+
+         ⚑ *Confirmed by five independent review lenses, 2026-09-06, against the room shot's
+         step-out.* `resume()` sets `armed = true` and nothing else — **it does not restart ARKit** —
+         and the only `wake()` in this file is `position()`'s. So a caller that paused, resumed and
+         then asked for a still got one of two wrong answers: **nil `currentFrame` on a zone whose
+         ARKit had never run**, or, worse, **the retained pre-pause frame, which still reports
+         `.normal`** — this file's own measured finding at `waitForTrackedFrame` — so both guards
+         below would pass and a pose from before the concierge moved would be stated as confidently
+         as a real one.
+
+         **The guard belongs on the value, not in the callers.** `waitForTrackedFrame` already
+         carries the `timestamp > stale` requirement for exactly this reason; `captureStill` had no
+         equivalent because until the step-out it was only ever called on a continuously-running
+         session. *That assumption is now false and this is where it stops being assumed.*
+         */
+        guard !paused else {
+            completion(["ok": false, "why": "positioning is paused", "recoverable": true]); return
+        }
         guard let live = session.currentFrame else {
             completion(["ok": false, "why": "no frame yet"]); return
         }
@@ -1110,6 +1130,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      that took it.* ⛑ The old handler did the second, which produced the next `sensorFailed`, five
      times in nine minutes.
      */
+    /**
+     ⛑ **Wake ARKit and WAIT for a frame it stands behind — the step the room shot's far end needs
+     and `resume()` deliberately does not do.**
+
+     ⚑ `resume()` means *stop refusing*, by design: the camera is re-taken lazily inside
+     `position()`, which is why the traverse keeps its world — every `handLens("zone")` is followed by
+     a `takePosition()`. **The room shot substitutes `captureStill`, which has no such path**, so it
+     needed this one stated rather than inherited.
+
+     **Bounded, and the timeout is the answer rather than a failure to report later.** `wake()` runs
+     `enter(.positioning)`, whose `needCamera?()` stops the capture session synchronously first and
+     whose `mustReset` is false — so **the origin and `originEpoch` survive**, which is the whole
+     reason a step-out is affordable at all.
+
+     ⚠️ **Blocks. Never call it on the main thread** — `waitForTrackedFrame` sleeps in 50 ms steps.
+     */
+    func wakeForCapture(timeout: TimeInterval = 8.0) -> Bool {
+        guard mode != nil else { return false }
+        if paused { wake() }
+        return waitForTrackedFrame(timeout: timeout) != nil
+    }
+
     func retry() -> [String: Any] {
         guard let m = mode else { return ["ok": false, "why": "no zone open"] }
         failure = nil

@@ -364,6 +364,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// ⚑ The step-out window, owned natively so a second shutter press cannot enter it half-open.
     private var roomShotOut = false
     private var roomShotWideReached = false
+    /// ⛑ **In flight across a transition** — distinct from `roomShotOut`, which holds the window
+    /// open while a person frames. *An earlier version of this file claimed to have this and did
+    /// not: a guard read at entry that nothing ever sets is a guard two callers pass together.*
+    private var roomShotBusy = false
     private var arProbe: HSArProbe?
 
     private var bench: HSBench?
@@ -807,6 +811,18 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
              */
             if let outgoing = self.zone {
                 HSZoneLog.record("zoneReplaced", ["for": id])
+                /* ⛑ **The step-out latch dies with the zone that opened it.** `roomShotOut` gates
+                   `roomShotCapture`; left true across a zone change it refuses every room shot in
+                   every room that follows, and the lens would still be on wide. *A latch whose exit
+                   lives only on the happy path is a latch with no exit* — the seventh instance of
+                   that class here, and the review found it before a walk did. */
+                if self.roomShotOut || self.roomShotBusy {
+                    HSZoneLog.record("roomShotStranded", ["clearedBy": "zoneReplaced"])
+                    _ = self.controller?.requestLens(.normal)
+                    self.roomShotOut = false
+                    self.roomShotBusy = false
+                    self.roomShotWideReached = false
+                }
                 _ = outgoing.closeZone()
             }
             let out = made.openZone(id) { [weak self] event in
@@ -886,14 +902,33 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         guard #available(iOS 17.0, *), let zone else { call.reject("no zone open"); return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            guard !self.roomShotOut else { call.resolve(self.js(["ok": false, "why": "already stepped out"])); return }
-            // ⚑ Set BEFORE anything that yields, so no second entry can pass the guard above.
+            guard !self.roomShotOut, !self.roomShotBusy else {
+                call.resolve(self.js(["ok": false, "why": "a room shot is already under way"])); return
+            }
+            // ⚑ BOTH set before anything that yields. `roomShotBusy` is the one an earlier version of
+            // this file claimed to have and did not: a guard read at entry that nothing ever sets is
+            // a guard two callers pass together.
+            self.roomShotBusy = true
             self.roomShotOut = true
             let before = zone.state()
             HSZoneLog.record("roomShotStepOut", ["from": String(describing: before["mode"] ?? "?")])
             /* The yield, in the traverse's proven order: save the map, pause ARKit, disarm, take the
                AR preview down, hand the lens back. `pause()` does all five. */
             _ = zone.pause()
+            /*
+             ⛑ **Wait out the preset restore `pause()` just enqueued, or the swap races it.**
+
+             `releaseCamera` → `reclaimCamera` starts the capture session synchronously and then
+             enqueues an **asynchronous** restore of `sessionPreset` to `.photo` — made async on
+             2026-08-30 because the synchronous version cost 9.3 s and a black screen. A
+             `beginConfiguration` landing between that enqueue and its execution is two configuration
+             transactions on one session, and the measured symptom of losing that race is already in
+             this file: **640×480, 49 KB stills where the same path had produced 2.5 MB.**
+
+             `startTraverse` takes the same barrier for the same reason (`sessionQueue.sync { }`), and
+             this is the second caller of a rule that was written once.
+             */
+            self.controller?.awaitSessionQueue()
             let achieved = self.controller?.requestLens(.wide)
             /* ⛑ **Read back off the controller, not off `Achieved`.** `Achieved` carries the MODE and
                what could not be met — it has never carried the lens, and asking it would have been a
@@ -902,6 +937,9 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             let got = self.controller?.currentLens ?? .normal
             self.roomShotWideReached = got == .wide
             HSZoneLog.record("roomShotWide", ["reached": got.rawValue, "unmet": achieved?.unmet ?? []])
+            // The window is open and no longer in flight — the concierge now frames, for as long
+            // as they like. `roomShotOut` alone holds it; `roomShotBusy` guards the transitions.
+            self.roomShotBusy = false
             call.resolve(self.js([
                 "ok": true,
                 // ⚑ Painted from the return, never the ask. A viewfinder that says "wide" because a
@@ -929,9 +967,12 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         guard #available(iOS 17.0, *), let zone else { call.reject("no zone open"); return }
         guard let controller else { call.reject("camera is not running"); return }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.roomShotOut else {
-                call.resolve(self?.js(["ok": false, "why": "not stepped out"]) ?? JSObject()); return
+            guard let self, self.roomShotOut, !self.roomShotBusy else {
+                call.resolve(self?.js(["ok": false, "why": "not stepped out, or already finishing"]) ?? JSObject()); return
             }
+            // ⚑ Set before the first hop, for the same reason as in `stepOut`. Two shutter presses
+            // arriving together both passed the old guard, because it read a flag nobody set.
+            self.roomShotBusy = true
             controller.capture(wideSibling: false) { result in
                 let wide: [String: Any]
                 switch result {
@@ -944,18 +985,41 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                     // device, and handing back mid-swap is how the old build met `sensorFailed`.
                     _ = controller.requestLens(.normal)
                     _ = zone.resume()
-                    /* ⚑ The zone re-takes the lens lazily, inside `captureStill`'s own path — the
-                       same route every ordinary photograph uses. Nothing bespoke re-establishes
-                       tracking here, so there is one way it can be wrong rather than two. */
-                    zone.captureStill(text: false) { still in
-                        self.roomShotOut = false
-                        self.roomShotWideReached = false
-                        HSZoneLog.record("roomShotDone", [
-                            "wide": wide["error"] == nil,
-                            "positioned": (still["position"] as? [String: Any])?["positioned"] as? Bool ?? false,
-                            "why": still["why"] ?? "",
-                        ])
-                        call.resolve(self.js(["ok": true, "wide": wide, "primary": still]))
+                    /*
+                     ⛑ **ARKit is woken and WAITED FOR, and the comment that used to sit here was
+                     wrong in the way that matters most: it described behaviour the code did not have.**
+
+                     It said the zone re-takes the lens lazily inside `captureStill`'s own path.
+                     ⚑ **It does not.** `resume()` sets `armed = true` and nothing else, and the only
+                     `wake()` in `HSZoneSession` belongs to `position()`. So the 1× frame was being
+                     asked of a **paused** session: nil on a zone whose ARKit had never run, or the
+                     retained pre-pause frame — still reporting `.normal` — on one where it had.
+                     **Both land on the same export shape as the 2026-09-05 failure this whole design
+                     exists to prevent: a wide frame with no positioned partner.**
+
+                     *The traverse keeps its world because every `handLens("zone")` is followed by a
+                     `takePosition()`, which wakes. This substituted `captureStill`, which does not.*
+
+                     ⚠️ **Off the main thread**, because `wakeForCapture` sleeps in 50 ms steps waiting
+                     for a frame ARKit stands behind. And bounded: if it never settles, the wide frame
+                     still files and the pose is refused **with its reason**, which is the difference
+                     between a gap the desk can date and an absence it cannot.
+                     */
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let settled = zone.wakeForCapture()
+                        HSZoneLog.record("roomShotSettled", ["settled": settled])
+                        zone.captureStill(text: false) { still in
+                            self.roomShotOut = false
+                            self.roomShotWideReached = false
+                            self.roomShotBusy = false
+                            HSZoneLog.record("roomShotDone", [
+                                "wide": wide["error"] == nil,
+                                "settled": settled,
+                                "positioned": (still["position"] as? [String: Any])?["positioned"] as? Bool ?? false,
+                                "why": still["why"] ?? "",
+                            ])
+                            call.resolve(self.js(["ok": true, "wide": wide, "primary": still, "settled": settled]))
+                        }
                     }
                 }
             }
@@ -969,11 +1033,26 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.roomShotOut else { call.resolve(); return }
             HSZoneLog.record("roomShotAborted")
+            self.controller?.awaitSessionQueue()
             _ = self.controller?.requestLens(.normal)
-            _ = self.zone?.resume()
+            let zone = self.zone
             self.roomShotOut = false
             self.roomShotWideReached = false
+            self.roomShotBusy = false
             call.resolve()
+            /*
+             ⛑ **Abort wakes the room too, and leaving that out was the same bug wearing an exit
+             sign.** `resume()` only arms; a room abandoned mid-step-out with ARKit paused refuses
+             **every subsequent shutter press**, and inside a zone there is no fallback — the screen
+             returns before the one call that would have woken it. *The concierge sees a working
+             viewfinder over a room that records nothing.* Off the main thread, bounded, and the
+             result is logged rather than assumed.
+             */
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = zone?.resume()
+                let settled = zone?.wakeForCapture() ?? false
+                HSZoneLog.record("roomShotAbortSettled", ["settled": settled])
+            }
         }
     }
 
@@ -1258,6 +1337,12 @@ final class CameraController: NSObject {
     /// ⚑ Read by  to keep the ARKit layer ABOVE this one. Exposed rather than made
     /// internal so the ordering rule stays a question asked of the controller that owns the layer.
     var previewViewForOrdering: UIView? { previewView }
+
+    /// ⛑ **Wait out whatever is already enqueued on `sessionQueue`** — the same barrier
+    /// `startTraverse` takes, for the same reason: `reclaimCamera` restores the preset
+    /// *asynchronously*, and a `beginConfiguration` landing mid-restore is two transactions on one
+    /// session. The measured symptom of losing that race is 640×480 stills where 2.5 MB belonged.
+    func awaitSessionQueue() { sessionQueue.sync { } }
     private weak var hostWebView: UIView?
     private var restoreOpaque: Bool?
 

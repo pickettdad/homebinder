@@ -3065,6 +3065,43 @@ export function CameraScreen({
         )}
 
         <div className="flex items-center justify-between gap-2">
+          {/*
+            ⛑ **While stepped out, the other modes are gone — not merely discouraged.**
+
+            ⚑ *Field 2026-09-06: "I clicked on new object container before I realised I was about to
+            take an object capture while in room shot; this should have a block."* He is right, and
+            the reason is sharper than tidiness: **the camera is on the 107° lens and ARKit is
+            paused**, so an object capture taken here would be a wide-angle photograph of one object
+            with no position — *filed as an ordinary object capture, indistinguishable at the desk
+            from a good one.* **A wrong answer that looks like a right one.**
+
+            Hidden rather than disabled: a greyed row invites a tap and a question, and there is
+            exactly one thing to do here — frame the room and press the shutter.
+          */}
+          {steppedOut ? (
+            <p className="text-sm text-brass-300">107° — frame the room, then press the shutter</p>
+          ) : pendingIntent === "room-shot" ? (
+            /*
+             ⛑ **Another room shot is a button, not an automatic return to wide.**
+
+             ⚑ *Field 2026-09-06: "after the first room shot the room shot stays in normal. I get
+             that maybe it shouldn't hand back over to wide right away as that would be an extra
+             handover if it is not needed, but maybe a button for 'take another room shot' because a
+             room can take 1-3 room shots total."* **That reasoning is the design** — the concierge
+             named the cost and the shape in one sentence.
+
+             *Each step-out costs a lens swap and a tracking re-establishment*, so returning to wide
+             on the chance of a second shot spends it on every room that only wanted one. **A button
+             spends it exactly when a person has decided to.**
+            */
+            <button
+              type="button"
+              onClick={() => void applyIntentLens("room-shot")}
+              className="rounded-lg bg-brass-700 px-3 py-1.5 text-sm text-white ring-1 ring-brass-500"
+            >
+              another room shot
+            </button>
+          ) : (
           <div className="flex gap-1">
             {MODE_BUTTONS.map((button) => (
               <button
@@ -3082,6 +3119,7 @@ export function CameraScreen({
               </button>
             ))}
           </div>
+          )}
 
           <button
             type="button"

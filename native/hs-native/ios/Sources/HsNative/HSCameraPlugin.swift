@@ -517,6 +517,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                saw before it lost the camera. */
             superview.insertSubview(view, belowSubview: web)
             self.arPreview = view
+            self.controller?.arPreviewForOrdering = view
             HSZoneLog.record("arPreviewAttached", [
                 "w": Double(view.bounds.width), "h": Double(view.bounds.height),
                 // ⚑ The two facts that decide whether anything can be SEEN, rather than whether a
@@ -673,6 +674,9 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             HSZoneLog.record("arPreviewDetached", ["had": self?.arPreview != nil])
             self?.arPreview?.removeFromSuperview()
             self?.arPreview = nil
+            // ⛑ Both ends. A stale ordering reference would send the next capture preview under a
+            // view that is no longer there — the same one-ended shape, one layer down.
+            self?.controller?.arPreviewForOrdering = nil
             if self?.restoreOpaqueForAr == true, let web = self?.webView {
                 WebLayer.restore(web, wasOpaque: true)
                 self?.restoreOpaqueForAr = false
@@ -914,6 +918,10 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             HSZoneLog.record("roomShotStepOut", ["from": String(describing: before["mode"] ?? "?")])
             /* The yield, in the traverse's proven order: save the map, pause ARKit, disarm, take the
                AR preview down, hand the lens back. `pause()` does all five. */
+            /* ⚑ Set BEFORE `pause()`, because `pause()` is what enqueues the restore. Setting it
+               afterwards would leave the ordering to chance; setting it first makes the enqueued
+               block find the flag already true, on the one queue that reads it. */
+            self.controller?.skipNextPresetRestore = true
             _ = zone.pause()
             /*
              ⛑ **Wait out the preset restore `pause()` just enqueued, or the swap races it.**
@@ -1345,6 +1353,14 @@ final class CameraController: NSObject {
     func awaitSessionQueue() { sessionQueue.sync { } }
     private weak var hostWebView: UIView?
     private var restoreOpaque: Bool?
+    /// ⚑ Set by a caller that is about to reconfigure the session anyway, **before** the work that
+    /// enqueues a restore. Written on main, read on `sessionQueue` — safe because the write always
+    /// precedes the enqueue, and the reader is the enqueued block itself.
+    var skipNextPresetRestore = false
+    /// ⛑ **The ARKit preview, so `attachPreview` can go UNDER it.** Weak, because the plugin owns
+    /// the view's lifetime and a stale strong reference here would order against a dead layer.
+    /// *One fact, known by the layer that arrives second as well as the one that arrives first.*
+    weak var arPreviewForOrdering: UIView?
 
     private let motion = CMMotionManager()
     private var statusTimer: Timer?
@@ -1786,7 +1802,24 @@ final class CameraController: NSObject {
         let layer = container.previewLayer
         layer.session = session
         layer.videoGravity = .resizeAspectFill
-        superview.insertSubview(container, belowSubview: webView)
+        /*
+         ⛑ **Below the ARKit preview when one exists, not merely below the page.**
+
+         ⚑ *Field 2026-09-06: "backed out and clicked photograph this room — viewfinder was black."*
+         `start()`'s zone-deferred branch now calls this on every screen entry, and it inserted
+         directly beneath the web view — **which is above an ARKit preview already sitting there.**
+         The capture session is stopped while a zone owns the lens, so its layer is a **black
+         rectangle laid over a live one.**
+
+         *The three-layer ordering is asserted in `attachArPreview` and was asserted nowhere else,
+         which is the rule-in-one-caller failure with the layer that arrives second.* Both ends now
+         know it: that one keeps the ARKit view above this one, this one goes under it on arrival.
+         */
+        if let ar = arPreviewForOrdering, ar.superview === superview {
+            superview.insertSubview(container, belowSubview: ar)
+        } else {
+            superview.insertSubview(container, belowSubview: webView)
+        }
 
         restoreOpaque = webView.isOpaque
         WebLayer.makeTransparent(webView)
@@ -1912,6 +1945,30 @@ final class CameraController: NSObject {
         */
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            /*
+             ⛑ **Skipped when a lens swap is about to do the same work — measured at 9,004 ms.**
+
+             ⚑ *Field 2026-09-06: "there is a 5-10 second delay on hitting the RoomShot button, I
+             thought the app had frozen."* The log names it exactly: `presetRestored ms: 9004.5`,
+             immediately before the swap to wide. **Setting `sessionPreset = .photo` renegotiates the
+             device format ARKit left behind, and that renegotiation is the nine seconds** — the
+             comment above already knew it.
+
+             The step-out then waited for it, correctly, because `awaitSessionQueue` was added to stop
+             the swap racing this very block. ⛑ **But the two are the same operation done twice:**
+             `swapLens` re-asserts `.photo` inside its own configuration transaction. *One
+             renegotiation is unavoidable; two, serialised, is nine seconds of a concierge thinking
+             the app has frozen.*
+
+             So a step-out declares that it is about to reconfigure, and this yields the work to it.
+             **Both run on `sessionQueue`, so there is no race to lose** — only an ordering, and the
+             swap is the one that should win.
+             */
+            if self.skipNextPresetRestore {
+                self.skipNextPresetRestore = false
+                HSZoneLog.record("presetRestoreYielded", ["to": "lensSwap"])
+                return
+            }
             let began = CACurrentMediaTime()
             guard self.session.sessionPreset != .photo, self.session.canSetSessionPreset(.photo) else { return }
             self.session.beginConfiguration()

@@ -334,6 +334,24 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      than false continuity, which is this project's standing rule for exactly this shape of problem.
      */
     private var originEpoch = 0
+    /**
+     ⛑ **A NAME for the origin, because the counter cannot distinguish two of them.**
+
+     ⚑ *Found by the owner's question, 2026-09-06: "I have used the same zone for 2 tests about 25
+     minutes apart — has any of the positioning changed during those down times and app rebuilds?"*
+     **It had, completely**, and the export could not say so. The manifest shows both runs in one
+     zone reporting `originEpoch: 1`, each with `reinits: 1`, `sinceInitSec: 1.4` and a pose within
+     a millimetre of `(0,0,0)` — *two fresh origins wearing the same number.*
+
+     **`originEpoch` is a per-process counter.** A new launch starts it again, so the first origin of
+     every run is epoch 1 — and equal epochs are exactly what the desk is told means *comparable*.
+     ⚠️ **That is the false-continuity failure this field was built to prevent, committed by the
+     instrument itself.** *A stale frame silently vouching for a measurement nobody took in it.*
+
+     A uuid is minted wherever the origin is, so **equal ids mean one frame and nothing else does.**
+     The counter stays beside it: it is readable, and it still says how many times a run re-based.
+     */
+    private var originId = UUID().uuidString
 
     /// What the session is actually configured to do, so `enter` can tell a real change from a
     /// mode label change. Compared by value — two configs that differ in nothing must compare equal.
@@ -452,11 +470,16 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         reinitCount += 1
         // ⚑ Only a RESET changes the frame. A re-init keeps it, which is the whole distinction the
         // desk needs and the one `reinits` alone could never express.
-        if mustReset { originEpoch += 1 }
+        if mustReset {
+            originEpoch += 1
+            // ⚑ A new frame is a new name. Minted here and nowhere else, beside the one line that
+            // creates the thing it names.
+            originId = UUID().uuidString
+        }
         lastInitAt = Date()
         HSZoneLog.record("enter", [
             "mode": next.rawValue, "reset": mustReset, "unmet": unmet, "reinits": reinitCount,
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
         ])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
         // ⚑ Cleared for RoomPlan rather than stored: it configures the session behind our back, so a
@@ -555,7 +578,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            the field populated. Two rooms were meshed on that walk; the difference between them is
            the entire question the desk is asking. */
         guard !anchors.isEmpty else {
-            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "originEpoch": originEpoch,
+            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "originEpoch": originEpoch, "originId": originId,
                     "why": "nothing was meshed"]
         }
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
@@ -651,7 +674,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "anchors": anchors.count,
             "faces": faces,
             // ⛑ Same frame question as the plan: geometry and poses combine only within one epoch.
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             // ⚑ Two rooms were meshed on the 2026-08-30 walk and neither payload could say which
             // it was. See the guard above.
             "zoneId": zoneId,
@@ -843,6 +866,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
                 "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(t[c][r]) } },
                 "mapping": mapping, "reinits": self.reinitCount, "originEpoch": self.originEpoch,
+                "originId": self.originId,
                 "sinceInitSec": Date().timeIntervalSince(self.lastInitAt),
                 "featurePoints": f.rawFeaturePoints?.points.count ?? 0,
                 /* ⚑ The camera model of the photograph itself, not of the tracking stream — the two
@@ -1050,7 +1074,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             // ⚑ The three that let a desk age a pose. See the comments above and on `reinitCount`.
             "mapping": mapping,
             "reinits": reinitCount,
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             "sinceInitSec": Date().timeIntervalSince(lastInitAt),
             "featurePoints": frame.rawFeaturePoints?.points.count ?? 0,
             /*
@@ -1375,7 +1399,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      USDZ. `confidence` travels with each one — RoomPlan says how sure it is and dropping that would
      be the same mistake as dropping `trackingState`.
      */
-    private static func describe(_ room: CapturedRoom, zoneId: String, originEpoch: Int) -> [String: Any] {
+    private static func describe(_ room: CapturedRoom, zoneId: String, originEpoch: Int, originId: String) -> [String: Any] {
         func surfaces(_ list: [CapturedRoom.Surface]) -> [[String: Any]] {
             list.map { s in
                 let p = s.transform.columns.3
@@ -1407,7 +1431,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             /* ⛑ **The frame this plan is drawn in.** The desk places containers by combining the
                plan with posed photographs, so the plan must say which origin it belongs to — a plan
                and a pose from different epochs are both correct and not comparable. */
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             "walls": surfaces(room.walls),
             "doors": surfaces(room.doors),
             "windows": surfaces(room.windows),
@@ -1580,7 +1604,7 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 HSZoneLog.record("roomBuilt", ["walls": room.walls.count])
                 self.capturedRoom = room
-                self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch))
+                self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch, originId: self.originId))
             } catch {
                 self.roomError = error.localizedDescription
                 self.deliverRoom(["captured": false, "why": error.localizedDescription])
@@ -1617,7 +1641,7 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
          * full room description at that rate is work spent redrawing a picture nobody read. */
         guard Date().timeIntervalSince(lastPlanAt) > 0.5 else { return }
         lastPlanAt = Date()
-        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId, originEpoch: originEpoch)])
+        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId, originEpoch: originEpoch, originId: originId)])
     }
 
     func captureSession(_ session: RoomCaptureSession,

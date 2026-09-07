@@ -127,6 +127,14 @@ export type ZonePosition =
        * than a matter of trust. An honest orphan beats false continuity — the standing rule.
        */
       originEpoch?: number;
+      /** ⛑ The origin's NAME. `originEpoch` is a per-process counter, so the first origin of every
+       *  launch is 1 — two runs in one zone both report 1 for different frames. **Equal ids mean one
+       *  frame; nothing else does.** See the fuller note in `events.ts`. */
+      originId?: string;
+      /** ⛑ The origin's NAME.  is a per-process counter, so the first origin of every
+       *  launch is 1 — two runs in one zone both report 1 for different frames. **Equal ids mean one
+       *  frame; nothing else does.** See the fuller note in `events.ts`. */
+      originId?: string;
 
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */

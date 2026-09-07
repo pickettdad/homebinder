@@ -148,6 +148,17 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
            positive because it retires an option rather than leaving it to be re-argued. */
         /* ⚑ **The exposure lock — the one measurement the owner's traverse idea turns on.** See
            `HSExposureLock`. Same shape as the zoom floor: ask the device, not the documentation. */
+        /* ⚑ **Step 1 of the posed traverse.** What a shutter at traverse cadence costs the tracking
+           stream, and whether texture reads the same on ARKit's frames — both unmeasured, both able
+           to sink the build at step 5 rather than here. See `HSTraverseSource`. */
+        if CommandLine.arguments.contains("--hs-traverse-source"), #available(iOS 16.0, *) {
+            let probe = HSTraverseSource()
+            traverseSource = probe
+            probe.run { result in
+                print("HS-TRAVERSE-SOURCE RESULT \(result["VERDICT"] ?? "?")")
+                self.traverseSource = nil
+            }
+        }
         if CommandLine.arguments.contains("--hs-exposure-lock"), #available(iOS 16.0, *) {
             let probe = HSExposureLock()
             exposureLock = probe
@@ -372,6 +383,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
     private var zoomFloor: AnyObject?
     private var exposureLock: AnyObject?
+    private var traverseSource: AnyObject?
     /// ⚑ The step-out window, owned natively so a second shutter press cannot enter it half-open.
     private var roomShotOut = false
     private var roomShotWideReached = false

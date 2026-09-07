@@ -869,10 +869,18 @@ export function CameraScreen({
 
   /** ⚑ Stepped out on the ultra-wide, ARKit paused, waiting for the concierge to frame and press. */
   const [steppedOut, setSteppedOut] = useState(false);
+  /** ⚑ A room shot has been taken in THIS zone — so another can be offered. Not `pendingIntent`:
+   *  armed means *the next shutter is this*, and offered means *you may ask for one more*. */
+  const [roomShotTaken, setRoomShotTaken] = useState(false);
   const steppedOutRef = useRef(false);
   useEffect(() => {
     steppedOutRef.current = steppedOut;
   }, [steppedOut]);
+  /* ⛑ The offer belongs to the ROOM. Carrying it into the next zone would offer "another" room shot
+     in a room that has had none — the stale-across-zones shape that `zoneTracking` was caught in. */
+  useEffect(() => {
+    setRoomShotTaken(false);
+  }, [zoneId]);
 
   const openRef = useRef<OpenContainer | null>(null);
   const zoneRef = useRef<string | undefined>(undefined);
@@ -938,6 +946,23 @@ export function CameraScreen({
       if (steppedOutRef.current && steppedOutZone) {
         const out = await roomShotCapture().catch(() => ({ ok: false, why: "the step-out failed" }));
         setSteppedOut(false);
+        /*
+         ⛑ **A completed room shot stops being ARMED and starts OFFERING.**
+
+         ⚑ *Field 2026-09-06: "the tag at the top of the viewfinder still read room shot; I took the
+         capture anyway."* It stayed armed because a room shot is one act per angle and the concierge
+         decides how many — a rule written in August and still right. **But armed and offered are
+         different things, and one badge said both.** *"Next shot · room shot" over a viewfinder
+         about to take an object capture is a label that contradicts what will happen* — and the
+         export proves the label was the wrong half: the captures filed correctly as ordinary ones.
+
+         **The button he asked for is what makes this resolvable.** *"Maybe a button for take another
+         room shot, because a room can take 1-3 room shots total."* An offer is visible without
+         claiming the next shutter press belongs to it.
+        */
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setRoomShotTaken(true);
         await fileRoomShot(out, steppedOutZone);
         return;
       }
@@ -3080,7 +3105,7 @@ export function CameraScreen({
           */}
           {steppedOut ? (
             <p className="text-sm text-brass-300">107° — frame the room, then press the shutter</p>
-          ) : pendingIntent === "room-shot" ? (
+          ) : roomShotTaken ? (
             /*
              ⛑ **Another room shot is a button, not an automatic return to wide.**
 

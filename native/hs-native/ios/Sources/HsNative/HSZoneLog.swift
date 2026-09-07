@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /**
  What the zone session did, kept by the app rather than by whoever was watching.
@@ -35,6 +36,29 @@ enum HSZoneLog {
     private static let lock = NSLock()
     private static let started = Date()
 
+    /// The same four words `HSGateOne` and the status panel use, so a walk's series and the gate's
+    /// are directly comparable rather than nearly comparable.
+    /*
+     ⛑ **Turned on here rather than assumed, because `batteryLevel` answers -1 when it is off.**
+
+     Three other files enable it — `HSBench`, `HSGateOne`, `HSShellPlugin` — and every one of them
+     does so inside a method that may never have run. ⚑ *A log that depends on somebody else having
+     initialised the thing it reads records -1 for a whole walk and looks like a device fault*, which
+     is the thing-consulted-is-not-the-thing-that-governs failure with a battery attached.
+     */
+    private static let batteryReady: Bool = {
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        return true
+    }()
+
+    static func thermalWord() -> String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"; case .fair: return "fair"
+        case .serious: return "serious"; case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
+    }
+
     static func record(_ what: String, _ detail: [String: Any] = [:]) {
         lock.lock()
         defer { lock.unlock() }
@@ -42,7 +66,25 @@ enum HSZoneLog {
             // Seconds since launch rather than a wall clock: the question is always *what happened
             // in what order and how long apart*, and a clock makes that arithmetic the reader's job.
             "t": Date().timeIntervalSince(started),
-            "what": what
+            "what": what,
+            /*
+             ⛑ **Thermal and battery on EVERY row, because they were on screen and nowhere else.**
+
+             ⚑ *Owner, 2026-09-06: "I wonder now if the thermal and battery will be changed
+             significantly. Is the thermal tool still on the build to keep track of that over our walk
+             tests?"* It was — in `HSGateOne`, the 45-minute probe, and in the live status panel. **A
+             walk recorded neither**, so the one configuration change most likely to move them —
+             scene reconstruction now running continuously in every mode — could only be judged by
+             somebody watching the screen at the time.
+
+             *Stamped on every row rather than on a timer:* a walk already writes rows at every
+             capture, mode change and tracking transition, so the trace comes free and is dense
+             exactly where the device is working hardest. **A separate sampler would be a second
+             clock to reason about, and Gate 1's own thermal series is what it would be compared
+             against — that one sampled on the events too.**
+             */
+            "thermal": Self.thermalWord(),
+            "battery": Self.batteryReady ? Double(UIDevice.current.batteryLevel) : -1,
         ]
         for (k, v) in detail { row[k] = v }
         entries.append(row)

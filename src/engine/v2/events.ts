@@ -48,6 +48,29 @@ export const EVENT_SCHEMA_VERSION_V2 = 2;
  */
 export const PIN_FLAGS = ["fine", "monitor", "issue"] as const;
 
+/**
+ ⛑ **One list, because there were two and they had already diverged.**
+
+ This union lived in `events.ts` and again in `sessionStore.ts`, and adding `room-shot` to the first
+ typechecked while the second silently refused it. ⚑ *Two copies of a vocabulary is how one of them
+ becomes wrong* — the same reason the build sequence is not kept in this repo twice.
+
+ ⚑ `room-shot` is its own act rather than a `capture`. **The desk asks a different question of a
+ failed room shot than of a failed photograph**: a room shot is the frame it places objects against
+ visually, so its absence means a room it cannot lay out, while a missing ordinary capture is one
+ object it cannot see. *Folding them together makes the two indistinguishable in the one place the
+ distinction is actionable.*
+ */
+export type RefusalAct =
+  | "floorplan"
+  | "mesh"
+  | "position"
+  | "lens"
+  | "traverse"
+  | "capture"
+  | "room-shot"
+  | "zone-session";
+
 export type PinFlag = (typeof PIN_FLAGS)[number];
 
 /**
@@ -324,7 +347,12 @@ export type V2SessionEvent =
   | (EventBase & {
       type: "AppRefused";
       /** The act, not the symptom. `position` covers a pose that could not be taken at all. */
-      act: "floorplan" | "mesh" | "position" | "lens" | "traverse" | "capture" | "zone-session";
+      /* ⚑ `room-shot` is its own act, not a `capture`. **The desk asks a different question of a
+         failed room shot than of a failed photograph**: a room shot is the frame it places objects
+         against visually, so its absence means a room it cannot lay out — while a missing ordinary
+         capture is one object it cannot see. *Folding it into `capture` would make the two
+         indistinguishable in the one place the distinction is actionable.* */
+      act: RefusalAct;
       zoneId?: string;
       /** The container it happened inside, where there was one. */
       pinId?: string;

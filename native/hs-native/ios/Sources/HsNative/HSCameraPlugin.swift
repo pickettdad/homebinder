@@ -58,6 +58,12 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resumeZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "takePosition", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "captureStill", returnType: CAPPluginReturnPromise),
+        /* ⚑ Three acts, because the middle one is a person framing a room — see `roomShotStepOut`.
+           A method absent from THIS list is a method JS cannot call however well it is written, and
+           that is a silent failure at the bridge rather than a compile error. */
+        CAPPluginMethod(name: "roomShotStepOut", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "roomShotCapture", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "roomShotAbort", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "retryZone", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startRoomPlan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopRoomPlan", returnType: CAPPluginReturnPromise),
@@ -93,6 +99,25 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.bench = nil
             }
         }
+        /*
+         ⛑ **At launch, on the session queue, before any zone can exist — the whole point of the
+         pre-build is WHEN it happens.**
+
+         ⚑ Measured (`HSArProbe`): building an `AVCaptureDeviceInput` costs **7 ms here and 9,006 ms
+         once ARKit holds the camera.** Baseline Service Design v1.12 calls this "a requirement of
+         the hatch and not an optimisation of it", and it had never been built — which is why the
+         room shot's wide frame has no affordable path today.
+
+         *Nothing else changes.* No session runs, no preset moves, no lens is selected. `swapLens`
+         simply finds an input already made instead of making one in the expensive state, and falls
+         back to building on demand — today's behaviour — if this failed.
+         */
+        /* ⛑ `ensureController()`, not the optional chain — `controller?` silently does nothing when
+           the controller has not been made yet, which at `load()` is always. **A pre-build that
+           quietly never runs is worse than none**: it reads as present in the source and still costs
+           9,006 ms in the field. *Caught by checking the device log for `inputsPrepared` and finding
+           no row* — the instrument earning its place immediately. */
+        ensureController().warmInputs()
         if CommandLine.arguments.contains("--hs-plate"), #available(iOS 16.0, *) {
             let p = HSPlateAB()
             plateAB = p
@@ -117,6 +142,27 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             let probe = HSLensProbe()
             lensProbe = probe
             probe.run { _ in self.lensProbe = nil }
+        }
+        /* ⚑ **The zoom floor — the one measurement that decides whether the room-shot handover has
+           to exist at all.** See `HSZoomFloor`. Two minutes, and a negative is as useful as a
+           positive because it retires an option rather than leaving it to be re-argued. */
+        /* ⚑ **The exposure lock — the one measurement the owner's traverse idea turns on.** See
+           `HSExposureLock`. Same shape as the zoom floor: ask the device, not the documentation. */
+        if CommandLine.arguments.contains("--hs-exposure-lock"), #available(iOS 16.0, *) {
+            let probe = HSExposureLock()
+            exposureLock = probe
+            probe.run { result in
+                print("HS-EXPOSURE-LOCK RESULT \(result["VERDICT"] ?? "?")")
+                self.exposureLock = nil
+            }
+        }
+        if CommandLine.arguments.contains("--hs-zoom-floor"), #available(iOS 16.0, *) {
+            let probe = HSZoomFloor()
+            zoomFloor = probe
+            probe.run { result in
+                print("HS-ZOOM-FLOOR RESULT \(result["VERDICT"] ?? "?")")
+                self.zoomFloor = nil
+            }
         }
         if CommandLine.arguments.contains("--hs-ar-probe") {
             let probe = HSArProbe()
@@ -324,6 +370,15 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Held for the length of the run; the probe is otherwise unowned and would deallocate mid-flight.
+    private var zoomFloor: AnyObject?
+    private var exposureLock: AnyObject?
+    /// ⚑ The step-out window, owned natively so a second shutter press cannot enter it half-open.
+    private var roomShotOut = false
+    private var roomShotWideReached = false
+    /// ⛑ **In flight across a transition** — distinct from `roomShotOut`, which holds the window
+    /// open while a person frames. *An earlier version of this file claimed to have this and did
+    /// not: a guard read at entry that nothing ever sets is a guard two callers pass together.*
+    private var roomShotBusy = false
     private var arProbe: HSArProbe?
 
     private var bench: HSBench?
@@ -389,9 +444,20 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
              */
             if let existing = self.arPreview {
                 let placed = existing.superview === superview
+                let mine = superview.subviews.firstIndex(of: existing) ?? Int.max
+                /*
+                 ⛑ **Above the capture preview as well as below the web view — three layers, two
+                 comparisons, and only one was being made.**
+
+                 The capture preview is now attached whenever the screen opens, including while a
+                 zone owns the lens. ⚑ *So "below the web view" stopped being sufficient the moment
+                 that changed*: an ARKit preview correctly below the page but **underneath a capture
+                 layer showing the last frame that session saw** is the 2026-08-21 black screen with
+                 an extra step — and `arPreviewKept` would have called it fine.
+                 */
                 let ordered = placed
-                    && (superview.subviews.firstIndex(of: existing) ?? Int.max)
-                     < (superview.subviews.firstIndex(of: web) ?? -1)
+                    && mine < (superview.subviews.firstIndex(of: web) ?? -1)
+                    && mine > (self.controller?.previewViewForOrdering.flatMap { superview.subviews.firstIndex(of: $0) } ?? -1)
                 if placed && ordered {
                     /*
                      ⛑ **Keeping the view must re-assert every condition that makes it VISIBLE, and
@@ -462,6 +528,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                saw before it lost the camera. */
             superview.insertSubview(view, belowSubview: web)
             self.arPreview = view
+            self.controller?.arPreviewForOrdering = view
             HSZoneLog.record("arPreviewAttached", [
                 "w": Double(view.bounds.width), "h": Double(view.bounds.height),
                 // ⚑ The two facts that decide whether anything can be SEEN, rather than whether a
@@ -618,6 +685,9 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             HSZoneLog.record("arPreviewDetached", ["had": self?.arPreview != nil])
             self?.arPreview?.removeFromSuperview()
             self?.arPreview = nil
+            // ⛑ Both ends. A stale ordering reference would send the next capture preview under a
+            // view that is no longer there — the same one-ended shape, one layer down.
+            self?.controller?.arPreviewForOrdering = nil
             if self?.restoreOpaqueForAr == true, let web = self?.webView {
                 WebLayer.restore(web, wasOpaque: true)
                 self?.restoreOpaqueForAr = false
@@ -756,6 +826,18 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
              */
             if let outgoing = self.zone {
                 HSZoneLog.record("zoneReplaced", ["for": id])
+                /* ⛑ **The step-out latch dies with the zone that opened it.** `roomShotOut` gates
+                   `roomShotCapture`; left true across a zone change it refuses every room shot in
+                   every room that follows, and the lens would still be on wide. *A latch whose exit
+                   lives only on the happy path is a latch with no exit* — the seventh instance of
+                   that class here, and the review found it before a walk did. */
+                if self.roomShotOut || self.roomShotBusy {
+                    HSZoneLog.record("roomShotStranded", ["clearedBy": "zoneReplaced"])
+                    _ = self.controller?.requestLens(.normal)
+                    self.roomShotOut = false
+                    self.roomShotBusy = false
+                    self.roomShotWideReached = false
+                }
                 _ = outgoing.closeZone()
             }
             let out = made.openZone(id) { [weak self] event in
@@ -806,6 +888,191 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["ok": false, "why": "no zone open"]); return
         }
         call.resolve(js(z.retry()))
+    }
+
+    /*
+     ═══ THE ROOM SHOT'S STEP-OUT ═══════════════════════════════════════════════════════════════
+
+     ⛑ **Three acts, because the middle one is the concierge framing a shot and no single call can
+     contain a person looking at a room.**
+
+     ⚑ *Why a step-out at all, and it is measured rather than assumed.* ARKit configures the plain
+     wide-angle device at **64.7°** and, while world tracking runs, pins its zoom range to exactly
+     `[1.0, 1.0]` — `docs/ZOOM-FLOOR-RESULT-2026-09-06.md`. The ultra-wide's **107.3°** is reachable
+     only by swapping the input, which means yielding the lens. *The field's own words:* **"it's hard
+     to know what is in the capture if you can't see it in the wide view."**
+
+     ⛑ **And the last build that did this DESTROYED THE POSE.** Every room shot in the 2026-09-05
+     export carries `positioned: false, why: "Required sensor failed"` on the wide frame and
+     `position: null` on its partner. `Required sensor failed` is ARKit being refused the camera:
+     **that swap collided, it did not yield.** The difference here is that every step is deliberate
+     and ordered, and the traverse is the existence proof that a deliberate yield keeps the room —
+     `kept 22 / 24 / 21` frames, `originEpoch` unchanged, across a two-zone walk.
+
+     **The state lives here, not in JS.** `roomShotOut` is written before the first `await` any caller
+     could interleave with, so a second shutter press cannot enter a half-open window — an adversarial
+     review of an earlier design found exactly that hole, a guard read once at entry and never set.
+     */
+    @objc func roomShotStepOut(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let zone else { call.reject("no zone open"); return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard !self.roomShotOut, !self.roomShotBusy else {
+                call.resolve(self.js(["ok": false, "why": "a room shot is already under way"])); return
+            }
+            // ⚑ BOTH set before anything that yields. `roomShotBusy` is the one an earlier version of
+            // this file claimed to have and did not: a guard read at entry that nothing ever sets is
+            // a guard two callers pass together.
+            self.roomShotBusy = true
+            self.roomShotOut = true
+            let before = zone.state()
+            HSZoneLog.record("roomShotStepOut", ["from": String(describing: before["mode"] ?? "?")])
+            /* The yield, in the traverse's proven order: save the map, pause ARKit, disarm, take the
+               AR preview down, hand the lens back. `pause()` does all five. */
+            /* ⚑ Set BEFORE `pause()`, because `pause()` is what enqueues the restore. Setting it
+               afterwards would leave the ordering to chance; setting it first makes the enqueued
+               block find the flag already true, on the one queue that reads it. */
+            self.controller?.skipNextPresetRestore = true
+            _ = zone.pause()
+            /*
+             ⛑ **Wait out the preset restore `pause()` just enqueued, or the swap races it.**
+
+             `releaseCamera` → `reclaimCamera` starts the capture session synchronously and then
+             enqueues an **asynchronous** restore of `sessionPreset` to `.photo` — made async on
+             2026-08-30 because the synchronous version cost 9.3 s and a black screen. A
+             `beginConfiguration` landing between that enqueue and its execution is two configuration
+             transactions on one session, and the measured symptom of losing that race is already in
+             this file: **640×480, 49 KB stills where the same path had produced 2.5 MB.**
+
+             `startTraverse` takes the same barrier for the same reason (`sessionQueue.sync { }`), and
+             this is the second caller of a rule that was written once.
+             */
+            self.controller?.awaitSessionQueue()
+            let achieved = self.controller?.requestLens(.wide)
+            /* ⛑ **Read back off the controller, not off `Achieved`.** `Achieved` carries the MODE and
+               what could not be met — it has never carried the lens, and asking it would have been a
+               value invented to answer a question. The controller's `lens` is set by the swap itself,
+               after `commitConfiguration`, which is the only place that knows. */
+            let got = self.controller?.currentLens ?? .normal
+            self.roomShotWideReached = got == .wide
+            HSZoneLog.record("roomShotWide", ["reached": got.rawValue, "unmet": achieved?.unmet ?? []])
+            // The window is open and no longer in flight — the concierge now frames, for as long
+            // as they like. `roomShotOut` alone holds it; `roomShotBusy` guards the transitions.
+            self.roomShotBusy = false
+            call.resolve(self.js([
+                "ok": true,
+                // ⚑ Painted from the return, never the ask. A viewfinder that says "wide" because a
+                // swap was requested is the failure this whole file is written against.
+                "wide": self.roomShotWideReached,
+                "lens": got.rawValue,
+            ]))
+        }
+    }
+
+    /**
+     ⛑ **The far end: the wide frame, then the lens back, then the positioned 1× frame.**
+
+     ⚑ **Order is the deliverable.** The owner asked for it precisely: *"wide angle first, we need it
+     for desk to use for visual room placements, and the normal lens right after so it knows the
+     position and where it was looking via raycast."* The wide frame is taken while AVFoundation holds
+     the lens; the 1× is taken by `captureStill` **after** ARKit has it back and tracking has settled,
+     so it carries a real pose, a real surface and a real raycast.
+
+     ⛑ **A bounded wait, and a refusal rather than a silent continue.** If tracking does not return,
+     the wide frame is still filed and the pose is recorded as refused with its reason — *an absence
+     reads as nobody tried; a refusal reads as this was attempted and here is why.*
+     */
+    @objc func roomShotCapture(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *), let zone else { call.reject("no zone open"); return }
+        guard let controller else { call.reject("camera is not running"); return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.roomShotOut, !self.roomShotBusy else {
+                call.resolve(self?.js(["ok": false, "why": "not stepped out, or already finishing"]) ?? JSObject()); return
+            }
+            // ⚑ Set before the first hop, for the same reason as in `stepOut`. Two shutter presses
+            // arriving together both passed the old guard, because it read a flag nobody set.
+            self.roomShotBusy = true
+            controller.capture(wideSibling: false) { result in
+                let wide: [String: Any]
+                switch result {
+                case .success(let payload): wide = payload
+                case .failure(let error): wide = ["error": error.localizedDescription]
+                }
+                HSZoneLog.record("roomShotWideTaken", ["ok": wide["error"] == nil])
+                DispatchQueue.main.async {
+                    // Back to 1× BEFORE the lens goes home: ARKit is offered only the wide-angle
+                    // device, and handing back mid-swap is how the old build met `sensorFailed`.
+                    _ = controller.requestLens(.normal)
+                    _ = zone.resume()
+                    /*
+                     ⛑ **ARKit is woken and WAITED FOR, and the comment that used to sit here was
+                     wrong in the way that matters most: it described behaviour the code did not have.**
+
+                     It said the zone re-takes the lens lazily inside `captureStill`'s own path.
+                     ⚑ **It does not.** `resume()` sets `armed = true` and nothing else, and the only
+                     `wake()` in `HSZoneSession` belongs to `position()`. So the 1× frame was being
+                     asked of a **paused** session: nil on a zone whose ARKit had never run, or the
+                     retained pre-pause frame — still reporting `.normal` — on one where it had.
+                     **Both land on the same export shape as the 2026-09-05 failure this whole design
+                     exists to prevent: a wide frame with no positioned partner.**
+
+                     *The traverse keeps its world because every `handLens("zone")` is followed by a
+                     `takePosition()`, which wakes. This substituted `captureStill`, which does not.*
+
+                     ⚠️ **Off the main thread**, because `wakeForCapture` sleeps in 50 ms steps waiting
+                     for a frame ARKit stands behind. And bounded: if it never settles, the wide frame
+                     still files and the pose is refused **with its reason**, which is the difference
+                     between a gap the desk can date and an absence it cannot.
+                     */
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let settled = zone.wakeForCapture()
+                        HSZoneLog.record("roomShotSettled", ["settled": settled])
+                        zone.captureStill(text: false) { still in
+                            self.roomShotOut = false
+                            self.roomShotWideReached = false
+                            self.roomShotBusy = false
+                            HSZoneLog.record("roomShotDone", [
+                                "wide": wide["error"] == nil,
+                                "settled": settled,
+                                "positioned": (still["position"] as? [String: Any])?["positioned"] as? Bool ?? false,
+                                "why": still["why"] ?? "",
+                            ])
+                            call.resolve(self.js(["ok": true, "wide": wide, "primary": still, "settled": settled]))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// ⛑ The back button, the failure path, and anything else that leaves. **A step-out has two ends
+    /// and this is the one that gets forgotten** — seven instances of that class in this codebase.
+    @objc func roomShotAbort(_ call: CAPPluginCall) {
+        guard #available(iOS 17.0, *) else { call.resolve(); return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.roomShotOut else { call.resolve(); return }
+            HSZoneLog.record("roomShotAborted")
+            self.controller?.awaitSessionQueue()
+            _ = self.controller?.requestLens(.normal)
+            let zone = self.zone
+            self.roomShotOut = false
+            self.roomShotWideReached = false
+            self.roomShotBusy = false
+            call.resolve()
+            /*
+             ⛑ **Abort wakes the room too, and leaving that out was the same bug wearing an exit
+             sign.** `resume()` only arms; a room abandoned mid-step-out with ARKit paused refuses
+             **every subsequent shutter press**, and inside a zone there is no fallback — the screen
+             returns before the one call that would have woken it. *The concierge sees a working
+             viewfinder over a room that records nothing.* Off the main thread, bounded, and the
+             result is logged rather than assumed.
+             */
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = zone?.resume()
+                let settled = zone?.wakeForCapture() ?? false
+                HSZoneLog.record("roomShotAbortSettled", ["settled": settled])
+            }
+        }
     }
 
     @objc func captureStill(_ call: CAPPluginCall) {
@@ -1086,8 +1353,25 @@ final class CameraController: NSObject {
     private var requestedLens: CameraLens?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var previewView: UIView?
+    /// ⚑ Read by  to keep the ARKit layer ABOVE this one. Exposed rather than made
+    /// internal so the ordering rule stays a question asked of the controller that owns the layer.
+    var previewViewForOrdering: UIView? { previewView }
+
+    /// ⛑ **Wait out whatever is already enqueued on `sessionQueue`** — the same barrier
+    /// `startTraverse` takes, for the same reason: `reclaimCamera` restores the preset
+    /// *asynchronously*, and a `beginConfiguration` landing mid-restore is two transactions on one
+    /// session. The measured symptom of losing that race is 640×480 stills where 2.5 MB belonged.
+    func awaitSessionQueue() { sessionQueue.sync { } }
     private weak var hostWebView: UIView?
     private var restoreOpaque: Bool?
+    /// ⚑ Set by a caller that is about to reconfigure the session anyway, **before** the work that
+    /// enqueues a restore. Written on main, read on `sessionQueue` — safe because the write always
+    /// precedes the enqueue, and the reader is the enqueued block itself.
+    var skipNextPresetRestore = false
+    /// ⛑ **The ARKit preview, so `attachPreview` can go UNDER it.** Weak, because the plugin owns
+    /// the view's lifetime and a stale strong reference here would order against a dead layer.
+    /// *One fact, known by the layer that arrives second as well as the one that arrives first.*
+    weak var arPreviewForOrdering: UIView?
 
     private let motion = CMMotionManager()
     private var statusTimer: Timer?
@@ -1427,21 +1711,59 @@ final class CameraController: NSObject {
                              skips the work it did not think it owed. The rule is that **anything
                              which returns instead of attaching still owes what attaching asserts.**
                              */
-                            if webView.isOpaque {
-                                // Bookkept exactly as `attachPreview` does, so `stop()` still
-                                // restores it — a transparency nobody records is one nobody undoes.
-                                self.restoreOpaque = webView.isOpaque
-                                self.hostWebView = webView
-                                WebLayer.makeTransparent(webView)
-                                HSZoneLog.record("deferredMadeTransparent")
-                            }
+                            /*
+                             ⛑ **The capture preview is attached even though the session is stopped,
+                             and that is the fix for the black traverse.**
+
+                             ⚑ *Field 2026-09-06, with a screenshot:* a traverse running, `keeping
+                             1/1`, `16s` on the clock — **and a black viewfinder.** The frames were
+                             real (`kept 22, pairs 21` in the same log). Nothing was broken except
+                             that there was nowhere to draw.
+
+                             `attachPreview` had exactly ONE caller, in the branch below this one. So
+                             with a zone open, `start()` returned here and **no capture preview layer
+                             was ever created** — and the moment the traverse reclaims the lens, the
+                             capture session runs with no layer bound to it. *A stopped session
+                             behind a preview layer is black and harmless; a running session behind
+                             nothing is the same black and is a lost capture.*
+
+                             ⚑ **Attaching early is the right order**, not a workaround: the layer is
+                             free, it shows black exactly while the session is stopped, and the ARKit
+                             preview sits above it — which is the arrangement the whole stack already
+                             assumes. *The alternative — attach it at reclaim — puts view work on the
+                             path that must be fast, and adds a fourth caller to a rule that has
+                             already been missed once.*
+                             */
+                            self.attachPreview(behind: webView)
                             self.startStatusSampling()
                             completion(.success(self.capabilities(unmetAtStart: [])))
                         }
                         return
                     }
                     try self.configureSession()
+                    /*
+                     ⛑ **Timed, because this is the CONTROL for the room shot's nine seconds and the
+                     repo has never held it.**
+
+                     This is the process's first acquisition of the rear camera and it happens with
+                     **no ARKit client in existence** — `HSZoneSession` is not constructed until
+                     `openZone`. ⚑ If it returns in milliseconds, the nine seconds belongs specifically
+                     to taking the lens back *from ARKit*: the expensive thing is a **handover**, not a
+                     start, and no amount of warming AVFoundation at launch can buy it back. If it
+                     returns at nine seconds, the cost is this app's first camera acquisition full stop
+                     and a launch-time warm-up pays it outright. **Two different plans, and this row
+                     picks one.**
+
+                     *Nobody has reported a nine-second wait opening the capture screen* — which is an
+                     absence of complaint, not a measurement, and this repo has already paid for
+                     treating one as the other.
+                    */
+                    let coldStart = CACurrentMediaTime()
                     self.session.startRunning()
+                    HSZoneLog.record("captureSessionStarted", [
+                        "ms": (CACurrentMediaTime() - coldStart) * 1000,
+                        "preset": self.session.sessionPreset.rawValue,
+                    ])
                     DispatchQueue.main.async {
                         self.attachPreview(behind: webView)
                         let achieved = self.apply(mode: mode)
@@ -1513,7 +1835,24 @@ final class CameraController: NSObject {
         let layer = container.previewLayer
         layer.session = session
         layer.videoGravity = .resizeAspectFill
-        superview.insertSubview(container, belowSubview: webView)
+        /*
+         ⛑ **Below the ARKit preview when one exists, not merely below the page.**
+
+         ⚑ *Field 2026-09-06: "backed out and clicked photograph this room — viewfinder was black."*
+         `start()`'s zone-deferred branch now calls this on every screen entry, and it inserted
+         directly beneath the web view — **which is above an ARKit preview already sitting there.**
+         The capture session is stopped while a zone owns the lens, so its layer is a **black
+         rectangle laid over a live one.**
+
+         *The three-layer ordering is asserted in `attachArPreview` and was asserted nowhere else,
+         which is the rule-in-one-caller failure with the layer that arrives second.* Both ends now
+         know it: that one keeps the ARKit view above this one, this one goes under it on arrival.
+         */
+        if let ar = arPreviewForOrdering, ar.superview === superview {
+            superview.insertSubview(container, belowSubview: ar)
+        } else {
+            superview.insertSubview(container, belowSubview: webView)
+        }
 
         restoreOpaque = webView.isOpaque
         WebLayer.makeTransparent(webView)
@@ -1561,10 +1900,18 @@ final class CameraController: NSObject {
            that was still held and was refused. ⚑ **A handover that does not wait is not a handover**
            — and it failed intermittently, which is the worst kind, because whether it worked
            depended on how busy the session queue happened to be. */
+        let yieldBegan = CACurrentMediaTime()
         sessionQueue.sync {
             if session.isRunning { session.stopRunning() }
         }
-        HSZoneLog.record("cameraYielded", ["running": session.isRunning])
+        /* ⚑ The other end of the same arbitration, and it has been just as blind. A nine-second
+           `stopRunning` at zone open would be invisible in exactly the way the nine-second
+           `startRunning` was — *a handover has two ends* is this file's oldest lesson, and it applies
+           to the instrument as much as to the operation it measures. */
+        HSZoneLog.record("cameraYielded", [
+            "running": session.isRunning,
+            "ms": (CACurrentMediaTime() - yieldBegan) * 1000,
+        ])
     }
 
     /**
@@ -1579,6 +1926,26 @@ final class CameraController: NSObject {
      *Ownership is a fact about the zone, not a race between two callers.*
      */
     private(set) var zoneOwnsCamera = false
+
+    /**
+     ⚑ **Which handover this is, since launch — because the nine seconds is an ORDINAL and no row
+     could say so.**
+
+     *Field 2026-09-06, two room-shot step-outs in one launch, one zone, one code path:*
+     `roomShotStepOut 16.16 → cameraReclaimed 25.16` = **9.00 s**, then `54.02 → 54.47` = **0.45 s**.
+     ⛑ Three explanations fit that pair and they have three different fixes — *paid once per launch*,
+     *paid once per capture-session lifetime*, and *gated on `saveWorldMap`'s 120-second floor* — and
+     **`cameraReclaimed` carried no ordinal and no duration, so it could not tell them apart.** That is
+     how two days went to the preset restore, which was real and was not this.
+
+     ⚠️ *And "once per launch" is already contradicted:* the synchronous preset restore measured
+     **9.3 s on all three handovers in one run** (2026-08-30, quoted below). So something gates it;
+     this counter plus a third room shot taken more than two minutes after the first is what names the
+     gate, and neither is available from a two-sample log.
+
+     `sessionQueue`-only, like everything else this controller keeps there.
+     */
+    private var reclaimCount = 0
 
     func reclaimCamera() {
         guard !zoneOwnsCamera else {
@@ -1596,6 +1963,21 @@ final class CameraController: NSObject {
 
            ⚑ **I made the outbound handover synchronous a day ago and left its twin behind.** A
            handover has two ends and only one of them was waiting. */
+        /*
+         ⛑ **Two clocks, because "9.00 s between two log lines" cannot say WHICH nine seconds.**
+
+         `sessionQueue` is serial, so this `sync` is two costs wearing one number: *waiting out
+         whatever is already on the queue*, and *the acquisition itself*. ⚑ They have opposite fixes —
+         a queue wait is ours to remove, an arbitration wait is not — and every attribution this file
+         has made so far was made without separating them.
+
+         Same reason `presetRestored` was made to carry its own number. **That number is what ended the
+         last round of guessing, and it ended it by disagreeing with the guess.**
+        */
+        let reclaimBegan = CACurrentMediaTime()
+        var startRunningMs = 0.0
+        var wasRunning = true
+        var nth = 0
         sessionQueue.sync {
             /*
              ⛑ **ARKit hands the lens back on ITS format, and that is the whole regression.**
@@ -1619,9 +2001,48 @@ final class CameraController: NSObject {
              here, on the way back in, inside a configuration block — and **read back afterwards**,
              because the thing consulted must be the thing that governs.
             */
+            wasRunning = session.isRunning
+            let acquireFrom = CACurrentMediaTime()
             if !session.isRunning { session.startRunning() }
+            startRunningMs = (CACurrentMediaTime() - acquireFrom) * 1000
+            reclaimCount += 1
+            nth = reclaimCount
         }
-        HSZoneLog.record("cameraReclaimed", ["running": session.isRunning])
+        /*
+         ⚑ **The number, on every reclaim — because this cost has now been MOVED three times and has
+         never once gone down.**
+
+         Four measurements, four *different* AVFoundation calls, one state (*ARKit has configured the
+         shared device and just let go*): the synchronous preset write at **9.3 s** (2026-08-30, three
+         handovers in one run); `AVCaptureDeviceInput(device:)` at **9,006 / 9,008 ms** (`HSArProbe`,
+         `docs/ZONE-SESSION-MEASURED-2026-08-19.md` §2); the async preset write at **9,004.5 ms**
+         (field 2026-09-06); and now `startRunning()` at **9.00 s** (field, same day). ⛑ *Three of those
+         land within 6 ms of each other, on three unrelated operations, in two different processes.*
+         **Work varies; a deadline does not** — this reads as one fixed wait, inherited by whichever
+         call is first to force the back camera off ARKit's `activeFormat`. Pre-building the input
+         handed it to the preset write; yielding the preset write handed it here. *Neither removed it.*
+
+         ⚑ **The prediction that makes this row worth its line:** a fix aimed at `startRunning` will
+         relocate the wait into `swapLens`'s `commitConfiguration`, which falls **outside** the
+         `roomShotStepOut → cameraReclaimed` window the field reads, and will look exactly like
+         success. `lensSwap` now carries `ms` for precisely that reason. *A duration is the only
+         instrument that can tell a fix from a relocation.*
+
+         Computed always and printed always: it is a duration, never a verdict, so runs under different
+         conditions stay comparable.
+        */
+        HSZoneLog.record("cameraReclaimed", [
+            "running": session.isRunning,
+            // The span the concierge actually feels: queue wait plus acquisition, one number.
+            "ms": (CACurrentMediaTime() - reclaimBegan) * 1000,
+            // ⚑ And the one call inside it. If `ms` is nine seconds and this is milliseconds, the cost
+            // is queue wait and every comment in this method is looking at the wrong call.
+            "startRunningMs": startRunningMs,
+            // ⛑ True when there was nothing to start. A fast row then means *no work* rather than
+            // *fast work* — two different findings wearing one number.
+            "wasRunning": wasRunning,
+            "nth": nth,
+        ])
         /*
          ⛑ **The restore is asynchronous, and that is a correction to yesterday's correction.**
 
@@ -1639,6 +2060,30 @@ final class CameraController: NSObject {
         */
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            /*
+             ⛑ **Skipped when a lens swap is about to do the same work — measured at 9,004 ms.**
+
+             ⚑ *Field 2026-09-06: "there is a 5-10 second delay on hitting the RoomShot button, I
+             thought the app had frozen."* The log names it exactly: `presetRestored ms: 9004.5`,
+             immediately before the swap to wide. **Setting `sessionPreset = .photo` renegotiates the
+             device format ARKit left behind, and that renegotiation is the nine seconds** — the
+             comment above already knew it.
+
+             The step-out then waited for it, correctly, because `awaitSessionQueue` was added to stop
+             the swap racing this very block. ⛑ **But the two are the same operation done twice:**
+             `swapLens` re-asserts `.photo` inside its own configuration transaction. *One
+             renegotiation is unavoidable; two, serialised, is nine seconds of a concierge thinking
+             the app has frozen.*
+
+             So a step-out declares that it is about to reconfigure, and this yields the work to it.
+             **Both run on `sessionQueue`, so there is no race to lose** — only an ordering, and the
+             swap is the one that should win.
+             */
+            if self.skipNextPresetRestore {
+                self.skipNextPresetRestore = false
+                HSZoneLog.record("presetRestoreYielded", ["to": "lensSwap"])
+                return
+            }
             let began = CACurrentMediaTime()
             guard self.session.sessionPreset != .photo, self.session.canSetSessionPreset(.photo) else { return }
             self.session.beginConfiguration()
@@ -1748,14 +2193,76 @@ final class CameraController: NSObject {
     /// The session surgery alone. Split from `apply(mode:)` rather than calling back into it: a
     /// swap must be followed by a full re-configure, and two functions that each call the other to
     /// finish the job is how one of them ends up running twice.
+    /**
+     ⛑ **Inputs built once, at launch, because building one later costs 9,006 ms.**
+
+     ⚑ *Measured, `HSArProbe`:* `AVCaptureDevice.default` + `AVCaptureDeviceInput(device:)` takes
+     **7 ms at launch and 9,006 ms while ARKit holds the camera.** Baseline Service Design v1.12 calls
+     the launch-time pre-build **"a requirement of the hatch and not an optimisation of it"** — and it
+     was never built. `configureSession` creates exactly one input and guards on
+     `session.inputs.isEmpty`, so every ultra-wide has been allocated lazily, in the expensive state,
+     inside the swap that needs it.
+
+     ⚠️ **Touched from `sessionQueue` ONLY.** An adversarial review of the first attempt at this found
+     the same cache written from three queues, and its verdict is the reason for this comment rather
+     than a lock: *"a raced Swift Dictionary is memory-unsafe, not merely stale."* Every read and
+     every write below is already inside `sessionQueue`; keep it that way.
+
+     *Zoom cannot substitute and that is measured too* (`docs/ZOOM-FLOOR-RESULT-2026-09-06.md`): while
+     ARKit runs, the device it configures is pinned to exactly `[1.0, 1.0]` — 64.7° against the
+     ultra-wide's 107.3°, with no path between them but an input swap.
+     */
+    private var preparedInputs: [CameraLens: AVCaptureDeviceInput] = [:]
+
+    /// Built at launch, on `sessionQueue`, before any zone can exist. Failure is silent and harmless:
+    /// `swapLens` falls back to building one on demand, which is exactly today's behaviour.
+    /// ⚑ Public entry point: hops to `sessionQueue` so callers cannot get the queue wrong. The rule
+    /// that `preparedInputs` is touched from one queue lives here, not in each caller.
+    func warmInputs() {
+        sessionQueue.async { [weak self] in self?.prepareInputs() }
+    }
+
+    private func prepareInputs() {
+        for lens in [CameraLens.normal, CameraLens.wide] where preparedInputs[lens] == nil {
+            guard let d = AVCaptureDevice.default(lens.deviceType, for: .video, position: .back),
+                  let input = try? AVCaptureDeviceInput(device: d) else { continue }
+            preparedInputs[lens] = input
+        }
+        HSZoneLog.record("inputsPrepared", ["lenses": preparedInputs.keys.map { $0.rawValue }.sorted()])
+    }
+
     private func swapLens(to wanted: CameraLens) -> Bool {
         guard !isTraversing else { return false }
         guard wanted != lens else { return true }
+        /* ⚑ The prepared input first. `AVCaptureDeviceInput` is reusable across add/remove cycles —
+           what is expensive is constructing one while ARKit holds the device, which is precisely
+           when a room shot needs it. */
+        if let ready = preparedInputs[wanted] {
+            return swapLens(to: wanted, using: ready)
+        }
         guard let newDevice = AVCaptureDevice.default(wanted.deviceType, for: .video, position: .back) else {
             return false
         }
         guard let newInput = try? AVCaptureDeviceInput(device: newDevice) else { return false }
+        /* ⛑ Cached on the way past, so a first swap pays the build once and a second never does.
+           Still `sessionQueue`-only — this line is inside the same call the guard above is. */
+        preparedInputs[wanted] = newInput
+        return swapLens(to: wanted, using: newInput)
+    }
 
+    /// ⚑ **The surgery itself, shared by both paths**, so a prepared input and a freshly-built one
+    /// can never diverge in what they do to the session. *Two functions that each half-do a swap is
+    /// how one of them forgets the preset.*
+    private func swapLens(to wanted: CameraLens, using newInput: AVCaptureDeviceInput) -> Bool {
+        /* ⛑ **Timed, because the nine seconds MOVES and this is where it moves next.**
+
+           Setting `sessionPreset = .photo` is what takes a session back out of input priority, and it
+           has measured **9,004.5 ms** doing exactly that (field 2026-09-06). This method performs the
+           same write inside its own transaction — which is why `skipNextPresetRestore` yields to it.
+           ⚑ **So a change that makes `cameraReclaimed` fast without making the step-out fast will show
+           up here and nowhere else**, because `lensSwap` is logged after the window the field reads.
+           *Three fixes have now relocated this cost; the fourth must not be able to hide.* */
+        let swapBegan = CACurrentMediaTime()
         let previous = videoInput
         session.beginConfiguration()
         if let previous { session.removeInput(previous) }
@@ -1788,13 +2295,18 @@ final class CameraController: NSObject {
         session.commitConfiguration()
         HSZoneLog.record("lensSwap", [
             "to": wanted.rawValue,
+            // ⚑ The whole configuration transaction, preset write included — the trap door under the
+            // next fix. See `swapBegan`.
+            "ms": (CACurrentMediaTime() - swapBegan) * 1000,
             // Read back AFTER commit. The thing consulted must be the thing that governs.
             "preset": session.sessionPreset.rawValue,
             "restored": session.sessionPreset == .photo,
         ])
 
         videoInput = newInput
-        device = newDevice
+        // ⚑ From the input, not from a separate lookup — the two could disagree, and the device that
+        // governs torch and rotation below is the one this input actually opened.
+        device = newInput.device
         lens = wanted
 
         /*
@@ -2218,6 +2730,20 @@ final class CameraController: NSObject {
                control.** */
             "lensLocked": zoneOwnsCamera || goal.lensLocked,
             "lens": zoneOwnsCamera ? CameraLens.normal.rawValue : lens.rawValue,
+            /*
+             ⚑ **Whether this iPad HAS an ultra-wide, which is not the same question as whether the
+             lens can be switched right now.**
+
+             `lensAvailable` answers *can I swap this instant* and is false for the whole life of a
+             zone, by design. **The room shot needs the other question** — is a 107° frame reachable
+             at all, ever — because the answer decides whether to offer a step-out or to say plainly
+             that this device cannot widen. ⛑ *Two facts under one flag is how a refusal ends up
+             meaning "not now" and "not ever" at once, and a concierge cannot act on either.*
+
+             Read from the prepared inputs rather than probed here: those are built at launch and are
+             the same objects a swap would use, so **the thing consulted is the thing that governs.**
+             */
+            "hasUltraWide": preparedInputs[.wide] != nil,
             "lensAvailable": zoneOwnsCamera
                 ? false
                 : AVCaptureDevice.default(CameraLens.wide.deviceType, for: .video, position: .back) != nil,

@@ -127,6 +127,10 @@ export type ZonePosition =
        * than a matter of trust. An honest orphan beats false continuity — the standing rule.
        */
       originEpoch?: number;
+      /** ⛑ The origin's NAME. `originEpoch` is a per-process counter, so the first origin of every
+       *  launch is 1 — two runs in one zone both report 1 for different frames. **Equal ids mean one
+       *  frame; nothing else does.** See the fuller note in `events.ts`. */
+      originId?: string;
 
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */
@@ -196,12 +200,32 @@ export function zoneGaps(zone: {
   photos: number;
   hasFloorplan: boolean;
   containers: { number: number; frames: { position?: ZonePosition }[] }[];
+  /**
+   ⛑ **Whether this zone's accumulated geometry has been filed — and it is not the same question as
+   "did the concierge use mesh mode".**
+
+   ⚑ *Since positioning runs `sceneReconstruction` continuously, the iPad builds geometry from the
+   moment the zone opens, in every mode.* `harvestMesh` reads **all** of it, and it runs at exactly
+   one moment: leaving mesh mode via Finish. **So Finish is not a "start scanning" button — it is
+   the only "keep it" button**, and a zone left without pressing it discards everything the walk
+   built, silently and for free.
+
+   *This is the absence-versus-refusal distinction again*: a room with no geometry because nobody
+   meshed and a room with no geometry because the concierge forgot are the same file.
+   */
+  meshFiled?: boolean;
 }): { complete: boolean; missing: string[] } {
   const missing: string[] = [];
   // Only a zone somebody actually photographed can be missing anything. An untouched zone is not
   // incomplete, it is unstarted, and saying otherwise would fire on every room before it is walked.
   if (zone.photos === 0) return { complete: true, missing };
   if (!zone.hasFloorplan) missing.push("no floorplan — scan the room");
+  /* ⚑ Gated on the zone having been worked in at all (`photos > 0`, above), so it never fires on a
+     room somebody walked through. The instruction is the whole point: the fix is one tap and it is
+     unavailable once the concierge has left. */
+  if (zone.meshFiled === false) {
+    missing.push("the room's 3D scan has not been kept — tap Mesh, then Finish mesh");
+  }
   /* ⛑ **Named, not counted, and the field asked for exactly this.** *"It says 3 objects the desk
      cannot place, but then doesn't really say what they are or what to do."* ⚑ A number is a
      verdict; a list is an instruction. **The concierge is standing in the room and can fix an
@@ -235,6 +259,88 @@ export function anchorAvailability(state: {
     return { canAnchor: false, why: `tracking ${state.tracking}`, fix: "Hold still and look at something with detail" };
   }
   return { canAnchor: true };
+}
+
+/**
+ * ⚑ **May the room shot step out for its wide frame right now — and what does it cost?**
+ *
+ * The room shot needs a **107°** frame; ARKit's device is pinned to **64.7°** and, while world
+ * tracking runs, to a zoom range of exactly `[1.0, 1.0]` — measured, `ZOOM-FLOOR-RESULT-2026-09-06`.
+ * **So the frame costs a camera handover**, and this decides whether to take one.
+ *
+ * ⛑ **The first design of this gate refused at the zone onset it was built for**, and the reason is
+ * worth keeping: it read a tracking state that `openZone` never sets, because opening a zone
+ * deliberately does not start ARKit. *A gate whose default is "refuse" fires hardest on the case it
+ * exists to serve.* **So this refuses only on facts that are positively known**, and is silent on
+ * absence.
+ *
+ * ⚑ **And it refuses rarely, because the handover is measured as safe** — `HSArProbe`: the map came
+ * back byte-identical, the origin moved 0.00003 m, no relocalisation. *What it costs is time, not
+ * the room.* The owner's ruling is the shape this encodes: *"since room shot only happens once or
+ * twice per room at the onset, we can accept a wait if needed… block its use mid zone if it could
+ * throw things off."* **Blocking is for what cannot work; the wait is disclosed, not prevented.**
+ */
+export function roomShotAvailability(state: {
+  /** Positively known to be running, from the native return. Absent means nobody has said. */
+  traversing?: boolean;
+  /** Positively known absent on this device. Absent means nobody has asked yet. */
+  hasUltraWide?: boolean;
+  /** The zone session's last reported failure, if any. */
+  zoneFailure?: string | null;
+  /** An object container the concierge has open. */
+  containerOpen?: boolean;
+  /** Handovers already spent in this zone — for disclosure, never for refusal. */
+  handoversThisZone?: number;
+  /** ARKit's `worldMappingStatus` as last reported. Absent means nobody has said. */
+  mapping?: string;
+}): { canStepOut: boolean; why?: string; fix?: string; note?: string } {
+  /* ⛑ Each of these is a fact that makes the step-out IMPOSSIBLE, not merely unwise — and each is
+     `=== true/false` rather than truthy, so an unanswered question never refuses. */
+  if (state.traversing === true) {
+    return { canStepOut: false, why: "a trace is running", fix: "Stop the trace, then take the room shot" };
+  }
+  if (state.hasUltraWide === false) {
+    return { canStepOut: false, why: "this iPad has no ultra-wide lens", fix: "The 1× room shot is still positioned" };
+  }
+  if (state.zoneFailure) {
+    return { canStepOut: false, why: state.zoneFailure, fix: "Restart positioning first — a step-out cannot recover it" };
+  }
+  /* ⚑ A room shot is a shot of the ROOM. Filing one into an open object would say the room belongs
+     to the object — and the fix is one tap, which is what makes this worth refusing rather than
+     silently re-targeting. */
+  if (state.containerOpen === true) {
+    return { canStepOut: false, why: "an object is open", fix: "Close the object first — a room shot belongs to the room" };
+  }
+  /* ⛑ Disclosed, not refused, and the distinction is the owner's ruling. The handover is safe; it
+     costs a few seconds of re-establishing tracking on the way back. Saying so on the second and
+     later shots lets a concierge decide; refusing would take that from them. */
+  /*
+   ⛑ **A room shot taken before the room is mapped is positioned and worth nothing.**
+
+   ⚑ *Measured, 2026-09-06 export.* The first room shot of each run — taken seconds after the zone
+   opened — reports `mapping: notAvailable`, `featurePoints: 0` and **no surface at all**. An
+   ordinary capture ninety seconds later reports `mapped`, 52 points and a `sceneDepth` surface.
+   *The pose is technically present and describes the origin itself, 1.4 seconds after ARKit started:
+   the least trustworthy measurement the system can produce.*
+
+   **Baseline Service Design v1.12 §4.1a already orders this** — *"walk into the zone and build its
+   plan before anything else is captured"* — and the floorplan's forty seconds of walking is exactly
+   what turns `notAvailable / 0 points / no surface` into `mapped / 52 / sceneDepth`.
+
+   ⚑ **Said, not refused.** The spec's order is the fix; this is the sentence for the concierge who
+   is standing there anyway, and a refusal at zone onset would fire on the case the room shot exists
+   for.
+   */
+  if (state.mapping === "notAvailable") {
+    return {
+      canStepOut: true,
+      note: "the room is not mapped yet — run the floorplan first, or this shot lands with no surface",
+    };
+  }
+  const spent = state.handoversThisZone ?? 0;
+  return spent > 0
+    ? { canStepOut: true, note: `stepping out again — positioning re-establishes each time (${spent} so far)` }
+    : { canStepOut: true };
 }
 
 /**

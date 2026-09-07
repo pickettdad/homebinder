@@ -334,6 +334,24 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      than false continuity, which is this project's standing rule for exactly this shape of problem.
      */
     private var originEpoch = 0
+    /**
+     ⛑ **A NAME for the origin, because the counter cannot distinguish two of them.**
+
+     ⚑ *Found by the owner's question, 2026-09-06: "I have used the same zone for 2 tests about 25
+     minutes apart — has any of the positioning changed during those down times and app rebuilds?"*
+     **It had, completely**, and the export could not say so. The manifest shows both runs in one
+     zone reporting `originEpoch: 1`, each with `reinits: 1`, `sinceInitSec: 1.4` and a pose within
+     a millimetre of `(0,0,0)` — *two fresh origins wearing the same number.*
+
+     **`originEpoch` is a per-process counter.** A new launch starts it again, so the first origin of
+     every run is epoch 1 — and equal epochs are exactly what the desk is told means *comparable*.
+     ⚠️ **That is the false-continuity failure this field was built to prevent, committed by the
+     instrument itself.** *A stale frame silently vouching for a measurement nobody took in it.*
+
+     A uuid is minted wherever the origin is, so **equal ids mean one frame and nothing else does.**
+     The counter stays beside it: it is readable, and it still says how many times a run re-based.
+     */
+    private var originId = UUID().uuidString
 
     /// What the session is actually configured to do, so `enter` can tell a real change from a
     /// mode label change. Compared by value — two configs that differ in nothing must compare equal.
@@ -360,6 +378,30 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         case .roomplan:
             // RoomPlan configures the session itself; we only ensure it has one to configure.
             config.planeDetection = [.horizontal, .vertical]
+            /*
+             ⛑ **Reconstruction asked for during the floorplan too, because the floorplan is the
+             longest walk of the zone and it was building nothing.**
+
+             ⚑ *Field 2026-09-06, and the owner's challenge is what found it:* his first room shot
+             came back `surface: none` — depth thin at `0 of 121`, and `meshFrom: live` with nothing
+             to hit. **His photographs show why depth refused**: the centre of that frame is the far
+             end of a basement, well past LiDAR's ~5 m, while the second shot's centre is a bookshelf
+             and measured **4.55 m**. *The depth reading was right both times.* **The mesh fallback
+             was not there to catch it.**
+
+             This case set `planeDetection` and nothing else, so **a 168-second floorplan walk
+             accumulated no geometry at all** — reconstruction began only when positioning took over,
+             thirteen seconds before the room shot. *The one capture the desk lays a room out from is
+             taken at the exact moment the mesh is emptiest.*
+
+             ⚠️ **RoomPlan may override this**, since it runs its own configuration over the session
+             we hand it. Setting it costs nothing if so, and `harvestMesh`'s anchor count after a
+             floorplan-only zone is what will say — asked rather than assumed, and the answer is a
+             row in the log rather than a belief.
+             */
+            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                config.sceneReconstruction = .mesh
+            }
         /*
          ⛑ **Mesh and positioning are ONE configuration, and writing them as two was the cost.**
 
@@ -452,11 +494,16 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         reinitCount += 1
         // ⚑ Only a RESET changes the frame. A re-init keeps it, which is the whole distinction the
         // desk needs and the one `reinits` alone could never express.
-        if mustReset { originEpoch += 1 }
+        if mustReset {
+            originEpoch += 1
+            // ⚑ A new frame is a new name. Minted here and nowhere else, beside the one line that
+            // creates the thing it names.
+            originId = UUID().uuidString
+        }
         lastInitAt = Date()
         HSZoneLog.record("enter", [
             "mode": next.rawValue, "reset": mustReset, "unmet": unmet, "reinits": reinitCount,
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
         ])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
         // ⚑ Cleared for RoomPlan rather than stored: it configures the session behind our back, so a
@@ -555,7 +602,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            the field populated. Two rooms were meshed on that walk; the difference between them is
            the entire question the desk is asking. */
         guard !anchors.isEmpty else {
-            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "originEpoch": originEpoch,
+            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "originEpoch": originEpoch, "originId": originId,
                     "why": "nothing was meshed"]
         }
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
@@ -607,10 +654,29 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let fb = a.geometry.faces
             let perFace = fb.indexCountPerPrimitive
             idx.reserveCapacity(fb.count * perFace)
+            /*
+             ⛑ **`bytesPerIndex` is read here AND honoured — it used to be read and ignored.**
+
+             The line advanced by `fb.bytesPerIndex` and then read `UInt32` unconditionally. On a
+             16-bit buffer that walks 2 bytes and reads 4, so every index but the first is two halves
+             of two different numbers: ⚑ **not a crash and not an error — a room made of the wrong
+             triangles**, in the one payload the desk reconstructs geometry from.
+
+             *The comment two lines above already stated the rule* — `indexCountPerPrimitive` "is read
+             rather than assumed, for the same reason" — and then the next statement broke it. Three
+             readers of this buffer exist (`renderArPreview`, `HSSurface`, here); the other two branch
+             correctly, and **the one that got it wrong is the one that writes the export.**
+
+             *It has not bitten yet because ARKit ships 32-bit indices today.* That is precisely the
+             "works until an OS release" hazard the sibling comment names.
+             */
+            let indexBase = fb.buffer.contents()
+            let indexWidth = fb.bytesPerIndex
             for i in 0..<(fb.count * perFace) {
-                idx.append(Int(fb.buffer.contents()
-                    .advanced(by: i * fb.bytesPerIndex)
-                    .assumingMemoryBound(to: UInt32.self).pointee))
+                let p = indexBase.advanced(by: i * indexWidth)
+                idx.append(indexWidth == 2
+                    ? Int(p.assumingMemoryBound(to: UInt16.self).pointee)
+                    : Int(p.assumingMemoryBound(to: UInt32.self).pointee))
             }
             pieces.append([
                 "id": a.identifier.uuidString,
@@ -632,7 +698,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "anchors": anchors.count,
             "faces": faces,
             // ⛑ Same frame question as the plan: geometry and poses combine only within one epoch.
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             // ⚑ Two rooms were meshed on the 2026-08-30 walk and neither payload could say which
             // it was. See the guard above.
             "zoneId": zoneId,
@@ -666,8 +732,41 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         guard mode != nil else { return ["paused": false, "why": "no zone open"] }
         // Save before going quiet: this is the natural moment, and a crash while paused should cost
         // nothing at all.
-        saveWorldMap()
+        /*
+         ⛑ **Timed and LEFT IN PLACE — the step-out's nine seconds is measured across a window that
+         contains all of this and logged none of it.**
+
+         `roomShotStepOut → cameraReclaimed` spans a world-map save, an `ARSession.pause()`, a preview
+         teardown and the whole of `reclaimCamera`. With one row at each end **every one of them is a
+         suspect**, and the field's 9.00 s could belong to any.
+
+         ⚑ *`saveWorldMap` is the only thing in that window whose behaviour depends on elapsed time.*
+         It is gated at one save per 120 s, and in `.positioning` the per-frame saver never fires — so
+         a step-out at t=16 extracts a map and a step-out at t=54 is refused, **which is exactly the
+         first-slow / second-fast shape the field reported.** `getCurrentWorldMap` returns as soon as
+         it is enqueued, but the `session.pause()` on the next line — and therefore ARKit's release of
+         the camera — may queue behind the extraction. That is a mechanism, not a measurement, which is
+         the whole reason for these two clocks.
+
+         ⛑ **Measured, not removed.** The map is the zone's insurance against losing its coordinate
+         space to a crash. It has no reader today — `worldMapPath` and `zoneMapSaved` appear nowhere in
+         `src/` or `tests/` — but *insurance nobody has cashed is not insurance nobody needs*, and
+         **deleting a save to test a hypothesis spends the world to buy a number.** `mapRequested` plus
+         `arPauseMs` settles it on this device in one walk, and *then* the save can move to a moment
+         nobody is waiting on.
+        */
+        let mapFrom = CACurrentMediaTime()
+        // ⚑ The RETURN, not the call: the 120-second gate is the variable, and a row that only said
+        // "called" would read identically on the slow step-out and the fast one.
+        let mapRequested = saveWorldMap()
+        let mapMs = (CACurrentMediaTime() - mapFrom) * 1000
+        let arFrom = CACurrentMediaTime()
         session.pause()
+        HSZoneLog.record("zonePaused", [
+            "mapRequested": mapRequested,
+            "mapMs": mapMs,
+            "arPauseMs": (CACurrentMediaTime() - arFrom) * 1000,
+        ])
         paused = true
         armed = false
         /*
@@ -737,6 +836,26 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            burst that queues is honest where a dropped frame is not. */
         guard !stillInFlight else { completion(["ok": false, "why": "a capture is already in flight"]); return }
 
+        /*
+         ⛑ **A paused session is refused HERE, so no caller can read a frame out of one.**
+
+         ⚑ *Confirmed by five independent review lenses, 2026-09-06, against the room shot's
+         step-out.* `resume()` sets `armed = true` and nothing else — **it does not restart ARKit** —
+         and the only `wake()` in this file is `position()`'s. So a caller that paused, resumed and
+         then asked for a still got one of two wrong answers: **nil `currentFrame` on a zone whose
+         ARKit had never run**, or, worse, **the retained pre-pause frame, which still reports
+         `.normal`** — this file's own measured finding at `waitForTrackedFrame` — so both guards
+         below would pass and a pose from before the concierge moved would be stated as confidently
+         as a real one.
+
+         **The guard belongs on the value, not in the callers.** `waitForTrackedFrame` already
+         carries the `timestamp > stale` requirement for exactly this reason; `captureStill` had no
+         equivalent because until the step-out it was only ever called on a continuously-running
+         session. *That assumption is now false and this is where it stops being assumed.*
+         */
+        guard !paused else {
+            completion(["ok": false, "why": "positioning is paused", "recoverable": true]); return
+        }
         guard let live = session.currentFrame else {
             completion(["ok": false, "why": "no frame yet"]); return
         }
@@ -804,6 +923,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
                 "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(t[c][r]) } },
                 "mapping": mapping, "reinits": self.reinitCount, "originEpoch": self.originEpoch,
+                "originId": self.originId,
                 "sinceInitSec": Date().timeIntervalSince(self.lastInitAt),
                 "featurePoints": f.rawFeaturePoints?.points.count ?? 0,
                 /* ⚑ The camera model of the photograph itself, not of the tracking stream — the two
@@ -1011,7 +1131,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             // ⚑ The three that let a desk age a pose. See the comments above and on `reinitCount`.
             "mapping": mapping,
             "reinits": reinitCount,
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             "sinceInitSec": Date().timeIntervalSince(lastInitAt),
             "featurePoints": frame.rawFeaturePoints?.points.count ?? 0,
             /*
@@ -1091,6 +1211,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      that took it.* ⛑ The old handler did the second, which produced the next `sensorFailed`, five
      times in nine minutes.
      */
+    /**
+     ⛑ **Wake ARKit and WAIT for a frame it stands behind — the step the room shot's far end needs
+     and `resume()` deliberately does not do.**
+
+     ⚑ `resume()` means *stop refusing*, by design: the camera is re-taken lazily inside
+     `position()`, which is why the traverse keeps its world — every `handLens("zone")` is followed by
+     a `takePosition()`. **The room shot substitutes `captureStill`, which has no such path**, so it
+     needed this one stated rather than inherited.
+
+     **Bounded, and the timeout is the answer rather than a failure to report later.** `wake()` runs
+     `enter(.positioning)`, whose `needCamera?()` stops the capture session synchronously first and
+     whose `mustReset` is false — so **the origin and `originEpoch` survive**, which is the whole
+     reason a step-out is affordable at all.
+
+     ⚠️ **Blocks. Never call it on the main thread** — `waitForTrackedFrame` sleeps in 50 ms steps.
+     */
+    func wakeForCapture(timeout: TimeInterval = 8.0) -> Bool {
+        guard mode != nil else { return false }
+        if paused { wake() }
+        return waitForTrackedFrame(timeout: timeout) != nil
+    }
+
     func retry() -> [String: Any] {
         guard let m = mode else { return ["ok": false, "why": "no zone open"] }
         failure = nil
@@ -1314,7 +1456,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      USDZ. `confidence` travels with each one — RoomPlan says how sure it is and dropping that would
      be the same mistake as dropping `trackingState`.
      */
-    private static func describe(_ room: CapturedRoom, zoneId: String, originEpoch: Int) -> [String: Any] {
+    private static func describe(_ room: CapturedRoom, zoneId: String, originEpoch: Int, originId: String) -> [String: Any] {
         func surfaces(_ list: [CapturedRoom.Surface]) -> [[String: Any]] {
             list.map { s in
                 let p = s.transform.columns.3
@@ -1346,7 +1488,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             /* ⛑ **The frame this plan is drawn in.** The desk places containers by combining the
                plan with posed photographs, so the plan must say which origin it belongs to — a plan
                and a pose from different epochs are both correct and not comparable. */
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             "walls": surfaces(room.walls),
             "doors": surfaces(room.doors),
             "windows": surfaces(room.windows),
@@ -1519,7 +1661,7 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 HSZoneLog.record("roomBuilt", ["walls": room.walls.count])
                 self.capturedRoom = room
-                self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch))
+                self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch, originId: self.originId))
             } catch {
                 self.roomError = error.localizedDescription
                 self.deliverRoom(["captured": false, "why": error.localizedDescription])
@@ -1556,7 +1698,7 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
          * full room description at that rate is work spent redrawing a picture nobody read. */
         guard Date().timeIntervalSince(lastPlanAt) > 0.5 else { return }
         lastPlanAt = Date()
-        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId, originEpoch: originEpoch)])
+        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId, originEpoch: originEpoch, originId: originId)])
     }
 
     func captureSession(_ session: RoomCaptureSession,

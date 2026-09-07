@@ -173,7 +173,12 @@ describe("which origin a measurement belongs to", () => {
   it("advances the epoch only on a reset, never on a plain re-init", () => {
     // ⚑ The whole distinction. Tying it to `reinitCount` would make every mode change look like a
     // new coordinate frame and the desk would refuse work that is perfectly comparable.
-    expect(ZONE_SRC).toMatch(/if mustReset \{ originEpoch \+= 1 \}/);
+    /* ⛑ Restated 2026-09-06: this matched the one-LINE form and failed when the block grew to mint
+       an origin id beside the increment. ⚑ *A test that pins a formatting is a test that fires on
+       the fix.* The rule is that the increment happens under `mustReset` and under nothing else. */
+    expect(ZONE_SRC).toMatch(/if mustReset \{[\s\S]{0,240}?originEpoch \+= 1/);
+    // The only increment in the file is that one — an unconditional one would advance on a re-init.
+    expect((ZONE_SRC.match(/originEpoch \+= 1/g) ?? []).length).toBe(1);
     expect(ZONE_SRC).not.toMatch(/reinitCount \+= 1\s*\n\s*originEpoch \+= 1/);
   });
 
@@ -384,5 +389,47 @@ describe("what the surface point is measured against", () => {
     const surface = /enum HSSurface \{[\s\S]*$/.exec(ZONE_SRC)?.[0] ?? "";
     expect(surface).toMatch(/triangleBudget/);
     expect(surface).toMatch(/budgetHit = true/);
+  });
+});
+
+/**
+ * ⛑ **Two origins must never wear the same name.**
+ *
+ * ⚑ *Found by the owner's question, 2026-09-06: "I have used the same zone for 2 tests about 25
+ * minutes apart — has any of the positioning changed during those down times and app rebuilds?"*
+ * It had, completely. The export shows both runs in one zone reporting `originEpoch: 1`, each with
+ * `reinits: 1`, `sinceInitSec: 1.4` and a pose within a millimetre of `(0,0,0)` — **two fresh
+ * origins, indistinguishable in the record.**
+ *
+ * `originEpoch` is a per-process counter, so the first origin of every launch is `1`. And equal
+ * epochs are precisely what the desk is told means *comparable*. ⚠️ **That is the false-continuity
+ * failure the field was built to prevent, committed by the instrument itself.**
+ *
+ * The invariant is **not** that the id is a uuid — that is an implementation. It is that **the name
+ * is minted where the origin is**, so it cannot be a counter that restarts.
+ */
+describe("naming an origin", () => {
+  it("mints a new name wherever it resets the frame, in the same statement", () => {
+    // ⚑ Beside the epoch increment, under the one condition that creates a new frame. A name minted
+    // anywhere else could name a frame that already existed.
+    expect(ZONE_SRC).toMatch(/if mustReset \{[\s\S]{0,200}?originEpoch \+= 1[\s\S]{0,200}?originId = UUID\(\)/);
+  });
+
+  it("carries it on the pose, the plan and the mesh, wherever the epoch goes", () => {
+    /* ⛑ All or none: an id on the poses with none on the plan tells the desk which photographs
+       agree with each other and nothing about whether they agree with the room. */
+    const epochs = (ZONE_SRC.match(/"originEpoch":/g) ?? []).length;
+    const ids = (ZONE_SRC.match(/"originId":/g) ?? []).length;
+    expect(ids).toBeGreaterThanOrEqual(epochs - 1); // the log row is the one that may differ
+    expect(ids).toBeGreaterThanOrEqual(3);
+  });
+
+  it("does not restore a saved world map, so a launch genuinely is a new frame", () => {
+    /* ⚠️ `saveWorldMap` writes on pause and **nothing sets `initialWorldMap`** — the map is saved and
+       never restored. That is why a new launch is a new origin, and it is recorded here rather than
+       rediscovered: if a future change starts restoring maps, this test fails and the name becomes a
+       question worth re-asking rather than an assumption. */
+    expect(ZONE_SRC).toMatch(/getCurrentWorldMap/);
+    expect(ZONE_SRC).not.toMatch(/initialWorldMap/);
   });
 });

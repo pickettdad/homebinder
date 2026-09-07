@@ -247,6 +247,22 @@ export type CapturePositionMeta =
        * than a matter of trust. An honest orphan beats false continuity — the standing rule.
        */
       originEpoch?: number;
+      /**
+       ⛑ **The origin's NAME, and it is the field to compare — not the epoch.**
+
+       ⚑ *`originEpoch` is a per-process counter, so the first origin of every app launch is `1`.*
+       The 2026-09-06 export shows two separate runs in one zone both reporting `originEpoch: 1`,
+       each with `reinits: 1` and a pose within a millimetre of the origin — **two different frames
+       wearing the same number.** A desk comparing epochs would combine them and get a confident
+       wrong placement.
+
+       **Equal `originId` means one coordinate frame. Nothing else does.** *Different ids mean the
+       measurements must not be combined, however similar their epochs look.*
+
+       ⚠️ **And an app restart always mints a new one.** The world map is saved on pause and
+       `initialWorldMap` is never set, so nothing restores it: every launch starts a room over.
+       */
+      originId?: string;
 
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */

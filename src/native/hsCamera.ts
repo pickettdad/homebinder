@@ -171,6 +171,10 @@ export interface ModeStatusEvent {
   lensLocked: boolean;
   /** Whether this iPad has an ultra-wide at all. */
   lensAvailable: boolean;
+  /** ⚑ Whether a 107° frame is reachable on this device **at all** — not whether it can be reached
+   *  right now. `lensAvailable` is the second question and is false for the life of a zone by
+   *  design; conflating them makes one refusal mean *not now* and *not ever* at once. */
+  hasUltraWide?: boolean;
   /** ⚑ ARKit holds the lens for the life of the zone. `sessionRunning` is true and the capture
    *  session's own is not — see the native comment: the question is *is the camera live*. */
   cameraHeldByZone?: boolean;
@@ -672,6 +676,9 @@ interface NativeCamera {
   /** The zone session — see `src/native/zone.ts`. Three bounded modes, one coordinate space. */
   openZone(options: { zoneId?: string }): Promise<ZoneOpened>;
   closeZone(): Promise<unknown>;
+  roomShotStepOut(): Promise<{ ok: boolean; wide?: boolean; lens?: string; why?: string }>;
+  roomShotCapture(): Promise<{ ok: boolean; wide?: unknown; primary?: unknown; why?: string }>;
+  roomShotAbort(): Promise<void>;
   setZoneMode(options: { mode: ZoneMode }): Promise<{ mode: ZoneMode; unmet: string[] }>;
   pauseZone(): Promise<{ paused: boolean }>;
   resumeZone(): Promise<{ paused: boolean }>;
@@ -946,6 +953,26 @@ export const closeBenchLoop = () => requireCamera().closeBenchLoop();
 /** The zone session. `takePosition` REFUSES rather than guessing — see `src/native/zone.ts`. */
 export const openZone = (zoneId?: string) => requireCamera().openZone(zoneId ? { zoneId } : {});
 export const closeZone = () => requireCamera().closeZone();
+
+/**
+ ⛑ **The room shot's step-out, in three acts — and the middle act is a person framing a room.**
+
+ ⚑ ARKit's device is **64.7°** and, while world tracking runs, pinned to a zoom range of exactly
+ `[1.0, 1.0]` (`docs/ZOOM-FLOOR-RESULT-2026-09-06.md`). The ultra-wide's **107.3°** is reachable only
+ by swapping the input, which means yielding the lens. *There is no third way; the probe closed that
+ door rather than leaving it to be re-argued.*
+
+ **`stepOut` → the concierge frames and taps → `capture` → wide frame, lens home, positioned 1×.**
+ `abort` is the other end for every exit that is not the shutter — a back button, a failure, an
+ unmount. ⛑ *A step-out has two ends and the second is the one that gets forgotten; that class has
+ seven instances in this codebase already.*
+
+ **The window's state lives natively**, not here: a second shutter press cannot enter it half-open,
+ which an adversarial review of an earlier design found a way to do.
+ */
+export const roomShotStepOut = () => requireCamera().roomShotStepOut();
+export const roomShotCapture = () => requireCamera().roomShotCapture();
+export const roomShotAbort = () => requireCamera().roomShotAbort();
 export const setZoneMode = (mode: ZoneMode) => requireCamera().setZoneMode({ mode });
 export const pauseZone = () => requireCamera().pauseZone();
 export const resumeZone = () => requireCamera().resumeZone();

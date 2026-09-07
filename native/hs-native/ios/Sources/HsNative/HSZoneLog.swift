@@ -59,6 +59,12 @@ enum HSZoneLog {
         }
     }
 
+    /// ⛑ Set by the zone session each time it recomputes. **A global rather than a parameter**, so
+    /// every row carries it without every caller having to know it exists — the same reasoning as
+    /// thermal and battery, and the same failure it avoids: a field present on the rows whoever
+    /// wrote them remembered, and absent exactly where a problem was.
+    static var deliveredFps: Double = 0
+
     static func record(_ what: String, _ detail: [String: Any] = [:]) {
         lock.lock()
         defer { lock.unlock() }
@@ -84,6 +90,7 @@ enum HSZoneLog {
              against — that one sampled on the events too.**
              */
             "thermal": Self.thermalWord(),
+            "fps": Self.deliveredFps,
             "battery": Self.batteryReady ? Double(UIDevice.current.batteryLevel) : -1,
         ]
         for (k, v) in detail { row[k] = v }

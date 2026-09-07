@@ -333,6 +333,12 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      comparable; different epochs mean the desk must not combine them** — an honest orphan rather
      than false continuity, which is this project's standing rule for exactly this shape of problem.
      */
+    /// ⛑ Delivered frame rate over a rolling five seconds — see `didUpdate`. Read into every pose and
+    /// every zone-log row, so a walk carries its own evidence of what the pipeline cost.
+    private var deliveredFps: Double = 0
+    private var frameCount = 0
+    private var fpsWindowStart: Double = 0
+
     private var originEpoch = 0
     /**
      ⛑ **A NAME for the origin, because the counter cannot distinguish two of them.**
@@ -923,6 +929,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
                 "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(t[c][r]) } },
                 "mapping": mapping, "reinits": self.reinitCount, "originEpoch": self.originEpoch,
+                "fps": self.deliveredFps,
                 "originId": self.originId,
                 "sinceInitSec": Date().timeIntervalSince(self.lastInitAt),
                 "featurePoints": f.rawFeaturePoints?.points.count ?? 0,
@@ -1537,6 +1544,31 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     // MARK: - ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        /*
+         ⛑ **Delivered frame rate, counted here because nothing in the zone session counts it.**
+
+         ⚑ *Step 0 of the posed traverse, and it comes first because the cost of every later step is
+         invisible without it.* The only `fps()` in the package lives in `HSGateOne` — the 45-minute
+         probe — so a shipping build could lose frames to a shutter, a Vision pass or a preview and
+         **nobody would have a number.**
+
+         ⚠️ *And the existing evidence cannot see the thing that is about to change.* Gate 1's flat
+         "30.0 fps" was taken at **one high-resolution capture per fifteen seconds**; a 100 ms
+         interruption there is 0.67% of the frame budget and averages away. At the 1 Hz a posed
+         traverse wants it is 8–10%. **A number extrapolated fifteen-fold beyond its measurement is
+         an assumption wearing a measurement's clothes**, and this is the counter that settles it.
+
+         Cheap on purpose: two increments and a comparison, on a thread ARKit already owns.
+         */
+        frameCount += 1
+        let now = CACurrentMediaTime()
+        if fpsWindowStart == 0 { fpsWindowStart = now }
+        else if now - fpsWindowStart >= 5 {
+            deliveredFps = Double(frameCount) / (now - fpsWindowStart)
+            HSZoneLog.deliveredFps = deliveredFps
+            frameCount = 0
+            fpsWindowStart = now
+        }
         /* ⚑ Every frame, because the pipeline does its own cadence gate — it counts frames and
            analyses every Nth, and it must do that counting once rather than once per source. */
         // ⚑ A COPY. See `copyBuffer` — handing ARKit's own buffer to another queue starves the

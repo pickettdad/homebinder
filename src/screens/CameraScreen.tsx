@@ -383,6 +383,9 @@ export function CameraScreen({
      callback that closed over an earlier render — `applyIntentLens` is the function that did it
      first. Written every render exactly as `statusRef` above is. */
   const traversingRef = useRef(false);
+  /** ⛑ ARKit's last reported `worldMappingStatus`, so the step-out can say when a room is not mapped
+   *  yet. Written wherever a pose comes back — one place, not beside each caller. */
+  const lastMappingRef = useRef<string | null>(null);
   const zoneFailureRef = useRef<string | null>(null);
   const [openCapture, setOpenCapture] = useState<MediaRef | null>(null);
   /** Which frame of a filed capture is being looked at. Reset by opening a different one. */
@@ -1094,6 +1097,9 @@ export function CameraScreen({
        taken from the picture.*
       */
       const fromShutter = result.position;
+      /* ⛑ Recorded wherever a pose arrives, which is the one place that always knows. Reading it off
+         a status sample instead would be a proxy, five seconds stale. */
+      if (fromShutter?.positioned && fromShutter.mapping) lastMappingRef.current = fromShutter.mapping;
       const position =
         fromShutter ??
         (await takePosition().catch(
@@ -2119,6 +2125,9 @@ export function CameraScreen({
           hasUltraWide: statusRef.current?.hasUltraWide,
           zoneFailure: zoneFailureRef.current,
           containerOpen: openRef.current != null,
+          // ⚑ From the last pose the zone reported, so the note fires on the state that governs
+          // rather than on a proxy for it.
+          mapping: lastMappingRef.current ?? undefined,
         });
         if (!gate.canStepOut) {
           setZoneNote(`wide frame unavailable: ${gate.why} — ${gate.fix}`);

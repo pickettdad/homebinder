@@ -315,6 +315,21 @@ describe("may the room shot step out", () => {
     }
   });
 
+  it("says when the room is not mapped yet, and does not refuse it", () => {
+    /* ⛑ **Measured, 2026-09-06.** The first room shot of each run reported `mapping: notAvailable`,
+       `featurePoints: 0` and **no surface at all** — a pose describing the origin itself, 1.4 s after
+       ARKit started. An ordinary capture ninety seconds later reported `mapped`, 52 points and a
+       `sceneDepth` surface. ⚑ *The spec already orders the floorplan first; this is the sentence for
+       the concierge standing there anyway.* Refusing would fire on the case the room shot is for. */
+    const cold = roomShotAvailability({ mapping: "notAvailable" });
+    expect(cold.canStepOut).toBe(true);
+    expect(cold.note).toMatch(/floorplan first/);
+    // A mapped room says nothing — a note that fires always is a note nobody reads.
+    expect(roomShotAvailability({ mapping: "mapped" }).note).toBeUndefined();
+    // And an unanswered question stays silent, like every other field here.
+    expect(roomShotAvailability({}).note).toBeUndefined();
+  });
+
   it("discloses the repeat cost rather than refusing it", () => {
     /* ⚑ Owner ruling: a wait is acceptable, and blocking is for what cannot work. The handover is
        measured safe — map byte-identical, origin 0.00003 m — so the second shot is a cost to state,

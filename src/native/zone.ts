@@ -131,10 +131,6 @@ export type ZonePosition =
        *  launch is 1 — two runs in one zone both report 1 for different frames. **Equal ids mean one
        *  frame; nothing else does.** See the fuller note in `events.ts`. */
       originId?: string;
-      /** ⛑ The origin's NAME.  is a per-process counter, so the first origin of every
-       *  launch is 1 — two runs in one zone both report 1 for different frames. **Equal ids mean one
-       *  frame; nothing else does.** See the fuller note in `events.ts`. */
-      originId?: string;
 
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */
@@ -295,6 +291,8 @@ export function roomShotAvailability(state: {
   containerOpen?: boolean;
   /** Handovers already spent in this zone — for disclosure, never for refusal. */
   handoversThisZone?: number;
+  /** ARKit's `worldMappingStatus` as last reported. Absent means nobody has said. */
+  mapping?: string;
 }): { canStepOut: boolean; why?: string; fix?: string; note?: string } {
   /* ⛑ Each of these is a fact that makes the step-out IMPOSSIBLE, not merely unwise — and each is
      `=== true/false` rather than truthy, so an unanswered question never refuses. */
@@ -316,6 +314,29 @@ export function roomShotAvailability(state: {
   /* ⛑ Disclosed, not refused, and the distinction is the owner's ruling. The handover is safe; it
      costs a few seconds of re-establishing tracking on the way back. Saying so on the second and
      later shots lets a concierge decide; refusing would take that from them. */
+  /*
+   ⛑ **A room shot taken before the room is mapped is positioned and worth nothing.**
+
+   ⚑ *Measured, 2026-09-06 export.* The first room shot of each run — taken seconds after the zone
+   opened — reports `mapping: notAvailable`, `featurePoints: 0` and **no surface at all**. An
+   ordinary capture ninety seconds later reports `mapped`, 52 points and a `sceneDepth` surface.
+   *The pose is technically present and describes the origin itself, 1.4 seconds after ARKit started:
+   the least trustworthy measurement the system can produce.*
+
+   **Baseline Service Design v1.12 §4.1a already orders this** — *"walk into the zone and build its
+   plan before anything else is captured"* — and the floorplan's forty seconds of walking is exactly
+   what turns `notAvailable / 0 points / no surface` into `mapped / 52 / sceneDepth`.
+
+   ⚑ **Said, not refused.** The spec's order is the fix; this is the sentence for the concierge who
+   is standing there anyway, and a refusal at zone onset would fire on the case the room shot exists
+   for.
+   */
+  if (state.mapping === "notAvailable") {
+    return {
+      canStepOut: true,
+      note: "the room is not mapped yet — run the floorplan first, or this shot lands with no surface",
+    };
+  }
   const spent = state.handoversThisZone ?? 0;
   return spent > 0
     ? { canStepOut: true, note: `stepping out again — positioning re-establishes each time (${spent} so far)` }

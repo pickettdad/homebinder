@@ -151,7 +151,7 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         /* ⚑ **Step 1 of the posed traverse.** What a shutter at traverse cadence costs the tracking
            stream, and whether texture reads the same on ARKit's frames — both unmeasured, both able
            to sink the build at step 5 rather than here. See `HSTraverseSource`. */
-        if CommandLine.arguments.contains("--hs-traverse-source"), #available(iOS 16.0, *) {
+        if CommandLine.arguments.contains("--hs-traverse-source"), #available(iOS 17.0, *) {
             let probe = HSTraverseSource()
             traverseSource = probe
             probe.run { result in

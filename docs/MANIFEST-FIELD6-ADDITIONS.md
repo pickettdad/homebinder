@@ -17,8 +17,24 @@ Three states, and the third is the one worth building for.
 | `{ positioned: true, … }` | measured, with `tracking`, a full 4×4 `transform`, and `surface` when something **measured** the surface in front of the lens — see §1a |
 | `{ positioned: false, why }` | ⚑ **a refusal** — the app could take a position here and did not |
 | field absent, `owner.kind: "pin"` | this frame inherits from its container, which is the normal case |
-| field absent, `frame.role` is not `primary` | a **sibling** — the pose is on the `primary` frame of the same `frame.captureId` |
+| field absent, `frame.role` is not `primary`, **and `intent` is not `pan`** | a **sibling** — the pose is on the `primary` frame of the same `frame.captureId` |
+| field absent on a `pan` frame | ⚠️ **never inherit** — see the block below |
 | field absent, `owner.kind: "zone"`, no `frame` | ⛑ **nobody knows** — there is no container to inherit from |
+
+> ## ⚠️ **SCOPED AWAY FROM THE TRAVERSE, 2026-09-07 — inheritance here would be a silent fabrication.**
+>
+> **The rule above is right for a bracket** and wrong for a leg, and the difference is what the frames
+> are. ⚑ *A bracket is three exposures of one thing from one place* — one pose describes all three,
+> and inheriting it is true. **A traverse leg is twenty-two frames taken from twenty-two places.**
+>
+> **So a frame that failed to pose must file `{positioned: false, why}` and never simply omit the
+> field.** Under the old rule a desk following the contract stamps it with the leg's *primary* pose —
+> **a polyline that starts correctly and then piles vertices on the origin, with no error anywhere and
+> perfectly plausible geometry.** *That is worse than a gap: a gap is visible and a wrong point is not.*
+>
+> ⛑ **The emitter enforces it rather than the reader remembering it.** A rule that lives only in this
+> document is a rule the reader has to already know — which is the sentence this document uses about
+> `position.projection`, three sections down, for exactly the same reason.
 
 ⛑ **The distinction between the last three is the whole design.** *At least one frame per container
 carries a position; everything else inherits it.* So an absent `position` on nine frames of a

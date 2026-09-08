@@ -106,6 +106,15 @@ const isSibling = (m: { frame?: FrameRoleMeta }): boolean =>
  * else says `unknown` **out loud**. ⚑ *An `unknown` in an export is a thing to go and look at. A
  * `voice` that is really a floorplan is a thing nobody will ever look at.*
  */
+/**
+ ⚑ **The refusal a traverse frame files when it has no pose**, so an absence is never mistaken for
+ an inheritance. See the note at the sibling emit site — a bracket may inherit, a leg may not.
+ */
+const unposedIfTraverse = (intent?: string): CapturePositionMeta | undefined =>
+  intent === "pan"
+    ? { positioned: false, why: "no pose recorded for this traverse frame" }
+    : undefined;
+
 const kindOf = (mime: string, intent?: CaptureIntent): MediaKindV3 => {
   // ⚑ Intent first, because it is a FACT the concierge declared rather than an inference from a
   // container format. `application/json` is not inherently geometry; a floorplan is.
@@ -134,8 +143,16 @@ export interface MediaFileEntryV3 {
   mime: string;
   bytes: number;
   sha256: string;
-  /** ⚑ Where this frame was taken, or the recorded reason there is none — see `CapturePositionMeta`.
-   *  Expected on ONE frame of a container; the rest inherit it and correctly have none. */
+  /**
+   ⚑ Where this frame was taken, or the recorded reason there is none — see `CapturePositionMeta`.
+   Expected on ONE frame of a container; the rest inherit it and correctly have none.
+
+   ⚠️ **Except on a `pan`, where inheritance is a silent fabrication.** A bracket is three exposures
+   of one thing from one place, so one pose describes all three. **A traverse leg is twenty-two
+   frames taken from twenty-two places** — and a desk that inherits the primary's pose onto a frame
+   that failed to pose draws *a polyline that starts correctly and then piles vertices on the origin,
+   with no error and plausible geometry.* **A gap is visible; a wrong point is not.**
+   */
   position?: CapturePositionMeta;
   /**
    * When this capture was COMMITTED, not when it began — `at` is stamped inside the storage
@@ -334,7 +351,21 @@ function collectMedia(state: SessionStateV2): MediaFileEntryV3[] {
         source: sib.source,
         read: sib.read,
         frame: sib.frame,
-        position: sib.position,
+        /*
+         ⛑ **A traverse frame with no pose says so, rather than falling through to inheritance.**
+
+         ⚑ *The declared rule — an absent `position` on a non-primary frame means the pose is on the
+         primary of this `captureId` — is right for a bracket and a fabrication for a leg.* Three
+         exposures of one thing from one place share a pose; **twenty-two frames taken from
+         twenty-two places do not.** A desk following the contract would stamp a failed frame with
+         the leg's first pose and draw *a polyline that starts correctly and then piles vertices on
+         the origin, with no error and plausible geometry.*
+
+         **Enforced here rather than left to the reader**, which is the same reason
+         `position.projection` is required rather than documented: *a rule that lives only in a
+         document is a rule the reader has to already know.*
+         */
+        position: sib.position ?? unposedIfTraverse(sib.intent ?? m.intent),
       });
     }
   };

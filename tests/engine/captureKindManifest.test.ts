@@ -280,3 +280,42 @@ describe("a traverse leg is ordered and timed", () => {
     expect(new Set(taken).size).toBe(out.media.length);
   });
 });
+
+/**
+ * ⛑ **A bracket may inherit a pose. A leg may not.**
+ *
+ * The declared rule — *an absent `position` on a non-primary frame means the pose is on the primary
+ * of this `captureId`* — is right for a bracket and a **silent fabrication** for a traverse. Three
+ * exposures of one thing from one place share a pose; ⚑ **twenty-two frames taken from twenty-two
+ * places do not.**
+ *
+ * A desk following the contract would stamp a failed frame with the leg's first pose and draw *a
+ * polyline that starts correctly and then piles vertices on the origin* — with no error anywhere and
+ * perfectly plausible geometry. **A gap is visible; a wrong point is not.**
+ *
+ * The invariant is about **which absences may be inherited**, not about today's intent vocabulary.
+ */
+describe("who may inherit a pose", () => {
+  const sibling = (intent?: CaptureIntent) => ({
+    ...mediaRef("cap", "image/jpeg", intent),
+    siblings: [{ ...mediaRef("sib", "image/jpeg", intent) }],
+  });
+
+  it("files a refusal on an unposed traverse frame instead of letting it inherit", () => {
+    const out = manifestOf([sibling("pan")] as never);
+    const sib = out.media.find((m) => m.mediaId === "sib");
+    expect(sib?.position?.positioned).toBe(false);
+    // ⚑ And it says why — a refusal a reader cannot act on is a refusal that gets ignored.
+    expect((sib?.position as { why?: string } | undefined)?.why).toBeTruthy();
+  });
+
+  it("leaves a bracket's sibling absent, because inheritance is correct there", () => {
+    /* ⛑ The other half, and it is what stops this becoming a rule that fires everywhere. A capture
+       that legitimately shares one pose must keep sharing it — filing refusals on brackets would
+       turn every ordinary sibling into a gap the desk has to explain. */
+    for (const intent of [undefined, "room-shot"] as const) {
+      const out = manifestOf([sibling(intent as CaptureIntent)] as never);
+      expect(out.media.find((m) => m.mediaId === "sib")?.position).toBeUndefined();
+    }
+  });
+});

@@ -292,6 +292,19 @@ export type CapturePositionMeta =
        `initialWorldMap` is never set, so nothing restores it: every launch starts a room over.
        */
       originId?: string;
+      /**
+       ⛑ **Why no surface was measured — and it is not one fact, it is three.**
+
+       ⚑ An absent `surface` could mean **beyond the sensor's ~8 m reach**, **depth thin on the
+       axis** (glass, a mirror, a dark chrome tank), or **the mesh budget stalled**. *Same empty
+       field, and the desk should act differently on each*: out-of-range is a fact about the room
+       and interpolating across it may be reasonable; a stalled budget is a fact about the app and
+       interpolating would be inventing geometry.
+
+       ⚠️ **Present only when `surface` is absent.** A measured surface says why it is there by
+       being there, and a reason beside a reading would be a field that could contradict its own row.
+       */
+      surfaceWhy?: string;
 
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */

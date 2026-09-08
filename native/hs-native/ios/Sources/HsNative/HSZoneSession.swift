@@ -971,6 +971,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "projection": ["projectable": true],
             ]
             if let payload = aim.payload { position["surface"] = payload }
+            // ⛑ The refusal rides out with the pose. An absent surface and an absent REASON
+            // are the same row to a reader; only one of them can be acted on.
+            else if let why = aim.why { position["surfaceWhy"] = why }
 
             /*
              ⛑ **The pixels are copied out and the frame is released BEFORE the hop, and that
@@ -1202,6 +1205,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            precisely because there were two places to write it.* */
         let aim = HSSurface.ahead(of: frame, live: session.currentFrame)
         if let payload = aim.payload { out["surface"] = payload }
+        // ⛑ The refusal rides out with the pose. An absent surface and an absent REASON
+        // are the same row to a reader; only one of them can be acted on.
+        else if let why = aim.why { out["surfaceWhy"] = why }
         // The lens goes back in the `defer` above — on this path and on every other.
         var row: [String: Any] = ["ok": true, "tracking": state]
         for (key, value) in aim.log { row[key] = value }
@@ -1900,6 +1906,33 @@ enum HSSurface {
          without asking where it came from, so anything admitted here is consumed as a measurement
          by construction.
          */
+        /**
+         ⛑ **Why nothing was measured — because an absence with no reason is three different facts
+         wearing one face.**
+
+         ⚑ *The reasons already exist and have never left the device.* `depthWhy`, `meshWhy`,
+         `meshFrom`, `triangles` and `budgetHit` live in `log` only, which reaches `HSZoneLog` — a
+         file shared by hand and **not part of the export**. So a desk holding an absent `surface`
+         cannot tell **"beyond the sensor's reach"** from **"depth thin on the axis"** from **"the
+         mesh budget stalled"** — *three absences with three different meanings for whether to bridge
+         a gap in a pipe line.*
+
+         **The distinction the whole field turns on**: out-of-range is a fact about the room and the
+         desk may reasonably interpolate across it; a stalled budget is a fact about the app and it
+         may not. **Same empty field, opposite instructions.**
+
+         *Emitted only when there is nothing to emit a point for* — a measured surface says why it is
+         there by being there.
+         */
+        var why: String? {
+            guard !source.measured else { return nil }
+            var parts: [String] = []
+            if !depthWhy.isEmpty { parts.append(depthWhy) }
+            if !meshWhy.isEmpty { parts.append(meshWhy) }
+            if budgetHit { parts.append("mesh budget reached") }
+            return parts.isEmpty ? "nothing measured on the axis" : parts.joined(separator: "; ")
+        }
+
         var payload: [String: Any]? {
             guard source.measured, let point else { return nil }
             var out: [String: Any] = [

@@ -3830,6 +3830,21 @@ final class CameraController: NSObject {
      concierge stopped sweeping. A filter on frame quality is a proxy for an intent the app is never
      told — which is the trigger's problem, not the filter's.
     */
+
+    /*
+     ⛑ **Both thresholds are calibrated against the AVFoundation pipeline and DO NOT transfer to
+     ARKit's** — measured, `docs/TRAVERSE-SOURCE-RESULT-2026-09-07.md`.
+
+     A **covered lens** reads **2.59** through ARKit's stream against AVFoundation's recorded
+     **1.83 / 1.88**. ⚑ *A covered lens is the one scene both pipelines can be shown identically*, so
+     the ratio is a property of the pipeline and not of a room: **×1.40**, and `5.0 → 7.0`.
+
+     ⚠️ **Not changed here, and deliberately.** These still gate AVFoundation frames until the source
+     swap lands; re-cutting them now would loosen the gate on the pipeline they were correct for.
+     **The number is recorded where the swap will need it**, because a constant re-derived at the
+     moment of a rewrite is a constant chosen to suit the rewrite.
+     */
+    private static let traverseTextureArkitScale = 1.40
     private static let traverseKeepTexture = 5.0
 
     private static let traverseEveryNthFrame = 2

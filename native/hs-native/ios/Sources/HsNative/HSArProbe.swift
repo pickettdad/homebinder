@@ -135,6 +135,9 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             // ---- Q1c: if the built-in bracket is refused, can one be hand-rolled? ----
             self.probeHandRolledBracket()
 
+            // ---- Q6: does asking for a PHOTO rather than a tracking frame change the pixels? ----
+            self.probePhotoQuality()
+
             // ---- Q1b: the bracket. LAST, because it may not return. ----
             self.probeBracket()
 
@@ -422,6 +425,197 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 10)
+    }
+
+    /**
+     **The two statistics that separate a soft photograph from a sharp one**, computed on the Y
+     plane so no CoreImage hop is needed and no colour interpretation can confound them.
+
+     ⚑ *Both, never one.* Scoring 2026-09-07's field captures on the Mac showed why: the soft
+     object photographs were **less** noisy than the sharp reference frame by a whole-frame measure,
+     because half of each frame was bright smooth wall. **Texture alone would have said the soft
+     ones were fine.** Detail and noise move together under multi-frame fusion — that is the whole
+     claim being tested — so a single number cannot say which moved.
+     */
+    private func planeStats(_ buffer: CVPixelBuffer) -> [String: Any] {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let planes = CVPixelBufferGetPlaneCount(buffer)
+        guard planes > 0, let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { return [:] }
+        let w = CVPixelBufferGetWidthOfPlane(buffer, 0)
+        let h = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        let px = base.assumingMemoryBound(to: UInt8.self)
+        func at(_ x: Int, _ y: Int) -> Double { Double(px[y * stride + x]) }
+
+        var lapSum = 0.0, lapSq = 0.0, nSum = 0.0, lum = 0.0, n = 0.0
+        var darkLum = 0.0, darkNoise = 0.0, darkN = 0.0
+        var y = 1
+        while y < h - 1 {
+            var x = 1
+            while x < w - 1 {
+                let c = at(x, y)
+                let lap = abs(4 * c - at(x - 1, y) - at(x + 1, y) - at(x, y - 1) - at(x, y + 1))
+                lapSum += lap; lapSq += lap * lap
+                /* ⛑ Immerkaer's kernel: it annihilates smooth AND linear structure, so what
+                   survives is overwhelmingly sensor noise rather than scene detail. That is what
+                   makes it separable from the Laplacian above, which answers to both. */
+                let nz = abs(4 * c - 2 * (at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1))
+                             + at(x - 1, y - 1) + at(x + 1, y - 1) + at(x - 1, y + 1) + at(x + 1, y + 1))
+                nSum += nz
+                lum += c; n += 1
+                // ⚑ The shadows, apart. That is where the field softness actually lives — measured
+                // shadow SNR 18.5 on the owner's captures against 41.5 on a well-lit frame.
+                if c < 48 { darkLum += c; darkNoise += nz; darkN += 1 }
+                x += 2
+            }
+            y += 2
+        }
+        guard n > 0 else { return [:] }
+        let mean = lapSum / n
+        let sigma = (nSum / n) * 1.2533 / 6.0
+        var out: [String: Any] = [
+            "w": w, "h": h,
+            "texture": (lapSq / n - mean * mean).squareRoot(),
+            "noise": sigma,
+            "meanLuma": lum / n,
+            "format": String(format: "%c%c%c%c",
+                             (CVPixelBufferGetPixelFormatType(buffer) >> 24) & 0xff,
+                             (CVPixelBufferGetPixelFormatType(buffer) >> 16) & 0xff,
+                             (CVPixelBufferGetPixelFormatType(buffer) >> 8) & 0xff,
+                             CVPixelBufferGetPixelFormatType(buffer) & 0xff),
+            // §1d: are the colour attachments even there to be propagated?
+            "hasYCbCrMatrix": CVBufferGetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) != nil,
+            "hasPrimaries": CVBufferGetAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) != nil,
+        ]
+        if darkN > 0 {
+            out["darkMeanLuma"] = darkLum / darkN
+            out["darkNoise"] = (darkNoise / darkN) * 1.2533 / 6.0
+            out["shadowSNR"] = (darkLum / darkN) / max(1e-9, (darkNoise / darkN) * 1.2533 / 6.0)
+            out["darkShare"] = darkN / n
+        }
+        return out
+    }
+
+    /**
+     ⚑ **Does asking ARKit for a PHOTOGRAPH rather than a tracking frame change the pixels?**
+
+     The owner reports in-zone captures are soft. The tempting answer was *"ARKit skips the photo
+     pipeline; `photoQualityPrioritization = .quality` will fuse several exposures and fix it."*
+     **Three things say do not ship that on an argument:**
+
+     1. ⚠️ **It may throw rather than refuse.** `AVCapturePhotoOutput` raises
+        `NSInvalidArgumentException` when the requested prioritisation exceeds the output's
+        `maxPhotoQualityPrioritization`, whose default is `.balanced` — and **ARKit owns that output
+        and never exposes it**, so we cannot raise the cap. An uncatchable exception is a crash in a
+        mechanical room. *This probe is where it is allowed to happen, on a desk.*
+     2. ⚠️ **It is documented to override a locked exposure** — *"to ensure ISO and exposureDuration
+        are honored while in Custom or Locked, you must set photoQualityPrioritization to Speed."*
+        The traverse's lock is its one measured win (median texture 6.2 → 18.1). **Buying sharpness
+        with the exposure lock would be a bad trade made silently.**
+     3. ⛑ **Our own A/B argues the other way.** `PLATE-AB-RESULT-2026-09-04`: the settings-less
+        ARKit path beat an AVFoundation path that already had `.quality` set, reading the serial
+        3-of-3 against 0-of-3.
+
+     **So the probe reads the defaults first — which settles (1) without risking anything — and only
+     then takes the two photographs, same scene, seconds apart, and measures both.**
+     */
+    private func probePhotoQuality() {
+        guard #available(iOS 26.0, *) else {
+            step("photoQuality: needs iOS 26 — unavailable here")
+            result["photoQualityAvailable"] = false
+            return
+        }
+        result["photoQualityAvailable"] = true
+
+        /*
+         ⚠️ **The session is re-run on the ZONE's own format first, and the first cut of this probe
+         is why.**
+
+         It read `session.configuration?.videoFormat` as it found it — after `probeStepOut` had
+         paused, handed the camera away and resumed — and measured a **2016×1512** still on a format
+         reporting `isRecommendedForHighResolutionFrameCapturing == false`. **That is not the path
+         the product takes.** `HSZoneSession.stillFormat()` filters to recommended formats and
+         prefers 4:3, and a refusal measured on a format the zone never uses would have been
+         reported as a refusal of the feature.
+
+         ⛑ *Same class as the covered-lens anchor in `TRAVERSE-SOURCE-RESULT`: the comparison is
+         only worth something when both sides are shown the same thing.* Asking the session to be in
+         a known state costs one `run` and removes the confound entirely.
+         */
+        let config = ARWorldTrackingConfiguration()
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            config.sceneReconstruction = .mesh
+        }
+        if let want = HSZoneSession.stillFormat() { config.videoFormat = want }
+        session.run(config, options: [])
+        _ = waitForNormal(timeout: 8)
+
+        guard let fmt = session.configuration?.videoFormat else {
+            step("photoQuality: no videoFormat after run")
+            return
+        }
+        result["pqFormat"] = "\(Int(fmt.imageResolution.width))x\(Int(fmt.imageResolution.height))"
+        result["pqFormatRecommended"] = fmt.isRecommendedForHighResolutionFrameCapturing
+        result["pqFormatColorSpace"] = fmt.defaultColorSpace.rawValue
+
+        /* ⚑ **The reading that settles whether the change is even safe**, taken before anything is
+           attempted. `AVCapturePhotoOutput` is documented to RAISE when the requested prioritisation
+           exceeds the output's cap, and ARKit owns that output and never exposes it — so the cap
+           cannot be read directly and the default is the only evidence available without risking
+           the app. */
+        let base = fmt.defaultPhotoSettings
+        result["pqDefaultPrioritization"] = base.photoQualityPrioritization.rawValue
+        result["pqDefaultMaxDims"] =
+            "\(base.maxPhotoDimensions.width)x\(base.maxPhotoDimensions.height)"
+        step("photoQuality: format \(Int(fmt.imageResolution.width))x\(Int(fmt.imageResolution.height)) "
+             + "recommended=\(fmt.isRecommendedForHighResolutionFrameCapturing) "
+             + "default=\(base.photoQualityPrioritization.rawValue) "
+             + "maxDims \(base.maxPhotoDimensions.width)x\(base.maxPhotoDimensions.height)")
+
+        /* ⚑ **All three rungs, not just the one being hoped for.** A refusal of `.quality` alone
+           cannot tell *"ARKit will not process a still"* from *"ARKit will not go that far"* — and
+           those have different consequences: the first closes the question, the second leaves a
+           middle setting on the table. **`.speed` is included as the control**, because it is
+           ARKit's own default and must succeed; if it does not, the instrument is broken rather
+           than the feature refused. */
+        let rungs: [(String, AVCapturePhotoOutput.QualityPrioritization)] =
+            [("speed", .speed), ("balanced", .balanced), ("quality", .quality)]
+        for (label, prioritisation) in rungs {
+            /* ⛑ **A fresh settings object every time, never a reused one.** `AVCapturePhotoOutput`
+               raises if a `uniqueID` is seen twice — *"it is illegal to re-use settings"* — the kind
+               of rule that survives a probe taking three photographs and crashes a walk taking two
+               hundred. `defaultPhotoSettings` is documented to hand back a new instance per get. */
+            guard let settings = session.configuration?.videoFormat.defaultPhotoSettings else { continue }
+            settings.photoQualityPrioritization = prioritisation
+            step("photoQuality[\(label)]: requesting \(prioritisation.rawValue) — if the log stops here, it raised")
+            let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera
+            let sem = DispatchSemaphore(value: 0)
+            let started = Date()
+            session.captureHighResolutionFrame(using: settings) { [weak self] frame, error in
+                guard let self else { sem.signal(); return }
+                var row: [String: Any] = [
+                    "ms": Date().timeIntervalSince(started) * 1000,
+                    "asked": prioritisation.rawValue,
+                ]
+                if let f = frame {
+                    row.merge(self.planeStats(f.capturedImage)) { a, _ in a }
+                    // ⚑ The real ISO off the device, not `exposureOffset` — the first cut logged an
+                    // EV bias under the name `iso`, which is a wrong number wearing a right label.
+                    row["iso"] = device?.iso ?? -1
+                    row["shutter"] = CMTimeGetSeconds(device?.exposureDuration ?? .zero)
+                } else {
+                    row["error"] = error?.localizedDescription ?? "no frame"
+                    row["errorCode"] = (error as NSError?)?.code ?? -1
+                }
+                self.result["pq_\(label)"] = row
+                self.step("photoQuality[\(label)]: \(row)")
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 12)
+            // Let the meter settle so the next rung is not measuring the last one's recovery.
+            Thread.sleep(forTimeInterval: 1.5)
+        }
     }
 
     private func probeBracket() {

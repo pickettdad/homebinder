@@ -198,6 +198,18 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             arProbe = probe
             probe.run { result in
                 NSLog("HS-AR-PROBE RESULT %@", String(describing: result))
+                /* ⛑ **Written to a file, because `NSLog` is not readable from where the answer is
+                   needed.** `devicectl --console` streams stdout; `NSLog` goes to the unified log,
+                   so a probe whose only output is a log line is a probe whose result has to be
+                   fished out of the device by hand — or, as happened here, appears to have produced
+                   nothing at all. **Every other probe in this package already writes a file**
+                   (`hs-exposure-lock.json`, `hs-traverse-source.json`, `hs-zoom-floor.json`); this
+                   one predates that habit and was the one that could not be read back. */
+                if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+                   let data = try? JSONSerialization.data(
+                       withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
+                    try? data.write(to: dir.appendingPathComponent("hs-ar-probe.json"), options: .atomic)
+                }
                 self.arProbe = nil
             }
         }

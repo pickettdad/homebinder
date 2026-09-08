@@ -9,6 +9,24 @@ import UIKit
 import Vision
 
 /**
+ ⛑ **A clock with milliseconds, because the default one cannot separate two frames of a traverse.**
+
+ `ISO8601DateFormatter()` with default options emits **whole seconds**. At the 1–2 Hz a traverse
+ fires, two consecutive frames get identical stamps — *a per-frame clock that cannot separate
+ consecutive frames answers none of the questions it was added for.*
+
+ ⚑ File-level rather than a member, because the class that needs it and the class that would own it
+ are different ones. `HSShellPlugin` carries its own copy; this is the second, and a third should
+ make it shared rather than a fourth.
+ */
+let hsFrameClock: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+
+/**
  The capture camera (F-26).
 
  ⚑ **A mode declares a goal. The camera measures the scene and finds the settings that reach it.**
@@ -4247,7 +4265,25 @@ final class CameraController: NSObject {
                because re-rotating mid-leg would make the pairs before a turn incomparable with the
                pairs after it, but the record stops asserting it as an observation. */
             "deviceRotationAngle": run.rotationAtRequest,
-            "at": ISO8601DateFormatter().string(from: Date())
+            /*
+             ⛑ **Milliseconds, because a whole second is this defect one order of magnitude down.**
+
+             ⚑ `ISO8601DateFormatter()` with default options emits **whole seconds**. At the 1–2 Hz a
+             traverse fires, *two frames of the same second get identical stamps* — and a per-frame
+             clock that cannot separate consecutive frames answers none of the questions it was added
+             for. `HSShellPlugin` already carries the fractional-seconds formatter; this is the second
+             caller of a rule that existed in one place.
+
+             ⚠️ **And this is still the DELIVERY time, not the shutter.** It is read here, in the
+             completion, 60–90 ms after the exposure and varying with load — *so the jitter of the
+             instrument would be read as the concierge speeding up and slowing down.* The shutter
+             instant lives on the `AVCapturePhoto` in the delegate and is gone by the time these
+             bytes arrive. **Named rather than quietly accepted**: it is a bounded, known error of
+             tens of milliseconds against a walk measured in seconds, and closing it means threading
+             the photo's own timestamp through `finish` — the step that consumes this field can do
+             that when a millisecond starts to matter.
+             */
+            "at": hsFrameClock.string(from: Date())
         ])
 
         if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {

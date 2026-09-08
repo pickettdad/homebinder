@@ -97,6 +97,35 @@ export interface FrameRoleMeta {
    *  hands — *I chose to stop here* — and never a claim that nothing was missed across the break.
    *  That claim is the desk's, and this field deliberately does not make it. */
   continuesFrom?: string;
+  /**
+   ⛑ **The device's own frame number, and a hole in it is the record of a missing vertex.**
+
+   ⚑ *Step 3 of the posed traverse.* The native counter increments for **every frame captured,
+   filed or discarded** — so `0, 1, 3, 4` means frame 2 was taken and dropped below the texture
+   floor. **Array position cannot say that**, and array position is the only order a leg carried
+   into the export until now.
+
+   ⚠️ **A reader must never renumber these.** Closing the gaps turns *"a vertex is missing here"*
+   into *"the line is continuous"* — which for a pipe run is the difference between a gap the desk
+   knows to bridge and a straight line drawn through something nobody photographed.
+   */
+  ordinal?: number;
+  /**
+   ⛑ **When THIS frame was taken — distinct from `capturedAt`, which is when the capture was
+   committed.**
+
+   ⚑ One press files a leg, so every frame of it shares one `capturedAt`. *That is correct and it
+   is also useless for a walk*: twenty-two frames spread over half a minute arrive stamped with the
+   moment the leg ended. **Without a per-frame time the desk cannot compute walking speed, cannot
+   see where the concierge paused, and cannot tell a forty-second leg from a four-second one** — the
+   difference between a trajectory and a bag of points.
+
+   ⚠️ **Milliseconds, and the shutter rather than the delivery.** At 1–2 Hz a whole-second stamp
+   gives two frames the same time, which is this defect one order of magnitude down; and a delivery
+   clock jitters with load by 60–90 ms, which a desk would read as the concierge speeding up and
+   slowing down.
+   */
+  takenAt?: string;
 }
 
 export interface CaptureMediaMeta {

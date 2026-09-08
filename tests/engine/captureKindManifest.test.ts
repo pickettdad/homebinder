@@ -227,3 +227,56 @@ describe("where the concierge walked in from", () => {
     expect(zoneOf({ kind: "uncaptured" }).enteredFrom).toEqual({ kind: "uncaptured" });
   });
 });
+
+/**
+ * ⛑ **A leg is an ordered thing that happened over time, and the export said neither.**
+ *
+ * ⚑ *Step 3 of the posed traverse.* Two facts a walk carries and the record threw away:
+ *
+ * 1. **The device's own frame number.** It counts every frame *captured*, filed or discarded — so
+ *    `0, 1, 3, 4` means frame 2 was taken and dropped below the texture floor. `roleFor` built the
+ *    record from **array position**, which cannot say that, and array position was the only order a
+ *    leg carried into the export.
+ * 2. **When each frame was taken.** One press files a leg, so every frame shares one `capturedAt` —
+ *    correct, and useless for a walk. *Twenty-two frames spread over half a minute arrive stamped
+ *    with the moment the leg ended.*
+ *
+ * The invariants below are about **preservation and distinctness**, not about today's field names or
+ * today's frame count: nothing renumbers, and the two clocks answer two different questions.
+ */
+describe("a traverse leg is ordered and timed", () => {
+  const legFrame = (ordinal: number, takenAt: string) => ({
+    captureId: "2026-09-07T12:00:00.000Z",
+    role: ordinal === 0 ? ("primary" as const) : ("evidence" as const),
+    ordinal,
+    takenAt,
+  });
+
+  it("never renumbers, so a hole stays a hole", () => {
+    /* ⚑ The fixture deliberately skips 2. **Without a gap, a renumbering bug and a correct emitter
+       produce identical output** — the test would pass on the defect it exists to catch. */
+    const frames = [0, 1, 3, 4].map((n) => legFrame(n, `2026-09-07T12:00:0${n}.500Z`));
+    const media = frames.map((f, i) =>
+      ({ ...mediaRef(`m${i}`, "image/jpeg", "pan"), frame: f }) as never,
+    );
+    const out = manifestOf(media as never);
+    const ordinals = out.media.map((m) => (m.frame as { ordinal?: number } | undefined)?.ordinal);
+    expect(ordinals).toEqual([0, 1, 3, 4]);
+    // Stated as properties rather than as that list: strictly increasing, and NOT a dense range.
+    expect(ordinals.every((n, i) => i === 0 || (n ?? 0) > (ordinals[i - 1] ?? 0))).toBe(true);
+    expect(ordinals).not.toEqual(ordinals.map((_, i) => i));
+  });
+
+  it("keeps the two clocks apart — one commit, many exposures", () => {
+    /* ⛑ Both failures in one assertion pair. A shared per-frame time cannot locate a pause; a
+       per-frame commit time cannot say these frames were one press. */
+    const frames = [0, 1, 2].map((n) => legFrame(n, `2026-09-07T12:00:0${n}.250Z`));
+    const media = frames.map((f, i) =>
+      ({ ...mediaRef(`t${i}`, "image/jpeg", "pan"), frame: f }) as never,
+    );
+    const out = manifestOf(media as never);
+    expect(new Set(out.media.map((m) => m.capturedAt)).size).toBe(1);
+    const taken = out.media.map((m) => (m.frame as { takenAt?: string } | undefined)?.takenAt);
+    expect(new Set(taken).size).toBe(out.media.length);
+  });
+});

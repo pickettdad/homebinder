@@ -1617,12 +1617,27 @@ export function CameraScreen({
           are both facts the desk needs and neither survives in the traverse result alone: that
           object lives until the next run and then goes.
         */
-        const roleFor = (index: number): FrameRoleMeta => ({
+        /*
+         ⛑ **Two numbers, and conflating them was the defect.** The array position says *where this
+         frame sits among the ones that were FILED*; `frame.index` says *which frame the device
+         took*, counting the discarded ones. **They differ by every frame the texture gate dropped**,
+         and on a leg whose first frame was discarded even the origin is misnumbered.
+
+         ⚑ So `roleFor` takes both: the position decides the role, the frame carries its own ordinal
+         and its own time. *`manifestV3` copies `frame` wholesale into the manifest entry, so putting
+         them here is the whole of the plumbing.*
+         */
+        /* ⚑ Typed as the two fields it reads, not as a frame. `TraverseFrame` and `CaptureFrame` are
+           different shapes and both carry these; asking for a whole frame would couple this to
+           whichever one happened to be passed first. */
+        const roleFor = (f: { index?: number; at?: string } | undefined, position: number): FrameRoleMeta => ({
           captureId: result.startedAt,
-          role: index === 0 ? "primary" : "evidence",
+          role: position === 0 ? "primary" : "evidence",
           lens: statusRef.current?.lens,
           registration: result.registration,
           continuesFrom: result.continuesFrom ?? undefined,
+          ordinal: f?.index,
+          takenAt: f?.at,
         });
         const blobFor = async (path: string) => (await fetch(frameUrl(path))).blob();
         /*
@@ -1644,7 +1659,7 @@ export function CameraScreen({
           rest.map(async (f, i) => ({
             blob: await blobFor(f.path),
             mime: "image/jpeg",
-            frame: roleFor(i + 1),
+            frame: roleFor(f, i + 1),
             position: i === lastIndex ? withProjection(endPosition) : undefined,
           })),
         );
@@ -1656,7 +1671,7 @@ export function CameraScreen({
           "image/jpeg",
           undefined,
           "pan",
-          { frame: roleFor(0), position: withProjection(startPosition.current), siblings },
+          { frame: roleFor(first, 0), position: withProjection(startPosition.current), siblings },
         );
       }
       return result;

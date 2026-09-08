@@ -169,7 +169,30 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      implementations of "is this plate readable" is a defect this project has already paid for
      twice.**
      */
-    var onAnalysisFrame: ((CVPixelBuffer) -> Void)?
+    /**
+     ⛑ **Everything a posed frame needs, as VALUES — the frame itself never leaves the callback.**
+
+     ⚑ *Step 2 of the posed traverse.* A trace that carries a pose per frame needs the transform, the
+     camera model and the instant, alongside the pixels. **Passing the `ARFrame` would be the obvious
+     way and is the one this file has already been burned by**: a retained frame keeps a slot in
+     ARKit's small pool, and enough of them stop the session delivering — *the viewfinder froze while
+     the shutter, containers and delete all kept working.* `onPreviewFrame` was rewritten to pass
+     values for the same reason and is the precedent.
+
+     `timestamp` is ARKit's own, in seconds since boot on the same clock as `CACurrentMediaTime` —
+     **the instant of exposure, not the instant of delivery.** *A per-frame time taken in a completion
+     is a delivery clock, and a trajectory measured on one cannot tell a pause from a sprint.*
+     */
+    struct AnalysisFrame {
+        let pixels: CVPixelBuffer
+        let transform: simd_float4x4
+        let intrinsics: simd_float3x3
+        let imageResolution: CGSize
+        let timestamp: TimeInterval
+        let tracking: String
+    }
+
+    var onAnalysisFrame: ((AnalysisFrame) -> Void)?
 
     /**
      ⚑ **A copy, because the original belongs to ARKit's frame pool.**
@@ -335,6 +358,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      */
     /// ⛑ Delivered frame rate over a rolling five seconds — see `didUpdate`. Read into every pose and
     /// every zone-log row, so a walk carries its own evidence of what the pipeline cost.
+    /// ⛑ The analysis cadence, owned here because this is where the copy is paid for. **2 matches the
+    /// traverse's own every-2nd-frame rule**, so moving the gate does not change what the consumer
+    /// sees — only where the cost is decided.
+    private static let analyseEveryNth = 2
+
     private var deliveredFps: Double = 0
     private var frameCount = 0
     private var fpsWindowStart: Double = 0
@@ -1571,10 +1599,26 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         }
         /* ⚑ Every frame, because the pipeline does its own cadence gate — it counts frames and
            analyses every Nth, and it must do that counting once rather than once per source. */
-        // ⚑ A COPY. See `copyBuffer` — handing ARKit's own buffer to another queue starves the
-        // frame pool, and a starved pool stops the session dead while the rest of the app runs on.
-        if onAnalysisFrame != nil, let copied = copyBuffer(frame.capturedImage) {
-            onAnalysisFrame?(copied)
+        /*
+         ⛑ **The cadence gate moved AHEAD of the copy** (step 2).
+
+         ⚑ *A dropped frame used to be copied first and dropped after.* `copyBuffer` is a ~4 MB memcpy
+         on the main thread, and the consumer analyses every Nth — so the copies that were thrown away
+         were main-thread work spent on nothing, at frame rate. **Deciding first costs a modulo.**
+
+         The gate lives here rather than in the consumer because this is the one place that knows what
+         it costs to say yes.
+         */
+        if onAnalysisFrame != nil, frameCount % Self.analyseEveryNth == 0,
+           let copied = copyBuffer(frame.capturedImage) {
+            onAnalysisFrame?(AnalysisFrame(
+                pixels: copied,
+                transform: frame.camera.transform,
+                intrinsics: frame.camera.intrinsics,
+                imageResolution: frame.camera.imageResolution,
+                // ⚑ ARKit's own timestamp — the exposure, not the delivery.
+                timestamp: frame.timestamp,
+                tracking: HSArProbe.describe(frame.camera.trackingState)))
         }
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }

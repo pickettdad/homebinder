@@ -384,6 +384,16 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var zoomFloor: AnyObject?
     private var exposureLock: AnyObject?
     private var traverseSource: AnyObject?
+    /// ⛑ The most recent analysed frame's geometry, held as VALUES. **Not an `ARFrame`** — see
+    /// `HSZoneSession.AnalysisFrame`. Written on main from the delegate; read by the traverse when
+    /// step 5 lands. *Present and unread for exactly one step, which is stated rather than left for
+    /// a reader to wonder about.*
+    @available(iOS 17.0, *)
+    private var lastAnalysisPose: HSZoneSession.AnalysisFrame? {
+        get { _lastAnalysisPose as? HSZoneSession.AnalysisFrame }
+        set { _lastAnalysisPose = newValue }
+    }
+    private var _lastAnalysisPose: Any?
     /// ⚑ The step-out window, owned natively so a second shutter press cannot enter it half-open.
     private var roomShotOut = false
     private var roomShotWideReached = false
@@ -816,7 +826,15 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             /* ⚑ ARKit's frames go to the SAME analysis the capture session feeds. See
                `CameraController.analyse` and `HSZoneSession.onAnalysisFrame`: one pipeline, one set
                of thresholds, two sources. */
-            made.onAnalysisFrame = { [weak self] buffer in self?.controller?.analyseAsync(buffer) }
+            /* ⚑ **The pose rides alongside, and nothing reads it yet** (step 2). The cadence gate now
+               lives in `HSZoneSession`, ahead of the copy, so `analyseAsync` receives the same every-
+               2nd-frame stream it always did — *fewer main-thread memcpys for the same input.* The
+               pose is stashed for the step that consumes it rather than threaded through `analyse`,
+               which is an image pipeline and should not grow a geometry argument it ignores. */
+            made.onAnalysisFrame = { [weak self] f in
+                self?.lastAnalysisPose = f
+                self?.controller?.analyseAsync(f.pixels)
+            }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
             made.onPreviewFrame = { [weak self] buffer, anchors, camera in

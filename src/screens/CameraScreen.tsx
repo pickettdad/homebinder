@@ -1370,16 +1370,21 @@ export function CameraScreen({
         reasoning from what sits near what does not merely fail, it *confidently produces the wrong
         sequence.*
 
-        **Per-frame position is not available and this is not a tuning problem.** A traverse runs on
-        the `AVCaptureSession` with exposure, focus and white balance locked; ARKit cannot hold the
-        lens at the same time, and one position costs a full camera handover — **1.70 s, measured
-        on device 2026-08-28** (yield → `limited(initializing)` → `normal` → read → reclaim). A
-        handover mid-run would also break the exposure lock the whole registration model depends on,
-        which is why `swapLens` already refuses while traversing. Per-frame world position **is**
-        decision one, not an addition to this.
+        ⛑ **Per-frame position WAS unavailable, and the paragraph that said so described a different
+        architecture.** It read: a traverse runs on the `AVCaptureSession` with exposure, focus and
+        white balance locked, ARKit cannot hold the lens at the same time, and one position costs a
+        full camera handover — **1.70 s, measured on device 2026-08-28**. Every clause was true while
+        the leg ran on the capture session.
 
-        **So: an anchor at each end of each leg**, taken where the concierge has already stopped.
-        The chain between them carries the order; these two carry the room. ⚑ *And a run that
+        ⚑ **It does not any more.** The leg runs inside the zone, ARKit keeps the lens throughout, and
+        each frame comes back through `captureHighResolutionFrame` carrying the pose of the instant it
+        was exposed — **72–84 ms, at 30.0 fps flat while it happens**
+        (`TRAVERSE-SOURCE-RESULT-2026-09-07`). *A stale reason left in place is how a settled question
+        gets re-derived as a constraint.*
+
+        **The two anchors stay, and they are not redundant:** they are taken where the concierge has
+        already stopped, so they are the leg's best-conditioned poses, the only two measured outside
+        a walk, and the fallback for a frame whose own shutter refused. ⚑ *And a run that
         doubles back is walked as separate legs* — `continuesFrom` already exists for exactly that —
         so the leg endpoints form a polyline of the route rather than a straight line through it.
       */
@@ -1407,11 +1412,19 @@ export function CameraScreen({
          focus and can take a moment; leaving the bar reading "start trace" while frames are
          already firing is the state the field called confusing, and it was. */
       setTraversing(true);
-      /* ⚑ **The outbound half of `handLens`, and the anchor above is why it has to be here.**
-         `takePosition` wakes positioning, which takes the camera for the life of the room, and a
-         traverse cannot run on a stopped capture session. Before the lens request rather than after
-         it, so `swapLens`'s preset re-assert lands on a session that is actually running. */
-      await handLens("traverse");
+      /* ⛑ **There is no outbound handover any more, and its absence is the feature** (steps 4/5).
+
+         `handLens("traverse")` paused the zone so the capture session could have the lens — which is
+         precisely why no traverse frame has ever carried a position: **ARKit was asleep for the whole
+         leg**, so the two end anchors were all there could ever be. The frames, the shutter, the pose
+         and the measured surface now all come out of the running zone session, so the lens never
+         moves; pausing here would refuse every frame with *positioning is paused*. ⚑ *Two handovers a
+         leg go with it* — the black preview the field called "takes a while", and the eleven seconds
+         between chained legs.
+
+         The inbound `handLens("zone")` calls below STAY. They are idempotent, they are the re-arm on
+         the failure path and on the back button, and **a handover has two ends on every path** — the
+         finding they were written for, which is not repealed by there being nothing to undo. */
       // ⚑ Lens SECOND, and it MUST be before `startTraverse`. A traverse locks exposure, white
       // balance and focus on its first frame and refuses a lens swap mid-run — so a wide default
       // applied afterwards would be silently declined, and the run would be shot on normal while
@@ -1609,6 +1622,26 @@ export function CameraScreen({
         });
         setZoneNote("that leg kept no frames — nothing to measure against on a blank surface");
       }
+      /*
+       ⛑ **A shutter the room refused is a fact about this leg, and a frame count cannot carry it.**
+
+       ⚑ A leg that kept four frames because it asked for four is a different object from one that
+       asked for twenty and was refused sixteen — *and the two read identically in `frames.length`.*
+       Tracking that was not `normal`, a still already in flight and a paused zone are the three a
+       concierge can cause, and none of them are ones he can see. `TraverseResult` lives until the
+       next run and then goes, so a refusal that rides only that object never reaches the desk —
+       rule 43, in the file that has paid for it before.
+      */
+      if (currentZone && result.refusals?.length) {
+        const n = result.refusals.length;
+        const why = [...new Set(result.refusals)].join("; ");
+        void recordRefusal({
+          act: "traverse",
+          zoneId: currentZone,
+          why: `the camera refused ${n} frame${n === 1 ? "" : "s"} of this trace — ${why}`,
+          recoverable: true,
+        });
+      }
       if (currentZone && first) {
         /*
           ⚑ The join and the registration model ride the FILED capture, not just the panel — which
@@ -1646,21 +1679,36 @@ export function CameraScreen({
           `primary`, so the manifest's own rule already says the pose is on the primary of this
           `captureId`, and the desk reads the leg rather than the frame.
 
-          ⛑ *A traverse is shot WIDE* (`lensPolicyFor`, and the run locks the lens for its whole
-          length), so both anchors are honest poses whose matrix does not describe their image —
-          and there is **no 1× frame anywhere in a traverse**, so `projectableFrame` is `null`.
-          *That is the case the field exists for: a real pose and nothing to project at all.*
+          ⚑ **Superseded, and this is where the owner's idea lands.** *"Add position into each frame
+          along a trace… a pipe running along walls and ceilings could actually be somewhat mapped
+          out."* Every frame is now an ARKit capture taken by the room's own session, so every frame
+          carries its own pose and its own measured surface. The two anchors stay as the fallback for
+          a frame whose shutter refused; they are no longer the only geometry in a leg.
+
+          ⛑ *This used to say a traverse is shot WIDE, so no anchor's matrix described its image.* It
+          is shot on ARKit's `builtInWideAngleCamera` — `lensPolicyFor` has returned `normal` since
+          2026-08-30, and world tracking is offered nothing else — so `projectionFor` answers
+          `projectable: true`, which is the same answer the frames' own positions already carry.
         */
         const traverseProjection = { frames: [{ lens: statusRef.current?.lens }], at: result.startedAt };
         const withProjection = (p: ZonePosition): CapturePositionMeta =>
           p.positioned ? { ...p, projection: projectionFor(traverseProjection) } : p;
         const lastIndex = rest.length - 1;
+        /* ⚑ **Its own pose, then the leg's end anchor, then nothing — in that order.** `f.position` is
+           what the tracking session measured for the frame that became this photograph. The end
+           anchor stays as the fallback for a shutter that refused on the last frame; a frame with
+           neither files none, which `unposedIfTraverse` turns into a recorded refusal rather than an
+           inherited pose. **A gap is visible; a wrong point is not.** */
         const siblings = await Promise.all(
           rest.map(async (f, i) => ({
             blob: await blobFor(f.path),
             mime: "image/jpeg",
             frame: roleFor(f, i + 1),
-            position: i === lastIndex ? withProjection(endPosition) : undefined,
+            position: f.position
+              ? withProjection(f.position)
+              : i === lastIndex
+                ? withProjection(endPosition)
+                : undefined,
           })),
         );
         await capturePhotoV2(
@@ -1671,7 +1719,12 @@ export function CameraScreen({
           "image/jpeg",
           undefined,
           "pan",
-          { frame: roleFor(first, 0), position: withProjection(startPosition.current), siblings },
+          {
+            frame: roleFor(first, 0),
+            // ⚑ Its own pose where the shutter measured one; the leg's opening anchor where it did not.
+            position: withProjection(first.position ?? startPosition.current),
+            siblings,
+          },
         );
       }
       return result;

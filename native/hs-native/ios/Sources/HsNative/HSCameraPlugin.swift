@@ -211,6 +211,38 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         made.onTextBoxes = { [weak self] payload in self?.notifyListeners("textBoxes", data: payload) }
         made.onStatus = { [weak self] payload in self?.notifyListeners("modeStatus", data: payload) }
         made.onTraverse = { [weak self] payload in self?.notifyListeners("traverse", data: payload) }
+        /*
+         ⚑ **The traverse's shutter, and from here on it is ARKit's** (steps 4 and 5, one change).
+
+         A leg used to hand the lens to the capture session and fire `photoOutput`. **That handover
+         is why no traverse frame has ever carried a position: ARKit was paused for the whole leg**,
+         so an anchor at each end was all there could ever be.
+         `captureHighResolutionFrame` is delivered out of band and costs the tracking stream nothing
+         at this cadence — `TRAVERSE-SOURCE-RESULT-2026-09-07`: 30.0 fps flat across four windows,
+         73 captures at 4032×3024, zero failures, baseline drift −0.0%, p50 71.6 ms at 1 Hz.
+
+         ⛑ **`captureStill` is asked, never re-implemented.** It already refuses a paused zone and
+         any tracking but `.normal`, already copies the pixels out ahead of the encode hop, already
+         writes the JPEG, reads the torch off the lamp rather than asserting it, and runs the whole
+         `HSSurface` ladder on **the frame that became the photograph**. Everything step 5 files was
+         computed there; a second implementation of *where was this taken* is a defect this file has
+         paid for twice.
+
+         Installed here rather than in `openZone` because the controller may not exist yet when a
+         zone opens, and it reads `self.zone` **at the moment of the request** — so a zone replaced
+         mid-walk cannot be photographed through a closure still holding the old one. It answers on
+         every path, including the refusal: *a shutter that answers nothing latches `awaitingFrame`
+         and the leg goes quiet with no row saying why.*
+        */
+        made.posedStill = { [weak self] done in
+            DispatchQueue.main.async {
+                if #available(iOS 17.0, *), let zone = self?.zone {
+                    zone.captureStill(text: false, completion: done)
+                } else {
+                    done(["ok": false, "why": "no zone open"])
+                }
+            }
+        }
         controller = made
         return made
     }
@@ -352,6 +384,22 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func startTraverse(_ call: CAPPluginCall) {
         guard let controller else {
             call.reject("Camera is not running — call start first")
+            return
+        }
+        /*
+         ⛑ **A trace is recorded against the room it is walked in** (steps 4/5), and this is the
+         precondition that replaced `session.isRunning`.
+
+         Every frame of a leg is now taken through the tracking session and files its own pose and
+         its own measured surface. A leg begun without a zone would file photographs under a posed
+         stamp with no pose in any of them — **and an absence is indistinguishable from a
+         measurement nobody took**, which is the failure the whole positioning track exists to
+         refuse. ⚠️ *The configuration this rules out is the harness with no zone open, which is the
+         one place the old traverse still worked* — which is exactly why it is refused in words here
+         rather than left to fail somewhere quieter.
+        */
+        guard #available(iOS 17.0, *), zone != nil else {
+            call.reject("Open a room first — a trace files a position on every frame")
             return
         }
         controller.startTraverse(continuesFrom: call.getString("continuesFrom")) { result in
@@ -849,9 +897,19 @@ public class HSCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                2nd-frame stream it always did — *fewer main-thread memcpys for the same input.* The
                pose is stashed for the step that consumes it rather than threaded through `analyse`,
                which is an image pipeline and should not grow a geometry argument it ignores. */
+            /* ⚑ **Step 5 consumes the channel step 2 built.** Two scalars cross rather than the
+               struct: `AnalysisFrame` is iOS 17 and `CameraController` is not, and the accumulator
+               needs nothing else. `widthPerMetre` is `W / fx` — how many metres of frame width one
+               metre of standoff buys — which is what turns a pose displacement back into the
+               fraction of a frame width the trigger has always been expressed in. */
             made.onAnalysisFrame = { [weak self] f in
                 self?.lastAnalysisPose = f
-                self?.controller?.analyseAsync(f.pixels)
+                let p = f.transform.columns.3
+                let fx = Double(f.intrinsics.columns.0.x)
+                self?.controller?.analyseAsync(
+                    f.pixels,
+                    eye: SIMD3<Float>(p.x, p.y, p.z),
+                    widthPerMetre: fx > 0 ? Double(f.imageResolution.width) / fx : 0)
             }
             made.showArPreview = { [weak self] arSession in self?.attachArPreview(arSession) }
             /* The preview is fed by whoever already has the frames — see `attachArPreview`. */
@@ -1373,6 +1431,17 @@ final class CameraController: NSObject {
     var onTextBoxes: (([String: Any]) -> Void)?
     var onStatus: (([String: Any]) -> Void)?
     var onTraverse: (([String: Any]) -> Void)?
+    /**
+     ⚑ **How a traverse asks for a photograph** (step 4). Installed by the plugin, which is the only
+     side that can see the zone session — this controller is an AVFoundation object and must not
+     learn about ARKit to fire a shutter.
+
+     The reply is `HSZoneSession.captureStill`'s whole payload: the filed frame, and a `position`
+     carrying the pose, the intrinsics and the measured `HSSurface` of the frame that became the
+     photograph. ⛑ **The contract is that it always answers**, success or refusal, because a shutter
+     that answers nothing latches `awaitingFrame` and the leg goes quiet with no row saying why.
+    */
+    var posedStill: ((@escaping ([String: Any]) -> Void) -> Void)?
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "ca.housesteady.camera.session")
@@ -1387,6 +1456,25 @@ final class CameraController: NSObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
     private var device: AVCaptureDevice?
+    /**
+     ⛑ **The camera a leg is actually exposed with, which is no longer this session's.**
+
+     A traverse runs inside a zone now, with ARKit holding the lens and this class's
+     `AVCaptureSession` **stopped for the whole leg** — so the exposure lock, the white balance
+     lock, the focus lock and their release all have to land on ARKit's own handle.
+     `EXPOSURE-LOCK-RESULT-2026-09-06` measured that it accepts `setExposureModeCustom` and that the
+     locks cost tracking nothing.
+
+     ⚑ Falling back to the session's own device leaves every non-zone caller unchanged. **Read by
+     the lock and by the release**, because a lock taken on one handle and lifted on another is a
+     leg's exposure frozen for the rest of the room — and `zoneOwnsCamera` is what makes the choice
+     a fact rather than the assumption that the two are the same object.
+    */
+    private var lensDevice: AVCaptureDevice? {
+        if zoneOwnsCamera, #available(iOS 16.0, *),
+           let ar = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera { return ar }
+        return device
+    }
     /// Held so the lens swap can remove exactly the input it added, rather than guessing from
     /// `session.inputs` — the audio probe adds one too.
     private var videoInput: AVCaptureDeviceInput?
@@ -3243,13 +3331,14 @@ final class CameraController: NSObject {
      on `visionQueue`, because that is the queue that owns the set being consulted.
      */
     fileprivate func finish(id: Int64, data: Data?, error: Error?) {
-        visionQueue.async { [weak self] in
-            guard let self else { return }
-            if self.traverseRequestIds.contains(id) {
-                self.completeTraverseFrame(id: id, data: data, error: error)
-            } else {
-                DispatchQueue.main.async { self.completeCaptureFrame(id: id, data: data, error: error) }
-            }
+        /* ⛑ **One path now, and the branch was not removed for tidiness — it became unreachable.**
+           A traverse used to fire `photoOutput` too, so its deliveries had to be told apart from a
+           capture job's here, on `visionQueue` because that queue owned the set being consulted. Its
+           frames come out of the tracking session instead, nothing inserts into `traverseRequestIds`
+           any more, and so every delivery on this output belongs to a capture job. *The set itself
+           stays until a good walk has proved this path; an empty set cannot misfire.* */
+        DispatchQueue.main.async { [weak self] in
+            self?.completeCaptureFrame(id: id, data: data, error: error)
         }
     }
 
@@ -3726,6 +3815,47 @@ final class CameraController: NSObject {
         /// is why they are counted — see `advanceTraverse`.
         var droppedSteps = 0
         var droppedAtRequest = 0
+        /**
+         ⚑ **Where the camera was when the last frame was asked for**, in the zone's world frame.
+
+         *This is the whole of the geometric trigger's state.* A differenced pose needs no history
+         and no successful registration between its two ends — which is exactly what the summed
+         pixel path could not offer, and why a step the accumulator failed to register used to cost
+         the run ground it never got back.
+        */
+        var eyeAtRequest: SIMD3<Float>?
+        /**
+         ⚑ **How far the last filed frame's own `HSSurface` measured its subject to be**, in metres.
+         `nil` until one arrives, and **held rather than reset when a later frame's surface refuses**
+         — depth along a run changes slowly, and a one-frame-old measurement beats an assumption.
+
+         ⛑ *This is what keeps a metric trigger honest.* Pixel motion is metres over standoff, so
+         the image accumulator was depth-adaptive by accident; converting the pose back through the
+         measured standoff keeps that property on purpose and lets `traverseTargetTravel` keep both
+         its value and its meaning. **With no standoff ever measured there is no conversion and no
+         guess** — see `advanceTraverse`.
+        */
+        var standoffM: Double?
+        /// Travel since the last request as a fraction of a frame width, measured from the POSE.
+        /// `nil` on a frame the geometric trigger could not speak about — which is also what says
+        /// the photometric accumulator fired this one.
+        var posedAtRequest: CGFloat?
+        /// Which witness fired this frame: `pose`, `pixels`, or `first`. ⛑ Recorded per pair,
+        /// because a run whose frames were all fired by the fallback is a different object from one
+        /// the geometry drove, and the two are indistinguishable in a count of frames.
+        var triggerAtRequest = "first"
+        /// ⛑ Shutters the zone refused, with the reason for each. **A discarded error reads as a
+        /// free shutter** — cadence achieved, latency low, frame rate untouched, nothing captured.
+        /// Tracking that was not normal, a still already in flight and a paused zone are all things
+        /// a concierge can cause and none of them are things he can see.
+        var refusals: [String] = []
+        /// ⚑ **The latch's own witness.** `captureStill`'s completion is behind a `guard let self`
+        /// that precedes its `defer`, so a zone torn down mid-leg answers nothing and
+        /// `awaitingFrame` would stand forever — *the one failure of this change that would be
+        /// silent rather than counted.* The sequence number is what lets a late answer be told from
+        /// the current one after the watchdog has given up. See `advanceTraverse`.
+        var shutterSeq = 0
+        var requestedAt: CFTimeInterval = 0
     }
 
     /**
@@ -3746,6 +3876,10 @@ final class CameraController: NSObject {
      affordable: the L-walk kept 16 frames for a whole mechanical room.
      */
     private static let traverseTargetTravel: CGFloat = 0.20
+    /// ⛑ How long a requested shutter may go unanswered before the leg gives up on it, in seconds.
+    /// Far past the measured p95 of 278 ms, because a slow shutter must never be mistaken for a
+    /// lost one — this exists only for the answer that never comes at all. See `advanceTraverse`.
+    private static let traverseShutterTimeout: CFTimeInterval = 3.0
     /// Below this, contact is not established and the pair is a gap.
     private static let traverseMinimumOverlap = 0.25
     /// Above this, the two halves of the frame moved differently — parallax — and a single
@@ -3776,9 +3910,19 @@ final class CameraController: NSObject {
      inside this, so it is a bound on nonsense and not a knob on the verdict.
      */
     private static let traverseCrossCheckTolerance: CGFloat = 0.05
-    /// Below this there is not enough in a frame for its overlap to mean anything. Measured
-    /// blank-first: covered lens 1.8, blurred carry 4.1-4.3, real frames 10.6-21.0.
-    private static let traverseMinimumTexture = 5.0
+    /**
+     Below this there is not enough in a frame for its overlap to mean anything. Measured
+     blank-first **on AVFoundation frames**: covered lens 1.8, blurred carry 4.1-4.3, real frames
+     10.6-21.0.
+
+     ⚠️ **7.0 since the frames became ARKit's, and this one matters most** — the same ×1.40 pipeline
+     scale as `traverseKeepTexture` (`traverseTextureArkitScale`). *This is the CERTIFICATION floor:
+     the guard that stands between a near-blank pair and `flowCoverage`.* Left at 5.0 against a
+     stream that reads 40% hotter it would sit lower than 5.0 ever sat on the frames it was chosen
+     on — **looser, in the blank-wall direction, inside the mechanism built to end the blank-wall
+     class.** Re-cut, not re-derived: the same blank-first samples, moved onto the new scale.
+    */
+    private static let traverseMinimumTexture = 7.0
     /// Registration runs at every other frame during a traverse rather than every sixth: a fast
     /// move between analysed frames is a pair the accumulator cannot register, and the
     /// accumulator is what decides when to fire.
@@ -3832,22 +3976,38 @@ final class CameraController: NSObject {
     */
 
     /*
-     ⛑ **Both thresholds are calibrated against the AVFoundation pipeline and DO NOT transfer to
+     ⛑ **Both thresholds were calibrated against the AVFoundation pipeline and do not transfer to
      ARKit's** — measured, `docs/TRAVERSE-SOURCE-RESULT-2026-09-07.md`.
 
      A **covered lens** reads **2.59** through ARKit's stream against AVFoundation's recorded
      **1.83 / 1.88**. ⚑ *A covered lens is the one scene both pipelines can be shown identically*, so
      the ratio is a property of the pipeline and not of a room: **×1.40**, and `5.0 → 7.0`.
 
-     ⚠️ **Not changed here, and deliberately.** These still gate AVFoundation frames until the source
-     swap lands; re-cutting them now would loosen the gate on the pipeline they were correct for.
-     **The number is recorded where the swap will need it**, because a constant re-derived at the
-     moment of a rewrite is a constant chosen to suit the rewrite.
+     ⚑ **The swap landed, so the re-cut lands with it — in the same commit, and that is not tidiness.**
+     A threshold carried across a pipeline change unchanged is a threshold that silently moved, and
+     both of these would have moved *looser*: frames kept that should not be, at a rate nobody could
+     attribute. *Under a posed traverse a wrongly-kept frame is a point on the pipe line that is not
+     really there.* The ratio stays here as the recorded derivation, so the next pipeline change
+     re-reads it rather than deriving a new one to suit itself.
      */
     private static let traverseTextureArkitScale = 1.40
-    private static let traverseKeepTexture = 5.0
+    private static let traverseKeepTexture = 7.0
 
-    private static let traverseEveryNthFrame = 2
+    /**
+     ⚑ **One, because the cadence gate now lives upstream and must live in exactly one place.**
+
+     `HSZoneSession.analyseEveryNth` already takes every 2nd ARKit frame, **ahead of the copy and on
+     ARKit's own delegate where nothing is dropped** — so the accumulator still sees 15 Hz, exactly
+     what 30 Hz ÷ 2 gave it on the capture session. *Nothing about the sampling interval changed;
+     only who counts.*
+
+     ⛑ **And who counts is the point.** `analyseAsync` DROPS a frame arriving while one is in flight
+     and `analyse` increments `frameCounter` only for survivors — so a modulo here would select every
+     2nd **survivor**, at an interval that moves with load, on a mechanism whose documented failure
+     is a step too large for translational registration to follow. Kept as a named constant rather
+     than deleted: the gate is a real mechanism and a deleted one is a comment.
+    */
+    private static let traverseEveryNthFrame = 1
     /// Working width for registration. Overlap is a geometric question, not a detail question.
     private static let traverseWorkingWidth = 384
 
@@ -3914,7 +4074,22 @@ final class CameraController: NSObject {
 
     func startTraverse(continuesFrom: String? = nil,
                        completion: @escaping (Result<[String: Any], Error>) -> Void) {
-        guard session.isRunning else {
+        /*
+         ⛑ **`session.isRunning` was the precondition and it had become the opposite of one**
+         (step 4, and it closes the 2026-09-06 audit's `beginTraverse` finding).
+
+         A traverse runs on ARKit's frames and ARKit's shutter, and the zone holds the rear camera
+         for the life of a room — so the capture session is deliberately **stopped** for every leg
+         that matters, and this guard refused exactly the runs it existed to admit. *Every traverse
+         begun inside a zone rejected before its first frame; the one place it still worked was the
+         harness with no zone open, which is where it was exercised.*
+
+         What must be running is the zone. `zoneOwnsCamera` is this class's own record of that, and
+         `posedStill` is the shutter it fires through — both, so a controller with a stale closure
+         and a zone that has handed the lens back are each refused rather than half-admitted. The
+         plugin refuses first, in words, where the zone itself is visible.
+        */
+        guard zoneOwnsCamera, posedStill != nil else {
             completion(.failure(CameraError.notRunning))
             return
         }
@@ -3966,9 +4141,14 @@ final class CameraController: NSObject {
          **recorded**: a leg that starts on an unconverged meter must be visible afterwards rather
          than inferred from a dark photograph.
         */
+        /* ⚑ **On ARKit's device, because ARKit is the one holding the camera** — see `lensDevice`.
+           Metering and locking this class's stopped session's handle would have been a lock on
+           nothing, and the leg's whole exposure model would have been silently wrong rather than
+           visibly refused. `traverseExposurePlan` opens with `device.activeFormat`, which is now
+           ARKit's own — the format the frames actually arrive in. */
         var exposureWaitMs = 0.0
         var exposureSettled = true
-        if let device {
+        if let device = lensDevice {
             let began = CACurrentMediaTime()
             while device.isAdjustingExposure, CACurrentMediaTime() - began < 1.5 {
                 Thread.sleep(forTimeInterval: 0.02)
@@ -3977,7 +4157,7 @@ final class CameraController: NSObject {
             exposureSettled = !device.isAdjustingExposure
         }
         var exposureRecord: [String: Any] = [:]
-        if let device {
+        if let device = lensDevice {
             do {
                 try device.lockForConfiguration()
                 // ⚑ Metered, not inherited — see `traverseFastestShutter`. `.custom` locks both
@@ -4062,7 +4242,14 @@ final class CameraController: NSObject {
                      only comparable against another from the same instrument. Adding this before
                      the second model exists is what keeps every traverse taken so far readable.
                     */
-                    "registration": "flow-v3",
+                    /* ⚑ **v4 differs from v3 by SOURCE and by WITNESS, not by model.** The
+                       registration is still translation-only. What changed: the pixels are ARKit's
+                       and texture on that pipeline reads ×1.40, so both texture floors moved; and
+                       `expectedTravel` is measured from the pose where a standoff was measured,
+                       rather than summed from image registration. *A number is only comparable
+                       against another from the same instrument, and the instrument's input and its
+                       witness are both part of the instrument.* */
+                    "registration": "flow-v4-posed",
                     "continuesFrom": run.continuesFrom as Any,
                     "targetTravel": Double(Self.traverseTargetTravel),
                     "minimumOverlap": Self.traverseMinimumOverlap,
@@ -4099,7 +4286,7 @@ final class CameraController: NSObject {
                 "startedAt": ISO8601DateFormatter().string(from: run.startedAt),
                 "endedAt": ISO8601DateFormatter().string(from: Date()),
                 // Both travel with the finished run, for the reasons given where they are set.
-                "registration": "flow-v3",
+                "registration": "flow-v4-posed",
                 "continuesFrom": run.continuesFrom as Any,
                 "torchLatched": run.torchLatched,
                 "unmet": run.unmet,
@@ -4110,7 +4297,13 @@ final class CameraController: NSObject {
                 "unverified": run.pairs.filter { ($0["contiguity"] as? String) == "unverified" }.count,
                 "exposure": run.exposure,
                 "discarded": run.discarded,
-                "discardedTexture": run.discardedTexture
+                "discardedTexture": run.discardedTexture,
+                /* ⛑ **Shutters the zone refused, with the reason for each.** A leg that kept four
+                   frames because it asked for four is a different object from one that asked for
+                   twenty and was refused sixteen — and `frames.length` reads identically for both.
+                   Carried on the RESULT and not only into the zone log, because the log is shared
+                   by hand and is not part of the export. */
+                "refusals": run.refusals
             ]
             DispatchQueue.main.async {
                 self.restoreContinuousModes()
@@ -4120,7 +4313,10 @@ final class CameraController: NSObject {
     }
 
     private func restoreContinuousModes() {
-        guard let device else { return }
+        // ⛑ The SAME handle the leg locked — see `lensDevice`. Locking ARKit's device and releasing
+        // the capture session's would leave a leg's exposure frozen for the rest of the room, which
+        // is the one-ended-operation class applied to a device rather than to a handover.
+        guard let device = lensDevice else { return }
         do {
             try device.lockForConfiguration()
             if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
@@ -4133,46 +4329,113 @@ final class CameraController: NSObject {
         evaluateTorch()
     }
 
-    /// The accumulator. Runs on `visionQueue`, every other frame, for the whole traverse.
-    private func advanceTraverse(with pixelBuffer: CVPixelBuffer) {
-        guard let run = traverse, !run.awaitingFrame else { return }
+    /**
+     The accumulator. Runs on `visionQueue`, on every analysis frame, for the whole traverse.
+
+     ⚑ **Steps 4 and 5 are ONE change, and this function is why.** Swapping the frame source while
+     leaving the trigger to sum image travel would have put the trigger behind `analyseAsync`'s
+     drop-when-busy — *"every 2nd frame"* becoming *"every 2nd survivor"* at a load-dependent
+     interval, on a mechanism whose documented failure is a step too large to register. **Measuring
+     the camera's pose removes the load-dependence outright**: the shift is differenced from the pose
+     at the last request rather than summed step by step, so *a frame that never arrives costs
+     nothing.* The pose at frame N+2 answers exactly what the sum N→N+1→N+2 approximated.
+
+     ⛑ **And this is what makes `cameraMoved` in the blank-wall guard mean anything.**
+     `travelAtRequest` is stamped the instant the trigger fires, on the same threshold that guard
+     tests, so `expectedTravel >= traverseTargetTravel` holds on **every pair that exists** — a
+     verified tautology, and the guard reduces to `!pictureMoved`. That was harmless-looking and it
+     was the defect: the accumulator is described as *an independent measurement of the camera* and
+     it is **a different pair of frames through the same instrument**, with flow's exact blank-wall
+     blindness. On a featureless wall both said *still*, so the guard never fired on the one case it
+     was built for. *The arithmetic is unchanged.* What changed is that the camera now has a witness
+     a blank wall cannot fool.
+
+     ⚠️ *And it goes no further than that.* The pose decides **when a frame is taken** and never
+     grades a pair — a blank wall gives perfect predicted geometry and zero evidence, the same shape
+     as zero translation computing 100% overlap and a covered lens reading covered 1.000.
+     **Geometry gates; only pixels certify.** `flowCoverage` is untouched and is still the only thing
+     in this file that writes `contiguous` or `gap`.
+     */
+    private func advanceTraverse(with pixelBuffer: CVPixelBuffer, eye: SIMD3<Float>,
+                                 widthPerMetre: Double) {
+        guard let run = traverse else { return }
+        /* ⛑ **The one failure of this change that would be SILENT, and it is counted instead.**
+           `captureStill`'s completion sits behind a `guard let self` that precedes its own `defer`,
+           so a zone torn down mid-leg answers nothing at all — `awaitingFrame` would stand forever,
+           the leg would stop firing, and the record would show a concierge who walked slowly. The
+           bound is far past the measured p95 of 278 ms, so a shutter that is merely slow is never
+           given up on. */
+        if run.awaitingFrame {
+            guard CACurrentMediaTime() - run.requestedAt > Self.traverseShutterTimeout else { return }
+            run.refusals.append("the shutter never answered")
+            HSZoneLog.record("traverseShutterLost", ["kept": run.frames.count, "seq": run.shutterSeq])
+            run.awaitingFrame = false
+            run.pendingBuffer = nil
+        }
         // ⚑ The run's orientation, fixed at `startTraverse` and not re-read per frame. Rotation is
         // already fixed for the length of a traverse — exposure, white balance and focus all lock
         // there — and an axis that changed halfway through would make the pairs before the turn
         // incomparable with the pairs after it, silently.
         guard let working = downscaled(pixelBuffer, crop: nil, orientation: run.orientation) else { return }
 
+        /**
+         ⚑ **Travel in METRES, expressed in the unit the trigger has always claimed.**
+
+         A frame `W` pixels wide with focal length `fx` pixels spans `Z · W / fx` metres at a standoff
+         of `Z`, so `widthPerMetre` is `W / fx` and one target's travel is exactly
+         **`0.20 · Z · W / fx` metres**: nearer subjects fire denser frames and a far wall fires
+         sparser ones. *That is the correct behaviour, and it is what the image accumulator was
+         approximating badly* — pixel motion is metres over standoff, so the old trigger was
+         depth-adaptive by accident. The same 0.20, the same units, measured instead of registered;
+         both terms ride the pair, so the first walk reads the actual metres rather than this comment.
+
+         ⛑ **And the fallback is the case where a metres-only trigger fails SILENTLY.** A pan from one
+         standing spot has no standoff to measure against; nor has a lens pointed down a corridor past
+         LiDAR's reach, nor a dark glossy wall depth refuses. A trigger expressed in metres computes
+         **zero** on all three and fires no frames at all while the concierge sweeps a wall believing
+         it is recording. So: **no measured standoff, no geometric claim** — `posed` is `nil`, the
+         photometric accumulator fires exactly as it does today, and `trigger` on the pair says which
+         witness walked this leg. *A default standoff would have been a guessed metre feeding the
+         trigger, which is precisely what `HSSurface` refuses to hand anybody.*
+        */
+        let posed: CGFloat? = {
+            guard let standoff = run.standoffM, let since = run.eyeAtRequest else { return nil }
+            let frameWidthM = standoff * widthPerMetre
+            guard frameWidthM > 0 else { return nil }
+            let d = eye - since
+            let travelM = Double((d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
+            return CGFloat(travelM / frameWidthM)
+        }()
+
         // The first frame is kept unconditionally: there is nothing to have travelled from.
         guard let previous = run.previousBuffer else {
             run.previousBuffer = working
-            requestTraverseFrame(run: run, buffer: working)
+            requestTraverseFrame(run: run, buffer: working, eye: eye, posed: nil, trigger: "first")
             return
         }
         run.previousBuffer = working
         /*
-         ⚑ **A step that fails to register is invisible to the accumulator, and that is the half of
-         the corner question `maxStep` cannot answer.**
+         ⚑ **A step that fails to register is invisible to the accumulator — and it may no longer
+         suppress a frame.**
 
-         `maxStep` says the *successful* steps were small — 0.010–0.026 of frame width against
-         0.013–0.034 on the pairs that passed — so the accumulator was tracking, and the pair
-         displacements of 0.6–1.0 look like keyframe mis-registration rather than real travel.
-         **But this early return drops a failed step silently**: travel simply does not advance, so
-         the accumulator under-counts by exactly the amount it could not see, and the run keeps
-         going as though nothing happened.
+         This was an early return: a failed registration incremented `droppedSteps` and left the
+         function, so `travel` did not advance and the run kept going as though nothing had happened.
+         ⛑ **Under a geometric trigger that line is the defect in one place** — it would let the
+         measurement that is blind on a blank wall veto the one that is not, which is exactly how the
+         accumulator lost ground at the corner and fired late. It counts and falls through; the fire
+         decision below reads the pose and does not care.
 
-         The owner reports a long break in captures while rounding the corner. Two explanations
-         survive that: the wider field of view needs more walking per frame-width, which the frame
-         rates support (wide fired 17 frames to normal's 31 over the same L, and the ultra-wide is
-         about twice the field) — or steps were failing there and the accumulator stalled. **A
-         count separates them**, and without it the discriminator is half an answer that reads like
-         a whole one.
+         The count stays, and it stays for the reason it was added: a dropped step is invisible to
+         `travel`, so a run using the photometric fallback can still under-count by exactly the amount
+         it could not see, and `maxStep` only ever saw the steps that succeeded.
         */
-        guard let step = translationFraction(from: previous, to: working) else {
+        let step = translationFraction(from: previous, to: working)
+        if let step {
+            run.travel.x += step.x
+            run.travel.y += step.y
+        } else {
             run.droppedSteps += 1
-            return
         }
-        run.travel.x += step.x
-        run.travel.y += step.y
         /*
          ⚑ **The size of a single accumulator step, kept so the corner can be explained.**
 
@@ -4193,15 +4456,33 @@ final class CameraController: NSObject {
          rather than acted on, because acting on the wrong reading of this either invents gaps or
          hides them.
         */
-        run.maxStep = max(run.maxStep, hypot(step.x, step.y))
-        if hypot(run.travel.x, run.travel.y) >= Self.traverseTargetTravel {
-            requestTraverseFrame(run: run, buffer: working)
+        if let step { run.maxStep = max(run.maxStep, hypot(step.x, step.y)) }
+        /* ⚑ **Two witnesses, and only one of them is ever allowed to be absent.** Where a surface has
+           been measured the geometry fires and the accumulator is recorded beside it as the control
+           that says whether this swap was needed. Where none ever has, the accumulator fires exactly
+           as it did before this change — *an honest fallback rather than a guess*, named on the pair
+           so a leg the geometry never drove cannot be mistaken for one it did. */
+        if let posed {
+            if posed >= Self.traverseTargetTravel {
+                requestTraverseFrame(run: run, buffer: working, eye: eye, posed: posed, trigger: "pose")
+            }
+        } else if hypot(run.travel.x, run.travel.y) >= Self.traverseTargetTravel {
+            requestTraverseFrame(run: run, buffer: working, eye: eye, posed: nil, trigger: "pixels")
         }
     }
 
-    private func requestTraverseFrame(run: TraverseRun, buffer: CVPixelBuffer) {
+    private func requestTraverseFrame(run: TraverseRun, buffer: CVPixelBuffer,
+                                      eye: SIMD3<Float>, posed: CGFloat?, trigger: String) {
+        /* ⛑ Ahead of every mutation below: bailing after `travel` is zeroed would strand the
+           accumulator behind an `awaitingFrame` that nothing would ever clear. */
+        guard let ask = posedStill else { return }
         run.awaitingFrame = true
         run.pendingBuffer = buffer
+        run.eyeAtRequest = eye
+        run.posedAtRequest = posed
+        run.triggerAtRequest = trigger
+        run.shutterSeq += 1
+        run.requestedAt = CACurrentMediaTime()
         // ⚑ The angle the device is at NOW, against the angle the connection was frozen at when
         // the leg started. Read here rather than in the completion because this is the instant the
         // shutter is asked for; the same background-queue read the rest of this file already makes.
@@ -4212,23 +4493,117 @@ final class CameraController: NSObject {
         run.travel = .zero
         run.maxStep = 0
         run.droppedSteps = 0
-        // `.speed` because a traverse is a burst and the operator is still moving: a frame that
-        // arrives late is a frame taken somewhere else. Quality prioritisation is right for a
-        // deliberate plate and wrong here.
-        let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
-        settings.photoQualityPrioritization = .speed
-        traverseRequestIds.insert(settings.uniqueID)
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        /* ⚑ **The tracking session's shutter, delivered out of band** (step 4).
+           `captureHighResolutionFrame` does not interrupt the stream — 30.0 fps flat across four
+           windows, 73 captures at 4032×3024, zero failures, p50 71.6 ms at 1 Hz and 83.8 ms at 2 Hz
+           (`TRAVERSE-SOURCE-RESULT-2026-09-07`) — so the frame the accumulator asked for comes back
+           carrying the pose of the instant it was exposed, **and the measured surface it was aimed
+           at.** `.speed` prioritisation has nothing left to buy: there is no photo pipeline to hurry,
+           and the photo output is not running, because ARKit holds the lens for the life of the zone
+           and a traverse no longer takes it away.
+
+           ⛑ Answered back onto `visionQueue` before anything touches `run`: every field of a
+           `TraverseRun` is owned by that queue and this reply arrives on main. The sequence number
+           travels with it, so an answer the watchdog has already given up on cannot clear a latch
+           belonging to a newer request. */
+        let seq = run.shutterSeq
+        ask { [weak self] still in
+            guard let self else { return }
+            self.visionQueue.async { self.completeTraverseFrame(still, seq: seq) }
+        }
     }
 
-    private func completeTraverseFrame(id: Int64, data: Data?, error: Error?) {
-        traverseRequestIds.remove(id)
+    /**
+     One pair, measured and **then** annotated — and the order is the ruling, not a style.
+
+     ⛑ `measureOverlap`'s signature is unchanged and takes no pose, no metre and no standoff: it
+     **cannot see geometry** even if a later edit wanted it to. Everything written below is added to
+     the record *after* the verdict has been reached, so *geometry may gate; only pixels may certify*
+     is enforced by the shape of the call rather than by a comment somebody has to read.
+    */
+    private func recordPair(_ run: TraverseRun, from previous: CVPixelBuffer,
+                            to current: CVPixelBuffer, index: Int) {
+        /* ⚑ The witness that actually fired, in the unit both have always been written in — a
+           fraction of frame width. `posedAtRequest` is metres of camera travel over the metres a
+           frame spans at the measured standoff; `travelAtRequest` is the image accumulator's path
+           length, which is what fires while no surface has been measured. */
+        var pair = measureOverlap(from: previous, to: current,
+                                  from: index - 1, to: index,
+                                  expectedTravel: run.posedAtRequest ?? run.travelAtRequest,
+                                  maxStep: run.stepAtRequest,
+                                  droppedSteps: run.droppedAtRequest)
+        pair["trigger"] = run.triggerAtRequest
+        /* ⛑ **The control, and it is why the accumulator is not retired in this commit.** The
+           photometric path length rides every pair beside the geometric one, so one walk carries two
+           witnesses of a single displacement — which is the evidence that the swap was necessary,
+           and it is destroyed by deleting the accumulator on the same commit that replaces it. */
+        pair["pixelTravel"] = Double(run.travelAtRequest)
+        if let posed = run.posedAtRequest { pair["posedTravel"] = Double(posed) }
+        if let standoff = run.standoffM { pair["standoffM"] = standoff }
+        run.pairs.append(pair)
+    }
+
+    /**
+     ⚑ **A frame arrives already written, already posed and already aimed** (step 5).
+
+     The zone session wrote the JPEG, read `camera.transform` off the frame that BECAME the
+     photograph, and asked `HSSurface` what the lens was pointing at. So this method's job shrank to
+     what it always was: decide whether the frame is worth keeping, pair it with the last one kept,
+     and hand the numbers to the screen.
+
+     ⛑ **The pose rides the FRAME, not the leg.** A leg used to carry two anchors and every frame
+     between them carried none, because a per-frame position cost a 1.70 s camera handover. It costs
+     72–84 ms. *A trace along a pipe is a polyline now, rather than a straight line between the two
+     places the concierge stood still.*
+     */
+    private func completeTraverseFrame(_ still: [String: Any], seq: Int) {
         guard let run = traverse else { return }
+        /* ⛑ An answer the watchdog already gave up on. Its `pendingBuffer` is gone, so there is no
+           pair to measure it against and no index it can honestly take — recorded, not filed. */
+        guard seq == run.shutterSeq else {
+            HSZoneLog.record("traverseShutterLate", ["seq": seq, "kept": run.frames.count])
+            return
+        }
         defer {
             run.awaitingFrame = false
             run.pendingBuffer = nil
         }
-        guard error == nil, let data else { return }
+        /* ⛑ **A refused shutter is a decision about this leg, so it is recorded rather than
+           dropped.** `captureStill` refuses a paused zone, a capture already in flight and any
+           tracking but `.normal` — real states with real remedies — and **a discarded error reads as
+           a free shutter**: cadence achieved, latency low, frame rate untouched, nothing captured.
+           No index is consumed, because nothing was taken. */
+        guard still["ok"] as? Bool == true,
+              let entry = (still["frames"] as? [[String: Any]])?.first,
+              let path = entry["path"] as? String else {
+            let why = still["why"] as? String ?? "capture failed"
+            run.refusals.append(why)
+            HSZoneLog.record("traverseFrameRefused", [
+                "why": why, "kept": run.frames.count, "discarded": run.discarded,
+            ])
+            onTraverse?(["frames": run.frames.count, "pairs": run.pairs, "discarded": run.discarded])
+            return
+        }
+        /*
+         ⚑ **The pose, whole and never picked apart** — `captureStill`'s own `position`: the transform
+         of the frame that became the photograph, its tracking word, its `originEpoch`, its
+         `originId`, its intrinsics, and where `HSSurface` measured one, `surface` with its source,
+         confidence and spread; where it refused, `surfaceWhy`. **The same rule `manifestV3` follows
+         with `frame` at both of its sites**, and for the same reason: a field this side has never
+         heard of still reaches the desk.
+
+         `mode` is merged in because it lives one level up in the reply and `ZonePosition` carries it
+         — the payload has to satisfy the type it is filed as, not merely resemble it.
+        */
+        var position = still["position"] as? [String: Any]
+            ?? ["positioned": false, "why": "the shutter returned no pose"]
+        position["mode"] = still["mode"] ?? "positioning"
+        /* ⚑ **The next frame's target is measured against THIS one's standoff.** The pipe is closer
+           than the wall behind it, and a trigger blind to that fires too rarely near an object and
+           too often across a room. Held when a later surface refuses rather than reset — see
+           `TraverseRun.standoffM`. */
+        if let surface = position["surface"] as? [String: Any],
+           let d = surface["distance"] as? Double, d > 0 { run.standoffM = d }
 
         let index = run.index
         // ⚑ Incremented for every frame CAPTURED, filed or not, so the pair indices keep meaning
@@ -4239,14 +4614,16 @@ final class CameraController: NSObject {
         if let texture, texture < Self.traverseKeepTexture {
             run.discarded += 1
             run.discardedTexture.append(texture)
+            /* ⛑ **The zone session has already written this file, which the old path had not.**
+               A frame the traverse chooses not to file has no owner and no reader, and these are
+               ~2.5 MB 12 MP stills rather than the fraction of that a `.speed` JPEG cost — on the
+               2026-08-29 dark room that would have been eight orphans in nine. Deleted where the
+               decision is made; the record of the discard is what survives. */
+            try? FileManager.default.removeItem(atPath: path)
             // The pair is still measured below — the buffer is in hand either way, and a record
             // with a hole in it is more use than a record that quietly renumbers itself.
             if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
-                run.pairs.append(measureOverlap(from: previous, to: current,
-                                                from: index - 1, to: index,
-                                                expectedTravel: run.travelAtRequest,
-                                                maxStep: run.stepAtRequest,
-                                                droppedSteps: run.droppedAtRequest))
+                recordPair(run, from: previous, to: current, index: index)
             }
             run.lastKeptBuffer = run.pendingBuffer
             /* ⛑ **A discard is a decision and it was silent.** Eight of nine frames were dropped
@@ -4261,18 +4638,18 @@ final class CameraController: NSObject {
             return
         }
 
-        let name = "hs-traverse-\(Int(run.startedAt.timeIntervalSince1970))-\(index).jpg"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        guard (try? data.write(to: url, options: .atomic)) != nil else { return }
+        /* ⚑ The file is already on disk and already stamped: the zone session wrote it and read the
+           orientation off its own bytes. `hs-zone-still-<ms>.jpg` rather than `hs-traverse-*`, and
+           nothing downstream reads the name — only the path. */
         run.frames.append([
             /// ⚑ Recorded on the FRAME, not only inside a pair. The discard threshold has to be
             /// chosen from a distribution across walks, and a value that lives only in a pair
             /// cannot be read for the frame it belongs to.
             "texture": texture ?? -1,
-            "path": url.path,
-            "bytes": data.count,
+            "path": path,
+            "bytes": entry["bytes"] ?? 0,
             "index": index,
-            "exifOrientation": Self.exifOrientation(of: data),
+            "exifOrientation": entry["exifOrientation"] ?? 1,
             /* ⚑ What the file CLAIMS versus how the iPad was actually held. `exifOrientation` is
                read off the bytes and is stamped from the connection's rotation, which is frozen for
                the leg — so on the 2026-08-19 clean-gap walk all 70 frames read 6 while the iPad was
@@ -4294,19 +4671,31 @@ final class CameraController: NSObject {
              instrument would be read as the concierge speeding up and slowing down.* The shutter
              instant lives on the `AVCapturePhoto` in the delegate and is gone by the time these
              bytes arrive. **Named rather than quietly accepted**: it is a bounded, known error of
-             tens of milliseconds against a walk measured in seconds, and closing it means threading
-             the photo's own timestamp through `finish` — the step that consumes this field can do
-             that when a millisecond starts to matter.
+             tens of milliseconds against a walk measured in seconds.
+
+             ⚑ *And it is now closable.* The frame this photograph came from carries ARKit's own
+             `timestamp` — the instant of EXPOSURE, on the same clock as `CACurrentMediaTime` — so the
+             step that needs a millisecond can thread it out of `captureStill` rather than deriving
+             one. Not done here: this change adds no field the trace does not already consume.
              */
-            "at": hsFrameClock.string(from: Date())
+            "at": hsFrameClock.string(from: Date()),
+            /*
+             ⚑ **Where this frame was taken — the owner's idea, in one field.** *"Add position into
+             each frame along a trace… a pipe running along walls and ceilings could actually be
+             somewhat mapped out."* Until now a leg carried two anchors, one at each end, and the
+             chain between them carried only order — because ARKit was paused for the whole leg and
+             there was no pose to be had.
+
+             ⛑ Copied wholesale and never re-derived, for the reason `manifestV3` copies `frame`
+             wholesale: a second implementation of *where was this taken* is a defect this file has
+             already paid for twice, and a field the zone side adds that this one forgets to forward
+             is rule 43 for the seventh time.
+            */
+            "position": position
         ])
 
         if let previous = run.lastKeptBuffer, let current = run.pendingBuffer {
-            run.pairs.append(measureOverlap(from: previous, to: current,
-                                            from: index - 1, to: index,
-                                            expectedTravel: run.travelAtRequest,
-                                            maxStep: run.stepAtRequest,
-                                            droppedSteps: run.droppedAtRequest))
+            recordPair(run, from: previous, to: current, index: index)
         }
         run.lastKeptBuffer = run.pendingBuffer
         // `lastPair` is omitted rather than sent as a wrapped nil: `Optional.none as Any` does not
@@ -4680,8 +5069,28 @@ final class CameraController: NSObject {
                 }
             }
 
+            /*
+             ⚠️ **This guard is a tautology, it always was, and what changed is the WITNESS.**
+
+             `expectedTravel` is stamped the instant the trigger fires, on the threshold this line
+             tests, so `cameraMoved` is true on every pair that can exist and the guard reduces to
+             `!pictureMoved`. ⛑ *Under `flow-v3` that reduction was unsound*: both sides were Vision
+             registrations, so a blank wall broke the antecedent and the consequent together and
+             *the camera moved* was itself unproven — the blank-wall false negative one level up.
+
+             ⚑ The antecedent is ARKit's wherever a standoff was measured. **The room says the camera
+             moved a target's worth; the pixels say nothing moved; therefore there is nothing there
+             to see.** Kept written out rather than collapsed, because it holds only while the
+             trigger and this line share a threshold — and **recorded**, so a run in which it is
+             false is visible in the data instead of impossible by argument. *`trigger` on the same
+             pair says which witness supplied it.*
+
+             ⚠️ *And it still does not certify.* Geometry may gate; only `flow.covered` below may say
+             `contiguous`.
+            */
             let cameraMoved = expectedTravel >= Self.traverseTargetTravel
             let pictureMoved = flow.median >= Double(Self.traverseTargetTravel) * 0.25
+            record["cameraMoved"] = cameraMoved
             if cameraMoved && !pictureMoved {
                 record["measured"] = false
                 record["contiguity"] = "unverified"
@@ -5114,16 +5523,22 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
      `busy` is written from two queues and deliberately not locked — the worst case is one extra or
      one missed frame at 5 Hz, and a lock on the main thread to protect a boolean is the disease.
      */
-    func analyseAsync(_ pixelBuffer: CVPixelBuffer) {
+    /// ⚑ `eye` and `widthPerMetre` ride ARKit's frames and are absent on the capture session's.
+    /// **A dropped frame is now harmless to the traverse**: the trigger differences two poses
+    /// instead of summing a path, so it cannot lose ground the way the accumulator did when this
+    /// gate dropped one.
+    func analyseAsync(_ pixelBuffer: CVPixelBuffer, eye: SIMD3<Float>? = nil,
+                      widthPerMetre: Double = 0) {
         guard !analysisBusy else { return }
         analysisBusy = true
         visionQueue.async { [weak self] in
-            self?.analyse(pixelBuffer)
+            self?.analyse(pixelBuffer, eye: eye, widthPerMetre: widthPerMetre)
             self?.analysisBusy = false
         }
     }
 
-    func analyse(_ pixelBuffer: CVPixelBuffer) {
+    func analyse(_ pixelBuffer: CVPixelBuffer, eye: SIMD3<Float>? = nil,
+                 widthPerMetre: Double = 0) {
         frameCounter += 1
 
         /*
@@ -5141,8 +5556,14 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
          plate read, and leaving it on would put a 12 MP-class request on the same queue as the
          accumulator that decides when to fire.
          */
+        /* ⚑ **A traverse is a posed act, and a frame with no pose is not one of its frames.** The
+           capture session's own frames can still reach here and carry no geometry; they are
+           correctly ignored while a leg runs, and `startTraverse` refuses without a zone so this
+           cannot quietly become a leg that takes nothing. */
         if isTraversing {
-            if frameCounter % Self.traverseEveryNthFrame == 0 { advanceTraverse(with: pixelBuffer) }
+            if let eye, frameCounter % Self.traverseEveryNthFrame == 0 {
+                advanceTraverse(with: pixelBuffer, eye: eye, widthPerMetre: widthPerMetre)
+            }
             return
         }
 

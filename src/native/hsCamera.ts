@@ -260,6 +260,27 @@ export interface TraversePair {
    *  so a run can under-count by exactly the amount it could not see. The other half of the corner
    *  discriminator — `maxStep` only sees the steps that succeeded. */
   droppedSteps?: number;
+  /** ⚑ **Which witness fired this frame** — `pose` where ARKit's own displacement crossed the
+   *  target, `pixels` where no surface had been measured and the image accumulator fired as it
+   *  always did, `first` for the frame that opens a leg. ⛑ A leg driven entirely by the fallback is
+   *  a different object from one the geometry drove, and a frame count cannot tell them apart. */
+  trigger?: "pose" | "pixels" | "first";
+  /** The camera's own displacement since the previous frame was requested, as a fraction of frame
+   *  width — metres of travel over the metres a frame spans at `standoffM`. Absent where no surface
+   *  had been measured, which is the honest answer rather than a guessed standoff. */
+  posedTravel?: number;
+  /** ⛑ The image accumulator's path length for the same pair, in frame widths — **the control.**
+   *  It used to BE `expectedTravel`; it is kept beside the geometric witness so one walk says
+   *  whether the swap was necessary, rather than retiring the old instrument on the commit that
+   *  replaces it. */
+  pixelTravel?: number;
+  /** The measured standoff the trigger's frame width was computed against, in metres, from the last
+   *  filed frame's own `surface`. Absent means nothing had measured one and `trigger` is `pixels`. */
+  standoffM?: number;
+  /** ⚑ Whether the camera had travelled a full target when this pair was measured. **True on every
+   *  pair by construction** — the trigger and the guard share a threshold — and recorded precisely
+   *  so that a run where it is false is visible in the data instead of impossible by argument. */
+  cameraMoved?: boolean;
   /** ⚑ How much there is to see in each frame of the pair, measured on ONE frame at a time.
    *  Every measure that has failed here was a correlation between two frames, and correlation with
    *  nothing to correlate returns confident nonsense — four times, in three mechanisms. Texture has
@@ -485,7 +506,11 @@ export interface TraverseFrame {
   path: string;
   bytes: number;
   index: number;
-  /** What the FILE claims, stamped once from the connection's rotation at `startTraverse`. */
+  /** What the FILE claims. ⚑ Read off the still's own bytes since the leg's frames became the zone
+   *  session's — honest where the old value was the capture connection's rotation, frozen for the
+   *  whole leg. `deviceRotationAngle` beside it is unchanged, so `framesTurnedFromStamp` still
+   *  compares the two; its numbers on a posed leg are new and are not comparable to a `flow-v3`
+   *  leg's. */
   exifOrientation: number;
   /** ⚑ Variance of the Laplacian on this frame — the one instrument in the traverse that is a
    *  property of a SINGLE frame and so cannot be fooled by having nothing to compare against.
@@ -499,6 +524,22 @@ export interface TraverseFrame {
    *  asserts it as an observation. Absent on legs recorded before this shipped. */
   deviceRotationAngle?: number;
   at: string;
+  /**
+   * ⚑ **Where this frame was taken, measured by the session that took it.**
+   *
+   * *Owner, 2026-09-07: "add position into each frame along a trace… a pipe running along walls and
+   * ceilings could actually be somewhat mapped out."* Until `flow-v4-posed` a leg carried two
+   * anchors, one at each end, and the chain between them carried only **order** — because a
+   * traverse handed the lens to the capture session and ARKit was paused for the whole leg.
+   *
+   * The leg runs inside the zone now, so this is `captureStill`'s `position` unaltered: the
+   * transform of the frame that became the photograph, its tracking word, its intrinsics, its
+   * `originEpoch` — and `surface` where `HSSurface` measured one, `surfaceWhy` where it refused.
+   * ⛑ Equal `originEpoch` **and** equal `originId` are what make two frames' positions comparable;
+   * neither the count nor the presence of a pose is enough on its own. Absent on legs recorded
+   * before this shipped, which is not the same as a refusal and must not be read as one.
+   */
+  position?: ZonePosition;
 }
 
 /** ⚑ What the room afforded and what was taken, metered once per leg.
@@ -556,6 +597,14 @@ export interface TraverseResult {
    *  A hole in `frames[].index` is where one was. */
   discarded?: number;
   discardedTexture?: number[];
+  /** ⛑ **Shutters the zone session refused, with the reason for each.** Kept because a discarded
+   *  error reads as a *free* shutter — cadence achieved, latency low, frame rate untouched, and
+   *  nothing captured. A leg that kept four frames because it asked for four is a different object
+   *  from one that asked for twenty and was refused sixteen, and `frames.length` reads identically
+   *  for both. Tracking that was not `normal`, a still already in flight and a paused zone are the
+   *  three a concierge can cause; none of them are ones he can see. Absent on legs recorded before
+   *  the traverse took its frames through the zone session. */
+  refusals?: string[];
 }
 
 export interface TraverseProgressEvent {

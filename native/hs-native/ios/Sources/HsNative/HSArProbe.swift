@@ -138,6 +138,12 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             // ---- Q6: does asking for a PHOTO rather than a tracking frame change the pixels? ----
             self.probePhotoQuality()
 
+            // ---- Q7: what a PHOTOGRAPHIC exposure buys, and what it costs tracking ----
+            self.probeExposureLadder()
+
+            // ---- Q8: the lamp. The biggest lever in a dim room, and never measured in a zone. ----
+            self.probeTorchGain()
+
             // ---- Q1b: the bracket. LAST, because it may not return. ----
             self.probeBracket()
 
@@ -615,6 +621,194 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             _ = sem.wait(timeout: .now() + 12)
             // Let the meter settle so the next rung is not measuring the last one's recovery.
             Thread.sleep(forTimeInterval: 1.5)
+        }
+    }
+
+    /**
+     ⚑ **What a photographic exposure buys the photograph, and what it costs the tracking.**
+
+     `PHOTO-SETTINGS-RESULT-2026-09-07` closed the pipeline route: `.quality` is refused and
+     `.balanced` moves nothing. **What that run did establish is that exposure is the variable** —
+     ISO 722 at 1/60 with 43% of the frame in shadow, shadow SNR 15.4 against 41.5 on a lit frame.
+
+     ⛑ **ARKit meters for a 60 Hz tracking stream**, so it buys short exposures with gain: a dropped
+     frame costs it tracking, and noise does not. **A photograph is not a tracking frame, and the
+     concierge is standing still when taking one.** The traverse already exploits that asymmetry and
+     banked a measured median texture 6.2 → 18.1. The object capture exploits nothing.
+
+     ⚠️ **Both halves, in one run, and the second half is the one that gets forgotten.**
+     `EXPOSURE-LOCK-RESULT`'s first cut proved the lock *takes* and never asked what it cost ARKit's
+     tracking — and ARKit extracts its features from the very stream the lock is changing. *A long
+     exposure in a dim room could starve VIO during the one act where the camera is moving.* So each
+     rung records `rawFeaturePoints` and the tracking state beside the image statistics, and a rung
+     that wins on shadow SNR while halving the feature count has not won.
+
+     **The ladder trades gain for time at constant exposure**, so a rung that improves the picture
+     improves it by collecting more light rather than by being brighter — which is the only way
+     shadow noise actually falls.
+     */
+    private func probeExposureLadder() {
+        guard #available(iOS 16.0, *) else {
+            step("ladder: in-session capture and device access need iOS 16")
+            result["ladderAvailable"] = false
+            return
+        }
+        guard let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera else {
+            step("ladder: ARKit handed back no configurable device")
+            result["ladderAvailable"] = false
+            return
+        }
+        result["ladderAvailable"] = true
+        let fmt = device.activeFormat
+        let minISO = fmt.minISO, maxISO = fmt.maxISO
+        let minDur = CMTimeGetSeconds(fmt.minExposureDuration)
+        let maxDur = CMTimeGetSeconds(fmt.maxExposureDuration)
+        result["ladderISORange"] = "\(minISO)…\(maxISO)"
+        result["ladderDurationRange"] = "\(minDur)…\(maxDur)"
+        step("ladder: iso \(minISO)…\(maxISO), duration \(minDur)…\(maxDur)")
+
+        /* ⛑ **`auto` first and last would be better still, but the scene must not move**, and this
+           already asks the owner to hold one aim for a minute. The control runs first; a rung that
+           beats it is compared against a reading taken seconds earlier on the same frame. */
+        let rungs: [(String, Double?, Float?)] = [
+            ("auto", nil, nil),
+            ("t60_iso400", 1.0 / 60, 400),   // the traverse's own setting, proven to cost tracking nothing
+            ("t30_iso200", 1.0 / 30, 200),
+            ("t15_iso100", 1.0 / 15, 100),
+            ("t8_iso50",   1.0 / 8,  50),
+        ]
+        for (label, dur, iso) in rungs {
+            var applied: [String: Any] = [:]
+            do {
+                try device.lockForConfiguration()
+                if let dur, let iso {
+                    let d = CMTime(seconds: min(max(dur, minDur), maxDur), preferredTimescale: 1_000_000)
+                    let i = min(max(iso, minISO), maxISO)
+                    device.setExposureModeCustom(duration: d, iso: i, completionHandler: nil)
+                    applied["askedShutter"] = CMTimeGetSeconds(d)
+                    applied["askedISO"] = i
+                } else if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+            } catch {
+                applied["lockFailed"] = true
+            }
+            // Let the sensor actually reach what it was told, rather than measuring the transition.
+            Thread.sleep(forTimeInterval: 1.2)
+
+            /* ⚑ The cost half. Sampled as a median of several rather than one reading, because one
+               frame pointed at a blank patch must not decide the answer — `EXPOSURE-LOCK-RESULT`'s
+               correction, applied here from the start rather than after a re-run. */
+            var features: [Int] = []
+            var states: Set<String> = []
+            for _ in 0..<5 {
+                if let f = session.currentFrame {
+                    features.append(f.rawFeaturePoints?.points.count ?? 0)
+                    states.insert(Self.describe(f.camera.trackingState))
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            let sorted = features.sorted()
+            applied["featuresMedian"] = sorted.isEmpty ? -1 : sorted[sorted.count / 2]
+            applied["tracking"] = states.sorted().joined(separator: "|")
+            applied["reachedISO"] = device.iso
+            applied["reachedShutter"] = CMTimeGetSeconds(device.exposureDuration)
+
+            let sem = DispatchSemaphore(value: 0)
+            session.captureHighResolutionFrame { [weak self] frame, error in
+                guard let self else { sem.signal(); return }
+                if let f = frame {
+                    applied.merge(self.planeStats(f.capturedImage)) { a, _ in a }
+                } else {
+                    applied["error"] = error?.localizedDescription ?? "no frame"
+                }
+                self.result["ladder_\(label)"] = applied
+                self.step("ladder[\(label)]: \(applied)")
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 12)
+        }
+
+        /* ⚠️ **Handed back, always.** A custom exposure left on ARKit's device would outlive this
+           probe as a setting nobody chose — the one-ended-operation class applied to a device, and
+           `restoreContinuousModes` exists in the plugin for exactly this reason. */
+        if let _ = try? device.lockForConfiguration() {
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            device.unlockForConfiguration()
+        }
+    }
+
+
+    /**
+     ⚑ **The torch, in the one condition it exists for — and nothing has ever measured it here.**
+
+     Every route to a better photograph tried so far has been about *processing the light that
+     arrived*: fusion (refused), a longer exposure (worth ~27% shadow SNR, `ladder`), a better
+     encode (cannot move sharpness). **This is the only lever that changes how much light arrives**,
+     and in an unlit corner that is not a percentage difference.
+
+     ⛑ **The device is reachable mid-session and this is measured, not argued** — `HSPlateAB` lights
+     a plate through `configurableCaptureDeviceForPrimaryCamera` while ARKit drives it, and
+     `HSZoneSession` reads `isTorchActive` off the same handle for every filed still.
+
+     ⚠️ **Off, on, off — and the second `off` is the point.** A single before/after pair cannot
+     separate *the torch helped* from *the meter drifted over eight seconds*, and this probe has
+     already been burned once by comparing two windows that were not the same scene. The closing
+     control returns to the opening condition; if it does not match the opener, the run is telling
+     us the scene moved and the middle reading means nothing.
+     */
+    private func probeTorchGain() {
+        guard #available(iOS 16.0, *) else { result["torchAvailable"] = false; return }
+        guard let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera else {
+            step("torch: no configurable device"); result["torchAvailable"] = false; return
+        }
+        guard device.hasTorch else {
+            step("torch: device reports no torch"); result["torchAvailable"] = false; return
+        }
+        result["torchAvailable"] = true
+
+        func shoot(_ label: String, lit: Bool) {
+            do {
+                try device.lockForConfiguration()
+                if lit { try? device.setTorchModeOn(level: 1.0) } else { device.torchMode = .off }
+                device.unlockForConfiguration()
+            } catch { step("torch[\(label)]: lockForConfiguration threw") }
+            // The lamp takes ~6 ms (measured 2026-08-28) but the METER takes far longer to answer it.
+            Thread.sleep(forTimeInterval: 1.5)
+            var row: [String: Any] = ["lit": lit, "torchActive": device.isTorchActive,
+                                      "iso": device.iso,
+                                      "shutter": CMTimeGetSeconds(device.exposureDuration)]
+            var features: [Int] = []
+            for _ in 0..<5 {
+                if let f = session.currentFrame { features.append(f.rawFeaturePoints?.points.count ?? 0) }
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+            let sorted = features.sorted()
+            row["featuresMedian"] = sorted.isEmpty ? -1 : sorted[sorted.count / 2]
+            let sem = DispatchSemaphore(value: 0)
+            session.captureHighResolutionFrame { [weak self] frame, error in
+                guard let self else { sem.signal(); return }
+                if let f = frame { row.merge(self.planeStats(f.capturedImage)) { a, _ in a } }
+                else { row["error"] = error?.localizedDescription ?? "no frame" }
+                self.result["torch_\(label)"] = row
+                self.step("torch[\(label)]: \(row)")
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 12)
+        }
+
+        shoot("offBefore", lit: false)
+        shoot("on", lit: true)
+        shoot("offAfter", lit: false)
+
+        // ⛑ Handed back. A lamp left burning is a setting nobody chose, and it is the owner's
+        // battery — the same one-ended-operation class the exposure ladder closes above.
+        if let _ = try? device.lockForConfiguration() {
+            device.torchMode = .off
+            device.unlockForConfiguration()
         }
     }
 

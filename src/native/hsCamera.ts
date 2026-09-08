@@ -627,6 +627,14 @@ export interface ZoneStillResult {
   frames?: CaptureFrame[];
   position?: ZonePosition;
   mode?: string;
+  /** ⚑ The horizon-level angle the zone stamped this still's EXIF orientation from, or `-1` when
+   *  nothing was watching the device and the file was therefore left **untagged**.
+   *
+   *  ⛑ `-1` and not `0`. Zero is a real angle — an iPad held landscape-right — so a zero standing
+   *  for *"no reading"* would be indistinguishable from a measurement, which is precisely the
+   *  defect this field was added to close: the still used to be filed as `exifOrientation: 1`
+   *  because nothing had written a tag, and a specified default was read as an observation. */
+  rotationAngle?: number;
 }
 
 export interface CaptureResult {

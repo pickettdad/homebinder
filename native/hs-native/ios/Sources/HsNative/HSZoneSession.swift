@@ -5,6 +5,7 @@ import ARKit
 // out of ARKit's own imports.
 import AVFoundation
 import Foundation
+import ImageIO
 import RoomPlan
 import simd
 
@@ -208,6 +209,17 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         guard CVPixelBufferCreate(nil, w, h, CVPixelBufferGetPixelFormatType(src),
                                   attrs as CFDictionary, &out) == kCVReturnSuccess,
               let dst = out else { return nil }
+        /* ⚑ **The colour attachments travel with the pixels, and they were being dropped.**
+
+           `CVPixelBufferCreate` makes a buffer with no attachments at all, so the YCbCr matrix,
+           colour primaries and transfer function ARKit tags its frames with — Apple documents the
+           first of these on `capturedImage` explicitly, *"you can verify this by checking the
+           kCVImageBufferYCbCrMatrixKey attachment"* — never reached the copy the encoder actually
+           reads. **CoreImage then had to guess the YCbCr→RGB conversion for every filed still.**
+
+           ⛑ *Same class as the orientation below: the thing consulted was not the thing that
+           governs.* A guess that is usually right is indistinguishable from a reading. */
+        CVBufferPropagateAttachments(src, dst)
         CVPixelBufferLockBaseAddress(src, .readOnly)
         CVPixelBufferLockBaseAddress(dst, [])
         defer {
@@ -316,6 +328,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         stopRoomCapture(keepSession: false)
         hideArPreview?()
         session.pause()
+        // The device it watches is about to stop being ours; a coordinator outliving that would
+        // report the last angle it saw as though it were current.
+        rotationCoordinator = nil
         releaseCamera?()
         let out: [String: Any] = [
             "zoneId": zoneId,
@@ -540,6 +555,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "originEpoch": originEpoch, "originId": originId,
         ])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
+        // ⚑ After `run`, never before: ARKit hands out no configurable device until it holds one.
+        armRotation()
         // ⚑ Cleared for RoomPlan rather than stored: it configures the session behind our back, so a
         // signature written here would describe a config that is about to stop being the live one.
         lastConfigSignature = next == .roomplan ? nil : signature
@@ -841,6 +858,84 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private let encodeQueue = DispatchQueue(label: "hs.zone.encode", qos: .userInitiated)
 
     /**
+     ⛑ **One context for the zone, not one per photograph.**
+
+     Apple's guidance is blunt — a `CIContext` carries a Metal command queue and a compiled kernel
+     cache, and *"it is not recommended to create many CIContext instances"* — and this path built a
+     fresh one inside the encode of every still. At traverse cadence that is one heavyweight
+     allocation and one cold kernel compile **per frame**. It is documented immutable and
+     thread-safe, so a single instance serves `encodeQueue` for the life of the session.
+
+     ⚠️ **This does not make a photograph sharper, and it is not filed as though it might.**
+     Measured on the owner's own captures, 2026-09-07: the softness is shadow noise in a dim room —
+     shadow SNR **18.5** against **41.5** on a well-lit frame *from this same code path* — and no
+     encoder setting moves that. Recorded here so a later reader does not credit this line.
+     */
+    private let encodeContext = CIContext()
+
+    /// The one JPEG dial for stills, named so `TRAVERSE-STORAGE-SPEC-2026-09-07` §4 can turn it
+    /// without hunting a literal at a call site. Measured at ≈2.2 bits/pixel on 12 MP — at the top
+    /// of the band Apple's own camera writes, which is why §3 of that spec rules it out as a cause.
+    static let stillJpegQuality = 0.95
+
+    /**
+     **Which way up the iPad is, for the photograph this session takes itself.**
+
+     ⚑ *One rule, two sources, and the split is deliberate.* The angle→EXIF mapping stays in
+     `CameraController.imageOrientation(forRotationAngle:)` — the file that records what two
+     disagreeing rotation tables cost, and closes with *"two tables can disagree, one cannot."*
+     What differs here is only **whose device is being watched**: the controller builds its
+     coordinator against the AVFoundation handle, and inside a zone **ARKit holds a different one**.
+
+     ⛑ **Built once and kept.** The coordinator reads CoreMotion, so one constructed per shutter
+     would answer `0` before it had settled — *a plausible number arriving in place of a
+     measurement*, which is the failure this project keeps having to name.
+
+     ⚠️ **Observation only**, so it cannot disturb the session ARKit is running: it holds *weak*
+     references to the device and never configures it.
+     */
+    private var rotationCoordinator: AnyObject?
+
+    /// Start watching ARKit's camera. Called straight after `session.run`, because
+    /// `configurableCaptureDeviceForPrimaryCamera` has nothing to hand back until then.
+    private func armRotation() {
+        guard #available(iOS 17.0, *), rotationCoordinator == nil,
+              let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera
+        else { return }
+        rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+    }
+
+    /// The horizon-level capture angle, or `nil` when nothing is watching.
+    ///
+    /// ⛑ **`nil` rather than a default, and that is the whole lesson of this defect.** A stand-in
+    /// `90` is indistinguishable from a real portrait reading. An unstamped file is honest; a
+    /// wrongly-stamped one is the bug being fixed, wearing the fix's clothes.
+    private var captureAngle: CGFloat? {
+        guard #available(iOS 17.0, *),
+              let c = rotationCoordinator as? AVCaptureDevice.RotationCoordinator else { return nil }
+        return c.videoRotationAngleForHorizonLevelCapture
+    }
+
+    /**
+     ⚠️ **Telemetry, never the stamp.**
+
+     ARKit runs gravity-aligned, so the camera transform carries the same roll the coordinator
+     reports, and comparing them costs nothing. It is **not** the answer, and the reason is the
+     posture the owner actually adopts: with the iPad flat the optical axis is parallel to gravity,
+     both terms go to zero, and the roll genuinely does not exist — `atan2(0,0)` then flips on hand
+     tremor. `HSCameraPlugin` chose the coordinator for exactly that case, *"the state an iPad is in
+     whenever a plate on top of a furnace gets photographed."*
+
+     ⛑ Logged beside the stamp so **one ordinary walk** settles whether the two agree, and which way
+     round portrait falls — rather than a probe asking the owner to hold the iPad four ways.
+     */
+    private static func gravityAngle(_ camera: ARCamera) -> Double {
+        let t = camera.transform
+        let deg = atan2(Double(t.columns.0.y), Double(t.columns.1.y)) * 180 / .pi
+        return deg < 0 ? deg + 360 : deg
+    }
+
+    /**
      **A 12 MP still taken through the tracking session, with the pose of the frame it came from.**
 
      ⚑ **This is the whole architecture in one method.** ARKit and an `AVCaptureSession` cannot share
@@ -940,6 +1035,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let torchLit = ARWorldTrackingConfiguration
                 .configurableCaptureDeviceForPrimaryCamera?.isTorchActive ?? false
 
+            /* ⚑ **Which way up, read at delivery and on the main thread** — beside the torch, and
+               for the torch's own stated reason: ARKit calls this completion on main, the rotation
+               coordinator publishes on main, and the exposure has already happened, so delivery is
+               the nearer instant to it than the request was.
+
+               ⛑ Captured into the encode hop as plain numbers. Everything crossing that hop is a
+               value, never an ARKit or AVFoundation object — this closure has been taught once what
+               holding a framework's own objects costs. */
+            let angle = self.captureAngle
+            let exif = angle.map { Int(CameraController.imageOrientation(forRotationAngle: $0).rawValue) }
+            let gravity = Self.gravityAngle(f.camera)
+
             /* ⚑ What the lens was aimed at, from THIS frame — and `HSSurface` is the one place
                that decides, which is why the ray that used to be written out here is gone. The
                optical axis is still the ray, and still for the reason it always was: it needs no
@@ -993,10 +1100,42 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 completion(["ok": false, "why": "could not copy the frame"]); return
             }
             self.encodeQueue.async {
-                let ci = CIImage(cvPixelBuffer: pixels)
-                guard let jpeg = CIContext().jpegRepresentation(
-                    of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(),
-                    options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95]
+                /*
+                 ⚑ **The orientation is STAMPED here, and reading it back was never the same act.**
+
+                 `CameraController.exifOrientation(of:)` states its own purpose in its own comment —
+                 *"so the zone session can stamp the SAME orientation on a still it took itself.
+                 Two implementations of 'which way up is this JPEG' is how a frame ends up sideways
+                 in one path and upright in the other"* — and this path called it to **read**.
+                 Nothing had written a tag, so it returned the specified default of `1`.
+
+                 ⛑ **That is not an absence; it is a positive claim that a sideways photograph is
+                 upright**, and it was believed by everything downstream — the desk, the browser,
+                 and `readAccurately`, which handed Vision every in-zone plate at `.up`. *A default
+                 rendered as a measurement*, the same shape as the fabricated `positioned: true`
+                 that `unposedIfTraverse` exists to prevent.
+
+                 ⚠️ **`settingProperties`, not an option on `jpegRepresentation`.** The JPEG writer
+                 accepts only quality, thumbnail and the depth/matte keys, so an orientation passed
+                 there **compiles, runs, and is silently dropped** — verified against this SDK
+                 rather than assumed, because a silent no-op here would look exactly like a fix.
+
+                 **Pixels stay in sensor orientation and only the tag is written**, which is the
+                 convention the rest of the app already keeps: *"2026-era Safari orients pixels
+                 itself, and manual rotation would double-rotate."*
+                 */
+                let raw = CIImage(cvPixelBuffer: pixels)
+                let ci = exif.map { raw.settingProperties([kCGImagePropertyOrientation as String: $0]) } ?? raw
+                /* ⚑ **sRGB, named.** `CGColorSpaceCreateDeviceRGB()` is device-dependent by
+                   definition, so the file carried no profile a reader could trust. `flattenPage`
+                   already names sRGB — **two encode sites disagreeing about colour is the same
+                   shape as two tables disagreeing about rotation**, and one of those has already
+                   shipped a bug in this repo. */
+                guard let jpeg = self.encodeContext.jpegRepresentation(
+                    of: ci,
+                    colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                    options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption:
+                                Self.stillJpegQuality]
                 ) else {
                     DispatchQueue.main.async { completion(["ok": false, "why": "could not encode the frame"]) }
                     return
@@ -1009,6 +1148,10 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 }
                 var entry: [String: Any] = [
                     "path": url.path, "bytes": jpeg.count, "index": 0,
+                    /* ⛑ Still read off the written bytes, and **that is now worth something**:
+                       having stamped the tag above, this line stops fabricating a default and
+                       becomes the read-back that confirms the stamp took. `exifAsked` vs
+                       `exifWrote` in the log below is the pair that would show it had not. */
                     "exifOrientation": CameraController.exifOrientation(of: jpeg),
                     // `lens` stays a constant and is not the same kind of claim: world tracking is
                     // offered only the wide-angle device on this iPad (`HSLensProbe`, 2026-08-24),
@@ -1023,6 +1166,15 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 var row: [String: Any] = [
                     "ms": ms, "bytes": jpeg.count, "mapping": mapping, "tracking": tracking,
                     "w": w, "h": h,
+                    /* ⚑ Asked, written, and the independent second opinion — three numbers that
+                       cost nothing and settle by showing. `exifAsked == exifWrote` says the stamp
+                       took; `angle` against `gravityAngle` says whether ARKit's gravity agrees with
+                       CoreMotion, and which way round portrait falls. **A log row, not a banner:
+                       there is nothing to announce unless they disagree.** */
+                    "exifAsked": exif ?? -1,
+                    "exifWrote": CameraController.exifOrientation(of: jpeg),
+                    "angle": angle.map { Double($0) } ?? -1,
+                    "gravityAngle": gravity,
                 ]
                 for (key, value) in aim.log { row[key] = value }
                 HSZoneLog.record("stillThroughArkit", row)
@@ -1030,6 +1182,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                     completion([
                         "ok": true, "latencyMs": ms, "frames": [entry],
                         "position": position, "mode": self.mode?.rawValue ?? "positioning",
+                        /* ⛑ **The angle the zone actually used.** `CameraScreen` hard-coded `0`
+                           here because the zone never asked a photo connection for one — so the
+                           review panel printed `0° asked · exif 1`, a self-consistent pair of wrong
+                           halves, on the one screen built to catch exactly that disagreement. */
+                        "rotationAngle": angle.map { Double($0) } ?? -1,
                     ])
                 }
             }

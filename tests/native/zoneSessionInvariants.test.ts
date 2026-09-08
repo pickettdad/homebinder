@@ -433,3 +433,61 @@ describe("naming an origin", () => {
     expect(ZONE_SRC).not.toMatch(/initialWorldMap/);
   });
 });
+
+/**
+ * ⚑ **A still that is written must have its orientation WRITTEN, never merely read back.**
+ *
+ * From 2026-09-05 the in-zone photograph came out of the tracking session and was encoded here from
+ * a raw pixel buffer — which carries no metadata. The encode never stamped an orientation, and the
+ * line beside it called `CameraController.exifOrientation(of:)`, whose own comment says it exists
+ * *"so the zone session can stamp the SAME orientation on a still it took itself."*
+ *
+ * ⛑ **It was used to read, so it returned the specified default of `1` — and `1` is not an absence.
+ * It is a positive claim that a sideways photograph is upright**, believed by the desk, by the
+ * browser, and by `readAccurately`, which handed Vision every in-zone plate at `.up`.
+ *
+ * *The invariant is not "the tag equals 6"* — that is an inventory, and it is false whenever the
+ * iPad is held landscape. It is that **the encode stamps, the source of the angle is a measurement
+ * rather than a constant, and the absence of a reading produces an absent tag rather than a
+ * plausible one.**
+ */
+describe("which way up a zone still is", () => {
+  it("stamps the orientation into the image it encodes", () => {
+    // The stamp itself, on the CIImage that is handed to the encoder.
+    expect(ZONE_SRC).toMatch(/settingProperties\(\[kCGImagePropertyOrientation/);
+  });
+
+  it("does not pass orientation to the JPEG writer, which silently drops it", () => {
+    /* ⚠️ The trap that makes this worth a test: `jpegRepresentation` accepts only quality, thumbnail
+       and the depth/matte keys. An orientation passed in its options **compiles, runs and does
+       nothing** — a no-op that is indistinguishable from a fix until a photograph comes back
+       sideways. Verified against the SDK 2026-09-07. */
+    const encode = /jpegRepresentation\([\s\S]{0,600}?\)/.exec(ZONE_SRC)?.[0] ?? "";
+    expect(encode).not.toBe("");
+    expect(encode).not.toMatch(/kCGImagePropertyOrientation/);
+  });
+
+  it("takes the angle from a measurement, never from a constant", () => {
+    /* ⛑ The mapping rule stays in `CameraController` — one table, because this repo has already
+       shipped a bug caused by two that disagreed. What the zone owns is only the *source*, since
+       ARKit holds a different device than the capture session does. */
+    expect(ZONE_SRC).toMatch(/RotationCoordinator\(device:/);
+    expect(ZONE_SRC).toMatch(/CameraController\.imageOrientation\(forRotationAngle:/);
+  });
+
+  it("leaves the tag off when nothing measured, rather than defaulting to a plausible angle", () => {
+    /* ⚑ The whole defect in one line. A stand-in `90` is indistinguishable from a real portrait
+       reading, so a fix that defaults is the bug wearing the fix's clothes. `captureAngle` is
+       optional and the stamp is applied through `map`, so no reading means no tag. */
+    expect(ZONE_SRC).toMatch(/private var captureAngle: CGFloat\?/);
+    expect(ZONE_SRC).toMatch(/exif\.map \{ raw\.settingProperties/);
+  });
+
+  it("records what it asked for beside what the file ended up carrying", () => {
+    /* A stamp that failed silently would otherwise look exactly like a stamp that worked.
+       Two numbers in the log, and they are a log row rather than a banner — there is nothing to
+       announce unless they disagree. */
+    expect(ZONE_SRC).toMatch(/"exifAsked"/);
+    expect(ZONE_SRC).toMatch(/"exifWrote"/);
+  });
+});

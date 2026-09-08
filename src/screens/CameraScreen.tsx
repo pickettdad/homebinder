@@ -1019,7 +1019,11 @@ export function CameraScreen({
               deskewed: false,
               torchPaired: false,
               lens: "normal" as const,
-              rotationAngle: 0,
+              /* ⛑ **The angle the zone actually used, not a placeholder.**
+                 This was hard-coded `0` because the zone never asks a photo connection for a
+                 rotation — so the review panel printed `0° asked · exif 1`, two wrong halves
+                 agreeing with each other, on the one screen built to catch that disagreement. */
+              rotationAngle: zoneStill.rotationAngle ?? -1,
               at: new Date().toISOString(),
               position: zoneStill.position,
             }

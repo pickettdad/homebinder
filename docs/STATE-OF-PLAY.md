@@ -152,6 +152,75 @@ TestFlight archive, per the build order.
 
 ---
 
+## ⚑ 2026-09-07 evening — the image-quality question, closed by measurement
+
+**The owner's ask:** *"I want the best solution for the image quality, not a bandaid — the step out
+seems like a bandaid."* He was right about the step-out: it would put a camera handover on every
+photograph, which is exactly what the continuous-session rebuild removed.
+
+### What shipped, and he confirmed it on the device
+
+⚑ **The in-zone still was never stamped with an orientation.** It encodes a `CVPixelBuffer`, which
+carries no metadata, and then called `CameraController.exifOrientation(of:)` — whose own comment says
+it exists *"so the zone session can stamp the SAME orientation on a still it took itself"* — **to
+read.** Nothing had written a tag, so it returned the specified default of `1`.
+
+⛑ **`1` is not an absence. It is a positive claim that a sideways photograph is upright**, and
+everything downstream believed it. **Including Vision:** `readAccurately` takes its orientation from
+that tag, so **every in-zone plate since 2026-09-05 was read at `.up` while lying on its side** — a
+silent OCR loss the desk cannot recover. It reached the traverse on 09-07 through
+`entry["exifOrientation"] ?? 1`.
+
+**Fixed** (`7418ea0`): the zone owns a `RotationCoordinator` against ARKit's device, the angle→EXIF
+mapping stays in `CameraController` (*"two tables can disagree, one cannot"*), and **no reading
+produces no tag** rather than a plausible default. ✅ **Owner verified upright on device.**
+
+Carried in the same commit, none of which can move sharpness and none of which is filed as though it
+could: **colour attachments now survive `copyBuffer`** (measured present on ARKit's buffers, so a
+real loss), **sRGB named** instead of uncalibrated deviceRGB, **one `CIContext`** instead of one per
+photograph, and `rotationAngle` stops being a hard-coded `0` on the TS side.
+
+### ⚠️ The softness: diagnosed, and it is not what this session first claimed
+
+**Scored on the Mac from the owner's own captures — no walk:** not motion blur (anisotropy 0.03–0.13),
+not defocus (no tile anywhere is sharp), not JPEG (≈2.2 bits/pixel, at the top of Apple's own band).
+⚑ **It is a dim room:** shadow SNR **18.5** against **41.5** on a well-lit frame *from the identical
+code path*, shadows at luma 23 vs 53, 1.6× the colour noise.
+
+**Every lever now has a number** (`PHOTO-SETTINGS-RESULT-2026-09-07`):
+
+| lever | measured | status |
+|---|---|---|
+| photo pipeline / fusion | — | 🔴 `.quality` **refused** (`ARError 107`), `.balanced` **inert** |
+| exposure 1/15–1/30 @ low ISO | **+27% shadow SNR, −37% noise** | ⚠️ tracking cost **unmeasured** |
+| torch | **+13%** | ✅ safe, small |
+| encode / colour / JPEG | **0** | ✅ fixed anyway |
+
+⛑ **The `.quality` refusal returns an `NSError`, not an exception** — so it was always safe to try,
+and is now known rather than assumed. *This session proposed it as "the non-bandaid answer" and was
+wrong; the document exists so the next session does not re-propose it.*
+
+### 🔴 What a desk can never answer — the owner named it
+
+Feature counts read **2–4** against Gate 1's median of **229**. This session read that as a
+textureless scene. **The owner's diagnosis is structural and better:** *"you are starting fresh in a
+space with no world-tracking history and expecting it to pick things up immediately?"*
+
+⚑ **ARKit triangulates feature points from parallax.** A stationary iPad seconds after a cold `run()`
+generates almost none, **so any stationary probe reads near-zero features whatever the scene.**
+*The cost half of the exposure question is only observable while walking.* The image half stands — a
+static scene is a fair test of a photograph.
+
+### The open decision, and it is the owner's
+
+**Exposure is the one real remaining code lever: +27% shadow SNR for object captures.** It cannot be
+shipped on the desk evidence alone, because a longer exposure could starve VIO during a walk and
+nothing here can see that. **So it is a walk to validate, for a 27% gain** — or it is deferred and
+the mechanical-room walk happens instead. *A trade-off between two defensible options is his call.*
+
+⚠️ **And the largest remaining variable is not in the code at all: it is how far the concierge stands
+from what they are photographing.**
+
 ## What is fixed and on the device
 
 - **ARKit frames are copied, never retained** — holding one past the delegate starved the frame pool

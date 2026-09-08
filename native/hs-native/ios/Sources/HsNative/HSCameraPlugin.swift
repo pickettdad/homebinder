@@ -1871,8 +1871,23 @@ final class CameraController: NSObject {
                              already been missed once.*
                              */
                             self.attachPreview(behind: webView)
+                            /*
+                             ⛑ **The mode is applied here too, now that it goes to the right device.**
+
+                             ⚑ This branch skipped `apply(mode:)` deliberately: it configured the
+                             AVFoundation handle, which inside a zone is not the camera taking the
+                             picture, and it touched a session the zone had stopped. **Both reasons
+                             are gone** — `apply` reaches for `lensDevice`, which is ARKit's device
+                             while the zone owns the lens.
+
+                             ⚠️ *Without this, a mode only reached the camera when a button was
+                             tapped* — so opening the viewfinder in Object mode gave ARKit's
+                             tracking-tuned settings and nothing else, which is what the field saw:
+                             **"its quality was not the greatest for being an object."**
+                             */
+                            let achieved = self.apply(mode: mode)
                             self.startStatusSampling()
-                            completion(.success(self.capabilities(unmetAtStart: [])))
+                            completion(.success(self.capabilities(unmetAtStart: achieved.unmet)))
                         }
                         return
                     }
@@ -2489,7 +2504,30 @@ final class CameraController: NSObject {
         if wantedLens != lens { _ = swapLens(to: wantedLens) }
         if lens != wantedLens { unmet.append("lens") }
 
-        guard let device else { return Achieved(mode: mode, unmet: ["camera"]) }
+        /*
+         ⛑ **`lensDevice`, not `device` — the mode must configure the camera that is actually taking
+         the photograph.**
+
+         ⚑ *Field 2026-09-07: "I went to object capture mode and snapped an object capture and its
+         quality was not the greatest for being an object."* He is right, and the resolution was
+         fine — 3.66 MB at 4032×3024 through the ARKit path. **What was missing was the mode.**
+
+         `device` is the AVFoundation session's handle. Inside a zone ARKit drives its own
+         (`configurableCaptureDeviceForPrimaryCamera`), so **every close-focus, spot-metering and
+         range-restriction this method sets was being applied to a device that was not taking the
+         picture.** *Object mode, Text mode and Document mode have therefore been decorative inside a
+         zone since the continuous session landed* — every in-zone capture got ARKit's settings, tuned
+         for tracking rather than for a nameplate at half a metre.
+
+         ⚠️ **It surfaced now because the traverse gave him something to compare against**, which is
+         the ordinary way a silent regression is found: not by looking, but by holding two things
+         beside each other.
+
+         The traverse already reaches for `lensDevice` for its exposure lock, and `restoreContinuousModes`
+         releases the same handle it locked. **This is the third caller of that rule and the one that
+         was missing it.**
+         */
+        guard let device = lensDevice else { return Achieved(mode: mode, unmet: ["camera"]) }
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }

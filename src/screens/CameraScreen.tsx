@@ -2625,7 +2625,7 @@ export function CameraScreen({
       </header>
 
       {showInstruments && status && (
-        <div className="absolute right-3 top-16 w-64 rounded-lg bg-slate-950/85 p-3 text-xs text-slate-300 ring-1 ring-slate-700">
+        <div className="absolute right-3 top-16 max-h-[calc(100dvh-5rem)] w-64 overflow-y-auto rounded-lg bg-slate-950/85 p-3 text-xs text-slate-300 ring-1 ring-slate-700">
           <p>thermal · <span className="font-mono text-slate-100">{status.thermalState}</span></p>
           <p>battery · <span className="font-mono text-slate-100">{Math.round(status.battery.level * 100)}%</span> {status.battery.state}</p>
           <p>

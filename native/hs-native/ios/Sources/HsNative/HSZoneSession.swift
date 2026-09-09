@@ -156,6 +156,10 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     var onPreviewFrame: ((CVPixelBuffer, [ARMeshAnchor], ARCamera) -> Void)?
     private var lastPreviewAt = Date.distantPast
     private var lastPlanAt = Date.distantPast
+    /// ⛑ The log's own throttle, separate from `lastPlanAt` so the live drawing and the written
+    /// record can never be tuned into each other by accident — they answer to different readers.
+    private var lastRoomLogAt = Date.distantPast
+    private var lastRoomProgressLogged: [Int] = []
     var hideArPreview: (() -> Void)?
     /**
      ⚑ **ARKit's frames, handed to the one analysis pipeline the app has.**
@@ -1923,7 +1927,32 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
             "windows": room.windows.count,
             "openings": room.openings.count
         ]
-        HSZoneLog.record("roomProgress", roomProgress)
+        /*
+         ⚑ **This line fills the ring buffer, and the buffer's own comment predicted it:**
+         *"partway through the first room and silently hands back a beginning that is not the
+         beginning."*
+
+         `didUpdate` fires at ~0.6 s, unthrottled, for the whole of a floorplan scan — **~100 rows
+         per scanning minute against a 3000-row buffer.** Measured across the owner's real logs it
+         is **80% of all rows** in a scan-heavy walk (272 of 340). A 90-minute walk wraps once
+         cumulative scanning passes roughly 13–22 minutes, and what it drops is the **oldest** rows
+         — the first room, the part nobody would think to doubt.
+
+         ⛑ **Raising `limit` would make it worse.** `flush()` re-serialises and atomically rewrites
+         the entire array on every `record()`, so a bigger buffer is a bigger write on every row —
+         during RoomPlan and scene reconstruction, on the same device.
+
+         **So the rows are reduced rather than the buffer enlarged**, and on the honest signal: a
+         count that has not changed carries nothing, and a heartbeat keeps the series readable while
+         a scan is genuinely finding nothing. *The live UI event below is deliberately untouched —
+         it is what the concierge watches, and it is not what fills the file.*
+         */
+        let counts = [room.walls.count, room.doors.count, room.windows.count, room.openings.count]
+        if counts != lastRoomProgressLogged || Date().timeIntervalSince(lastRoomLogAt) > 2.0 {
+            lastRoomProgressLogged = counts
+            lastRoomLogAt = Date()
+            HSZoneLog.record("roomProgress", roomProgress)
+        }
         onEvent?(["roomProgress": roomProgress])
 
         /* ⚑ **The geometry, live, and not only the counts.**

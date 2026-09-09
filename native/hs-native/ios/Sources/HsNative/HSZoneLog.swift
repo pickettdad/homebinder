@@ -51,6 +51,14 @@ enum HSZoneLog {
         return true
     }()
 
+    /// ⛑ Named rather than numbered: `2` in a shared file is a lookup a reader should not have to do.
+    static func batteryStateWord() -> String {
+        switch UIDevice.current.batteryState {
+        case .charging: return "charging"; case .full: return "full"
+        case .unplugged: return "unplugged"; default: return "unknown"
+        }
+    }
+
     static func thermalWord() -> String {
         switch ProcessInfo.processInfo.thermalState {
         case .nominal: return "nominal"; case .fair: return "fair"
@@ -92,6 +100,13 @@ enum HSZoneLog {
             "thermal": Self.thermalWord(),
             "fps": Self.deliveredFps,
             "battery": Self.batteryReady ? Double(UIDevice.current.batteryLevel) : -1,
+            /* ⚑ **The level alone cannot tell a full battery from a charging one**, and both read
+               1.0. Every walk in this repo's history reads a flat 100% — correctly, because they
+               were tethered — and nothing in the shared file said so. *An owner asking this walk to
+               benchmark a whole house needs the record to distinguish "used no power" from "was
+               plugged in", and the level is silent on exactly that.* The dev bench has recorded this
+               since August; the walk log never did. */
+            "batteryState": Self.batteryStateWord(),
         ]
         for (k, v) in detail { row[k] = v }
         entries.append(row)

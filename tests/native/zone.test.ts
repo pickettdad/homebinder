@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  roomShotAvailability,
   zoneGaps,
   ZONE_MODES,
   anchorAvailability,
@@ -243,8 +244,101 @@ describe("what a zone is missing, said while the concierge is still in it", () =
     expect(g.missing.join(" ")).toMatch(/take one more photo/);
   });
 
+  /**
+   * ⛑ **Geometry accumulates for free and is kept only on request** — so the room that never asked
+   * is indistinguishable from the room that had nothing to keep.
+   *
+   * ⚑ Since positioning runs reconstruction continuously, `harvestMesh` reads everything the zone
+   * built, and it runs at one moment only: Finish mesh. **The button is not "start scanning", it is
+   * the only "keep it".** A zone left without it discards a deliverable that already existed.
+   */
+  it("says when a room's geometry was never kept, and only for a room somebody worked in", () => {
+    const worked = { photos: 12, hasFloorplan: true, containers: [anchored] };
+    expect(zoneGaps({ ...worked, meshFiled: false }).missing.join(" ")).toMatch(/Finish mesh/);
+    expect(zoneGaps({ ...worked, meshFiled: true }).complete).toBe(true);
+    // ⛑ Absent is not false. A caller that cannot answer the question must not trip the warning —
+    // that is how a diagnostic starts firing on every room and stops being read.
+    expect(zoneGaps(worked).complete).toBe(true);
+    // And never on a room nobody has started, whatever the mesh says.
+    expect(zoneGaps({ photos: 0, hasFloorplan: false, containers: [], meshFiled: false }).complete).toBe(true);
+  });
+
   it("names both when both are missing, and does not stop at the first", () => {
     const g = zoneGaps({ photos: 4, hasFloorplan: false, containers: [floating(3)] });
     expect(g.missing).toHaveLength(2);
+  });
+});
+
+/**
+ * ⛑ **A gate whose default is "refuse" fires hardest on the case it exists to serve.**
+ *
+ * The first design of this one read a tracking state that `openZone` never sets — opening a zone
+ * deliberately does not start ARKit — so it refused **at the zone onset the room shot is for**. An
+ * adversarial review caught it before it reached a walk.
+ *
+ * ⚑ The invariant asserted here is therefore about **absence, not about the list of refusals**: a
+ * question nobody has answered must never produce a refusal. That holds at four conditions and at
+ * forty.
+ */
+describe("may the room shot step out", () => {
+  it("allows when nothing is known — the zone-onset case it exists for", () => {
+    // Nothing has been reported yet: no tracking, no capabilities, no container. That is exactly the
+    // state one second after a zone is created, and it must not refuse.
+    expect(roomShotAvailability({}).canStepOut).toBe(true);
+  });
+
+  it("refuses only on facts positively known, never on unanswered ones", () => {
+    /* ⛑ `=== true` / `=== false` rather than truthy, so `undefined` is silent. Asserted as a rule
+       over every field rather than as a list of today's four. */
+    const fields = ["traversing", "hasUltraWide", "containerOpen"] as const;
+    for (const f of fields) {
+      expect(roomShotAvailability({ [f]: undefined }).canStepOut).toBe(true);
+    }
+    expect(roomShotAvailability({ traversing: true }).canStepOut).toBe(false);
+    expect(roomShotAvailability({ hasUltraWide: false }).canStepOut).toBe(false);
+    expect(roomShotAvailability({ containerOpen: true }).canStepOut).toBe(false);
+  });
+
+  it("says what to do, not only that it is refused", () => {
+    // A refusal a concierge cannot act on is one that gets ignored — the same rule anchorAvailability
+    // is written to.
+    for (const state of [
+      { traversing: true },
+      { hasUltraWide: false },
+      { zoneFailure: "Required sensor failed." },
+      { containerOpen: true },
+    ]) {
+      const out = roomShotAvailability(state);
+      expect(out.canStepOut).toBe(false);
+      expect(out.why).toBeTruthy();
+      expect(out.fix).toBeTruthy();
+    }
+  });
+
+  it("says when the room is not mapped yet, and does not refuse it", () => {
+    /* ⛑ **Measured, 2026-09-06.** The first room shot of each run reported `mapping: notAvailable`,
+       `featurePoints: 0` and **no surface at all** — a pose describing the origin itself, 1.4 s after
+       ARKit started. An ordinary capture ninety seconds later reported `mapped`, 52 points and a
+       `sceneDepth` surface. ⚑ *The spec already orders the floorplan first; this is the sentence for
+       the concierge standing there anyway.* Refusing would fire on the case the room shot is for. */
+    const cold = roomShotAvailability({ mapping: "notAvailable" });
+    expect(cold.canStepOut).toBe(true);
+    expect(cold.note).toMatch(/floorplan first/);
+    // A mapped room says nothing — a note that fires always is a note nobody reads.
+    expect(roomShotAvailability({ mapping: "mapped" }).note).toBeUndefined();
+    // And an unanswered question stays silent, like every other field here.
+    expect(roomShotAvailability({}).note).toBeUndefined();
+  });
+
+  it("discloses the repeat cost rather than refusing it", () => {
+    /* ⚑ Owner ruling: a wait is acceptable, and blocking is for what cannot work. The handover is
+       measured safe — map byte-identical, origin 0.00003 m — so the second shot is a cost to state,
+       not a thing to prevent. Taking the choice away would be the app deciding for the room. */
+    const first = roomShotAvailability({ handoversThisZone: 0 });
+    expect(first.canStepOut).toBe(true);
+    expect(first.note).toBeUndefined();
+    const again = roomShotAvailability({ handoversThisZone: 2 });
+    expect(again.canStepOut).toBe(true);
+    expect(again.note).toMatch(/re-establishes/);
   });
 });

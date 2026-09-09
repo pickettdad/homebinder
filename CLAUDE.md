@@ -254,6 +254,21 @@ that changes what a fresh session would need to know: what is on the device, wha
 proved, what is open and what is next. *It is a carried-forward document with a named consumer — the
 next session — so it stays, and it is replaced rather than appended to.*
 
+**Build through; interrupt only for the breaking kind (owner ruling 2026-09-07).** *"Just keep
+building. If each verified step requires me to say keep going — only ask for verification if it is
+a critical change or app/process breaking, otherwise keep building."*
+
+⛑ **The verified-step discipline stays; what goes is the pause between steps.** Each increment is
+still gated — typecheck, tests, `xcodebuild`, installed, and where possible read back off the device
+log — but the gate is the compiler and the hardware, **not the owner's attention.** *He is the field
+instrument, and spending him on "shall I continue" is spending the scarcest thing in the project on
+the cheapest question.*
+
+⚑ **What still earns an interrupt**, and the list is short: a change that could **lose captured
+data**, one that changes **what the walk asks of him**, one that **cannot be reverted**, and a
+**decision that is his** — a ruling, a trade-off between two defensible designs, a cost he should
+weigh. *Everything else is reported at the end of the run, not asked about in the middle of it.*
+
 **Issue hygiene.** Docs (`REDESIGN-v2`, `PLAN-STAGE-*`, `CHECKLIST-MASTER-REVIEW`) carry
 *planned* work; the GitHub Issues tab carries *field defects that aren't fixed the same
 turn*. A defect found in testing and deferred becomes an issue; planned build steps never

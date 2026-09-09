@@ -135,6 +135,15 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             // ---- Q1c: if the built-in bracket is refused, can one be hand-rolled? ----
             self.probeHandRolledBracket()
 
+            // ---- Q6: does asking for a PHOTO rather than a tracking frame change the pixels? ----
+            self.probePhotoQuality()
+
+            // ---- Q7: what a PHOTOGRAPHIC exposure buys, and what it costs tracking ----
+            self.probeExposureLadder()
+
+            // ---- Q8: the lamp. The biggest lever in a dim room, and never measured in a zone. ----
+            self.probeTorchGain()
+
             // ---- Q1b: the bracket. LAST, because it may not return. ----
             self.probeBracket()
 
@@ -422,6 +431,385 @@ final class HSArProbe: NSObject, ARSessionDelegate {
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 10)
+    }
+
+    /**
+     **The two statistics that separate a soft photograph from a sharp one**, computed on the Y
+     plane so no CoreImage hop is needed and no colour interpretation can confound them.
+
+     ⚑ *Both, never one.* Scoring 2026-09-07's field captures on the Mac showed why: the soft
+     object photographs were **less** noisy than the sharp reference frame by a whole-frame measure,
+     because half of each frame was bright smooth wall. **Texture alone would have said the soft
+     ones were fine.** Detail and noise move together under multi-frame fusion — that is the whole
+     claim being tested — so a single number cannot say which moved.
+     */
+    private func planeStats(_ buffer: CVPixelBuffer) -> [String: Any] {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let planes = CVPixelBufferGetPlaneCount(buffer)
+        guard planes > 0, let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { return [:] }
+        let w = CVPixelBufferGetWidthOfPlane(buffer, 0)
+        let h = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        let px = base.assumingMemoryBound(to: UInt8.self)
+        func at(_ x: Int, _ y: Int) -> Double { Double(px[y * stride + x]) }
+
+        var lapSum = 0.0, lapSq = 0.0, nSum = 0.0, lum = 0.0, n = 0.0
+        var darkLum = 0.0, darkNoise = 0.0, darkN = 0.0
+        var y = 1
+        while y < h - 1 {
+            var x = 1
+            while x < w - 1 {
+                let c = at(x, y)
+                let lap = abs(4 * c - at(x - 1, y) - at(x + 1, y) - at(x, y - 1) - at(x, y + 1))
+                lapSum += lap; lapSq += lap * lap
+                /* ⛑ Immerkaer's kernel: it annihilates smooth AND linear structure, so what
+                   survives is overwhelmingly sensor noise rather than scene detail. That is what
+                   makes it separable from the Laplacian above, which answers to both. */
+                let nz = abs(4 * c - 2 * (at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1))
+                             + at(x - 1, y - 1) + at(x + 1, y - 1) + at(x - 1, y + 1) + at(x + 1, y + 1))
+                nSum += nz
+                lum += c; n += 1
+                // ⚑ The shadows, apart. That is where the field softness actually lives — measured
+                // shadow SNR 18.5 on the owner's captures against 41.5 on a well-lit frame.
+                if c < 48 { darkLum += c; darkNoise += nz; darkN += 1 }
+                x += 2
+            }
+            y += 2
+        }
+        guard n > 0 else { return [:] }
+        let mean = lapSum / n
+        let sigma = (nSum / n) * 1.2533 / 6.0
+        var out: [String: Any] = [
+            "w": w, "h": h,
+            "texture": (lapSq / n - mean * mean).squareRoot(),
+            "noise": sigma,
+            "meanLuma": lum / n,
+            "format": String(format: "%c%c%c%c",
+                             (CVPixelBufferGetPixelFormatType(buffer) >> 24) & 0xff,
+                             (CVPixelBufferGetPixelFormatType(buffer) >> 16) & 0xff,
+                             (CVPixelBufferGetPixelFormatType(buffer) >> 8) & 0xff,
+                             CVPixelBufferGetPixelFormatType(buffer) & 0xff),
+            // §1d: are the colour attachments even there to be propagated?
+            "hasYCbCrMatrix": CVBufferGetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, nil) != nil,
+            "hasPrimaries": CVBufferGetAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) != nil,
+        ]
+        if darkN > 0 {
+            out["darkMeanLuma"] = darkLum / darkN
+            out["darkNoise"] = (darkNoise / darkN) * 1.2533 / 6.0
+            out["shadowSNR"] = (darkLum / darkN) / max(1e-9, (darkNoise / darkN) * 1.2533 / 6.0)
+            out["darkShare"] = darkN / n
+        }
+        return out
+    }
+
+    /**
+     ⚑ **Does asking ARKit for a PHOTOGRAPH rather than a tracking frame change the pixels?**
+
+     The owner reports in-zone captures are soft. The tempting answer was *"ARKit skips the photo
+     pipeline; `photoQualityPrioritization = .quality` will fuse several exposures and fix it."*
+     **Three things say do not ship that on an argument:**
+
+     1. ⚠️ **It may throw rather than refuse.** `AVCapturePhotoOutput` raises
+        `NSInvalidArgumentException` when the requested prioritisation exceeds the output's
+        `maxPhotoQualityPrioritization`, whose default is `.balanced` — and **ARKit owns that output
+        and never exposes it**, so we cannot raise the cap. An uncatchable exception is a crash in a
+        mechanical room. *This probe is where it is allowed to happen, on a desk.*
+     2. ⚠️ **It is documented to override a locked exposure** — *"to ensure ISO and exposureDuration
+        are honored while in Custom or Locked, you must set photoQualityPrioritization to Speed."*
+        The traverse's lock is its one measured win (median texture 6.2 → 18.1). **Buying sharpness
+        with the exposure lock would be a bad trade made silently.**
+     3. ⛑ **Our own A/B argues the other way.** `PLATE-AB-RESULT-2026-09-04`: the settings-less
+        ARKit path beat an AVFoundation path that already had `.quality` set, reading the serial
+        3-of-3 against 0-of-3.
+
+     **So the probe reads the defaults first — which settles (1) without risking anything — and only
+     then takes the two photographs, same scene, seconds apart, and measures both.**
+     */
+    private func probePhotoQuality() {
+        guard #available(iOS 26.0, *) else {
+            step("photoQuality: needs iOS 26 — unavailable here")
+            result["photoQualityAvailable"] = false
+            return
+        }
+        result["photoQualityAvailable"] = true
+
+        /*
+         ⚠️ **The session is re-run on the ZONE's own format first, and the first cut of this probe
+         is why.**
+
+         It read `session.configuration?.videoFormat` as it found it — after `probeStepOut` had
+         paused, handed the camera away and resumed — and measured a **2016×1512** still on a format
+         reporting `isRecommendedForHighResolutionFrameCapturing == false`. **That is not the path
+         the product takes.** `HSZoneSession.stillFormat()` filters to recommended formats and
+         prefers 4:3, and a refusal measured on a format the zone never uses would have been
+         reported as a refusal of the feature.
+
+         ⛑ *Same class as the covered-lens anchor in `TRAVERSE-SOURCE-RESULT`: the comparison is
+         only worth something when both sides are shown the same thing.* Asking the session to be in
+         a known state costs one `run` and removes the confound entirely.
+         */
+        let config = ARWorldTrackingConfiguration()
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            config.sceneReconstruction = .mesh
+        }
+        if let want = HSZoneSession.stillFormat() { config.videoFormat = want }
+        session.run(config, options: [])
+        _ = waitForNormal(timeout: 8)
+
+        guard let fmt = session.configuration?.videoFormat else {
+            step("photoQuality: no videoFormat after run")
+            return
+        }
+        result["pqFormat"] = "\(Int(fmt.imageResolution.width))x\(Int(fmt.imageResolution.height))"
+        result["pqFormatRecommended"] = fmt.isRecommendedForHighResolutionFrameCapturing
+        result["pqFormatColorSpace"] = fmt.defaultColorSpace.rawValue
+
+        /* ⚑ **The reading that settles whether the change is even safe**, taken before anything is
+           attempted. `AVCapturePhotoOutput` is documented to RAISE when the requested prioritisation
+           exceeds the output's cap, and ARKit owns that output and never exposes it — so the cap
+           cannot be read directly and the default is the only evidence available without risking
+           the app. */
+        let base = fmt.defaultPhotoSettings
+        result["pqDefaultPrioritization"] = base.photoQualityPrioritization.rawValue
+        result["pqDefaultMaxDims"] =
+            "\(base.maxPhotoDimensions.width)x\(base.maxPhotoDimensions.height)"
+        step("photoQuality: format \(Int(fmt.imageResolution.width))x\(Int(fmt.imageResolution.height)) "
+             + "recommended=\(fmt.isRecommendedForHighResolutionFrameCapturing) "
+             + "default=\(base.photoQualityPrioritization.rawValue) "
+             + "maxDims \(base.maxPhotoDimensions.width)x\(base.maxPhotoDimensions.height)")
+
+        /* ⚑ **All three rungs, not just the one being hoped for.** A refusal of `.quality` alone
+           cannot tell *"ARKit will not process a still"* from *"ARKit will not go that far"* — and
+           those have different consequences: the first closes the question, the second leaves a
+           middle setting on the table. **`.speed` is included as the control**, because it is
+           ARKit's own default and must succeed; if it does not, the instrument is broken rather
+           than the feature refused. */
+        let rungs: [(String, AVCapturePhotoOutput.QualityPrioritization)] =
+            [("speed", .speed), ("balanced", .balanced), ("quality", .quality)]
+        for (label, prioritisation) in rungs {
+            /* ⛑ **A fresh settings object every time, never a reused one.** `AVCapturePhotoOutput`
+               raises if a `uniqueID` is seen twice — *"it is illegal to re-use settings"* — the kind
+               of rule that survives a probe taking three photographs and crashes a walk taking two
+               hundred. `defaultPhotoSettings` is documented to hand back a new instance per get. */
+            guard let settings = session.configuration?.videoFormat.defaultPhotoSettings else { continue }
+            settings.photoQualityPrioritization = prioritisation
+            step("photoQuality[\(label)]: requesting \(prioritisation.rawValue) — if the log stops here, it raised")
+            let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera
+            let sem = DispatchSemaphore(value: 0)
+            let started = Date()
+            session.captureHighResolutionFrame(using: settings) { [weak self] frame, error in
+                guard let self else { sem.signal(); return }
+                var row: [String: Any] = [
+                    "ms": Date().timeIntervalSince(started) * 1000,
+                    "asked": prioritisation.rawValue,
+                ]
+                if let f = frame {
+                    row.merge(self.planeStats(f.capturedImage)) { a, _ in a }
+                    // ⚑ The real ISO off the device, not `exposureOffset` — the first cut logged an
+                    // EV bias under the name `iso`, which is a wrong number wearing a right label.
+                    row["iso"] = device?.iso ?? -1
+                    row["shutter"] = CMTimeGetSeconds(device?.exposureDuration ?? .zero)
+                } else {
+                    row["error"] = error?.localizedDescription ?? "no frame"
+                    row["errorCode"] = (error as NSError?)?.code ?? -1
+                }
+                self.result["pq_\(label)"] = row
+                self.step("photoQuality[\(label)]: \(row)")
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 12)
+            // Let the meter settle so the next rung is not measuring the last one's recovery.
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+    }
+
+    /**
+     ⚑ **What a photographic exposure buys the photograph, and what it costs the tracking.**
+
+     `PHOTO-SETTINGS-RESULT-2026-09-07` closed the pipeline route: `.quality` is refused and
+     `.balanced` moves nothing. **What that run did establish is that exposure is the variable** —
+     ISO 722 at 1/60 with 43% of the frame in shadow, shadow SNR 15.4 against 41.5 on a lit frame.
+
+     ⛑ **ARKit meters for a 60 Hz tracking stream**, so it buys short exposures with gain: a dropped
+     frame costs it tracking, and noise does not. **A photograph is not a tracking frame, and the
+     concierge is standing still when taking one.** The traverse already exploits that asymmetry and
+     banked a measured median texture 6.2 → 18.1. The object capture exploits nothing.
+
+     ⚠️ **Both halves, in one run, and the second half is the one that gets forgotten.**
+     `EXPOSURE-LOCK-RESULT`'s first cut proved the lock *takes* and never asked what it cost ARKit's
+     tracking — and ARKit extracts its features from the very stream the lock is changing. *A long
+     exposure in a dim room could starve VIO during the one act where the camera is moving.* So each
+     rung records `rawFeaturePoints` and the tracking state beside the image statistics, and a rung
+     that wins on shadow SNR while halving the feature count has not won.
+
+     **The ladder trades gain for time at constant exposure**, so a rung that improves the picture
+     improves it by collecting more light rather than by being brighter — which is the only way
+     shadow noise actually falls.
+     */
+    private func probeExposureLadder() {
+        guard #available(iOS 16.0, *) else {
+            step("ladder: in-session capture and device access need iOS 16")
+            result["ladderAvailable"] = false
+            return
+        }
+        guard let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera else {
+            step("ladder: ARKit handed back no configurable device")
+            result["ladderAvailable"] = false
+            return
+        }
+        result["ladderAvailable"] = true
+        let fmt = device.activeFormat
+        let minISO = fmt.minISO, maxISO = fmt.maxISO
+        let minDur = CMTimeGetSeconds(fmt.minExposureDuration)
+        let maxDur = CMTimeGetSeconds(fmt.maxExposureDuration)
+        result["ladderISORange"] = "\(minISO)…\(maxISO)"
+        result["ladderDurationRange"] = "\(minDur)…\(maxDur)"
+        step("ladder: iso \(minISO)…\(maxISO), duration \(minDur)…\(maxDur)")
+
+        /* ⛑ **`auto` first and last would be better still, but the scene must not move**, and this
+           already asks the owner to hold one aim for a minute. The control runs first; a rung that
+           beats it is compared against a reading taken seconds earlier on the same frame. */
+        let rungs: [(String, Double?, Float?)] = [
+            ("auto", nil, nil),
+            ("t60_iso400", 1.0 / 60, 400),   // the traverse's own setting, proven to cost tracking nothing
+            ("t30_iso200", 1.0 / 30, 200),
+            ("t15_iso100", 1.0 / 15, 100),
+            ("t8_iso50",   1.0 / 8,  50),
+        ]
+        for (label, dur, iso) in rungs {
+            var applied: [String: Any] = [:]
+            do {
+                try device.lockForConfiguration()
+                if let dur, let iso {
+                    let d = CMTime(seconds: min(max(dur, minDur), maxDur), preferredTimescale: 1_000_000)
+                    let i = min(max(iso, minISO), maxISO)
+                    device.setExposureModeCustom(duration: d, iso: i, completionHandler: nil)
+                    applied["askedShutter"] = CMTimeGetSeconds(d)
+                    applied["askedISO"] = i
+                } else if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+            } catch {
+                applied["lockFailed"] = true
+            }
+            // Let the sensor actually reach what it was told, rather than measuring the transition.
+            Thread.sleep(forTimeInterval: 1.2)
+
+            /* ⚑ The cost half. Sampled as a median of several rather than one reading, because one
+               frame pointed at a blank patch must not decide the answer — `EXPOSURE-LOCK-RESULT`'s
+               correction, applied here from the start rather than after a re-run. */
+            var features: [Int] = []
+            var states: Set<String> = []
+            for _ in 0..<5 {
+                if let f = session.currentFrame {
+                    features.append(f.rawFeaturePoints?.points.count ?? 0)
+                    states.insert(Self.describe(f.camera.trackingState))
+                }
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+            let sorted = features.sorted()
+            applied["featuresMedian"] = sorted.isEmpty ? -1 : sorted[sorted.count / 2]
+            applied["tracking"] = states.sorted().joined(separator: "|")
+            applied["reachedISO"] = device.iso
+            applied["reachedShutter"] = CMTimeGetSeconds(device.exposureDuration)
+
+            let sem = DispatchSemaphore(value: 0)
+            session.captureHighResolutionFrame { [weak self] frame, error in
+                guard let self else { sem.signal(); return }
+                if let f = frame {
+                    applied.merge(self.planeStats(f.capturedImage)) { a, _ in a }
+                } else {
+                    applied["error"] = error?.localizedDescription ?? "no frame"
+                }
+                self.result["ladder_\(label)"] = applied
+                self.step("ladder[\(label)]: \(applied)")
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 12)
+        }
+
+        /* ⚠️ **Handed back, always.** A custom exposure left on ARKit's device would outlive this
+           probe as a setting nobody chose — the one-ended-operation class applied to a device, and
+           `restoreContinuousModes` exists in the plugin for exactly this reason. */
+        if let _ = try? device.lockForConfiguration() {
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            device.unlockForConfiguration()
+        }
+    }
+
+
+    /**
+     ⚑ **The torch, in the one condition it exists for — and nothing has ever measured it here.**
+
+     Every route to a better photograph tried so far has been about *processing the light that
+     arrived*: fusion (refused), a longer exposure (worth ~27% shadow SNR, `ladder`), a better
+     encode (cannot move sharpness). **This is the only lever that changes how much light arrives**,
+     and in an unlit corner that is not a percentage difference.
+
+     ⛑ **The device is reachable mid-session and this is measured, not argued** — `HSPlateAB` lights
+     a plate through `configurableCaptureDeviceForPrimaryCamera` while ARKit drives it, and
+     `HSZoneSession` reads `isTorchActive` off the same handle for every filed still.
+
+     ⚠️ **Off, on, off — and the second `off` is the point.** A single before/after pair cannot
+     separate *the torch helped* from *the meter drifted over eight seconds*, and this probe has
+     already been burned once by comparing two windows that were not the same scene. The closing
+     control returns to the opening condition; if it does not match the opener, the run is telling
+     us the scene moved and the middle reading means nothing.
+     */
+    private func probeTorchGain() {
+        guard #available(iOS 16.0, *) else { result["torchAvailable"] = false; return }
+        guard let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera else {
+            step("torch: no configurable device"); result["torchAvailable"] = false; return
+        }
+        guard device.hasTorch else {
+            step("torch: device reports no torch"); result["torchAvailable"] = false; return
+        }
+        result["torchAvailable"] = true
+
+        func shoot(_ label: String, lit: Bool) {
+            do {
+                try device.lockForConfiguration()
+                if lit { try? device.setTorchModeOn(level: 1.0) } else { device.torchMode = .off }
+                device.unlockForConfiguration()
+            } catch { step("torch[\(label)]: lockForConfiguration threw") }
+            // The lamp takes ~6 ms (measured 2026-08-28) but the METER takes far longer to answer it.
+            Thread.sleep(forTimeInterval: 1.5)
+            var row: [String: Any] = ["lit": lit, "torchActive": device.isTorchActive,
+                                      "iso": device.iso,
+                                      "shutter": CMTimeGetSeconds(device.exposureDuration)]
+            var features: [Int] = []
+            for _ in 0..<5 {
+                if let f = session.currentFrame { features.append(f.rawFeaturePoints?.points.count ?? 0) }
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+            let sorted = features.sorted()
+            row["featuresMedian"] = sorted.isEmpty ? -1 : sorted[sorted.count / 2]
+            let sem = DispatchSemaphore(value: 0)
+            session.captureHighResolutionFrame { [weak self] frame, error in
+                guard let self else { sem.signal(); return }
+                if let f = frame { row.merge(self.planeStats(f.capturedImage)) { a, _ in a } }
+                else { row["error"] = error?.localizedDescription ?? "no frame" }
+                self.result["torch_\(label)"] = row
+                self.step("torch[\(label)]: \(row)")
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 12)
+        }
+
+        shoot("offBefore", lit: false)
+        shoot("on", lit: true)
+        shoot("offAfter", lit: false)
+
+        // ⛑ Handed back. A lamp left burning is a setting nobody chose, and it is the owner's
+        // battery — the same one-ended-operation class the exposure ladder closes above.
+        if let _ = try? device.lockForConfiguration() {
+            device.torchMode = .off
+            device.unlockForConfiguration()
+        }
     }
 
     private func probeBracket() {

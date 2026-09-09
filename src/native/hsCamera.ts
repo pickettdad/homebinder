@@ -171,6 +171,10 @@ export interface ModeStatusEvent {
   lensLocked: boolean;
   /** Whether this iPad has an ultra-wide at all. */
   lensAvailable: boolean;
+  /** ⚑ Whether a 107° frame is reachable on this device **at all** — not whether it can be reached
+   *  right now. `lensAvailable` is the second question and is false for the life of a zone by
+   *  design; conflating them makes one refusal mean *not now* and *not ever* at once. */
+  hasUltraWide?: boolean;
   /** ⚑ ARKit holds the lens for the life of the zone. `sessionRunning` is true and the capture
    *  session's own is not — see the native comment: the question is *is the camera live*. */
   cameraHeldByZone?: boolean;
@@ -256,6 +260,27 @@ export interface TraversePair {
    *  so a run can under-count by exactly the amount it could not see. The other half of the corner
    *  discriminator — `maxStep` only sees the steps that succeeded. */
   droppedSteps?: number;
+  /** ⚑ **Which witness fired this frame** — `pose` where ARKit's own displacement crossed the
+   *  target, `pixels` where no surface had been measured and the image accumulator fired as it
+   *  always did, `first` for the frame that opens a leg. ⛑ A leg driven entirely by the fallback is
+   *  a different object from one the geometry drove, and a frame count cannot tell them apart. */
+  trigger?: "pose" | "pixels" | "first";
+  /** The camera's own displacement since the previous frame was requested, as a fraction of frame
+   *  width — metres of travel over the metres a frame spans at `standoffM`. Absent where no surface
+   *  had been measured, which is the honest answer rather than a guessed standoff. */
+  posedTravel?: number;
+  /** ⛑ The image accumulator's path length for the same pair, in frame widths — **the control.**
+   *  It used to BE `expectedTravel`; it is kept beside the geometric witness so one walk says
+   *  whether the swap was necessary, rather than retiring the old instrument on the commit that
+   *  replaces it. */
+  pixelTravel?: number;
+  /** The measured standoff the trigger's frame width was computed against, in metres, from the last
+   *  filed frame's own `surface`. Absent means nothing had measured one and `trigger` is `pixels`. */
+  standoffM?: number;
+  /** ⚑ Whether the camera had travelled a full target when this pair was measured. **True on every
+   *  pair by construction** — the trigger and the guard share a threshold — and recorded precisely
+   *  so that a run where it is false is visible in the data instead of impossible by argument. */
+  cameraMoved?: boolean;
   /** ⚑ How much there is to see in each frame of the pair, measured on ONE frame at a time.
    *  Every measure that has failed here was a correlation between two frames, and correlation with
    *  nothing to correlate returns confident nonsense — four times, in three mechanisms. Texture has
@@ -481,7 +506,11 @@ export interface TraverseFrame {
   path: string;
   bytes: number;
   index: number;
-  /** What the FILE claims, stamped once from the connection's rotation at `startTraverse`. */
+  /** What the FILE claims. ⚑ Read off the still's own bytes since the leg's frames became the zone
+   *  session's — honest where the old value was the capture connection's rotation, frozen for the
+   *  whole leg. `deviceRotationAngle` beside it is unchanged, so `framesTurnedFromStamp` still
+   *  compares the two; its numbers on a posed leg are new and are not comparable to a `flow-v3`
+   *  leg's. */
   exifOrientation: number;
   /** ⚑ Variance of the Laplacian on this frame — the one instrument in the traverse that is a
    *  property of a SINGLE frame and so cannot be fooled by having nothing to compare against.
@@ -495,6 +524,22 @@ export interface TraverseFrame {
    *  asserts it as an observation. Absent on legs recorded before this shipped. */
   deviceRotationAngle?: number;
   at: string;
+  /**
+   * ⚑ **Where this frame was taken, measured by the session that took it.**
+   *
+   * *Owner, 2026-09-07: "add position into each frame along a trace… a pipe running along walls and
+   * ceilings could actually be somewhat mapped out."* Until `flow-v4-posed` a leg carried two
+   * anchors, one at each end, and the chain between them carried only **order** — because a
+   * traverse handed the lens to the capture session and ARKit was paused for the whole leg.
+   *
+   * The leg runs inside the zone now, so this is `captureStill`'s `position` unaltered: the
+   * transform of the frame that became the photograph, its tracking word, its intrinsics, its
+   * `originEpoch` — and `surface` where `HSSurface` measured one, `surfaceWhy` where it refused.
+   * ⛑ Equal `originEpoch` **and** equal `originId` are what make two frames' positions comparable;
+   * neither the count nor the presence of a pose is enough on its own. Absent on legs recorded
+   * before this shipped, which is not the same as a refusal and must not be read as one.
+   */
+  position?: ZonePosition;
 }
 
 /** ⚑ What the room afforded and what was taken, metered once per leg.
@@ -552,6 +597,14 @@ export interface TraverseResult {
    *  A hole in `frames[].index` is where one was. */
   discarded?: number;
   discardedTexture?: number[];
+  /** ⛑ **Shutters the zone session refused, with the reason for each.** Kept because a discarded
+   *  error reads as a *free* shutter — cadence achieved, latency low, frame rate untouched, and
+   *  nothing captured. A leg that kept four frames because it asked for four is a different object
+   *  from one that asked for twenty and was refused sixteen, and `frames.length` reads identically
+   *  for both. Tracking that was not `normal`, a still already in flight and a paused zone are the
+   *  three a concierge can cause; none of them are ones he can see. Absent on legs recorded before
+   *  the traverse took its frames through the zone session. */
+  refusals?: string[];
 }
 
 export interface TraverseProgressEvent {
@@ -574,6 +627,14 @@ export interface ZoneStillResult {
   frames?: CaptureFrame[];
   position?: ZonePosition;
   mode?: string;
+  /** ⚑ The horizon-level angle the zone stamped this still's EXIF orientation from, or `-1` when
+   *  nothing was watching the device and the file was therefore left **untagged**.
+   *
+   *  ⛑ `-1` and not `0`. Zero is a real angle — an iPad held landscape-right — so a zero standing
+   *  for *"no reading"* would be indistinguishable from a measurement, which is precisely the
+   *  defect this field was added to close: the still used to be filed as `exifOrientation: 1`
+   *  because nothing had written a tag, and a specified default was read as an observation. */
+  rotationAngle?: number;
 }
 
 export interface CaptureResult {
@@ -672,6 +733,9 @@ interface NativeCamera {
   /** The zone session — see `src/native/zone.ts`. Three bounded modes, one coordinate space. */
   openZone(options: { zoneId?: string }): Promise<ZoneOpened>;
   closeZone(): Promise<unknown>;
+  roomShotStepOut(): Promise<{ ok: boolean; wide?: boolean; lens?: string; why?: string }>;
+  roomShotCapture(): Promise<{ ok: boolean; wide?: unknown; primary?: unknown; why?: string }>;
+  roomShotAbort(): Promise<void>;
   setZoneMode(options: { mode: ZoneMode }): Promise<{ mode: ZoneMode; unmet: string[] }>;
   pauseZone(): Promise<{ paused: boolean }>;
   resumeZone(): Promise<{ paused: boolean }>;
@@ -946,6 +1010,26 @@ export const closeBenchLoop = () => requireCamera().closeBenchLoop();
 /** The zone session. `takePosition` REFUSES rather than guessing — see `src/native/zone.ts`. */
 export const openZone = (zoneId?: string) => requireCamera().openZone(zoneId ? { zoneId } : {});
 export const closeZone = () => requireCamera().closeZone();
+
+/**
+ ⛑ **The room shot's step-out, in three acts — and the middle act is a person framing a room.**
+
+ ⚑ ARKit's device is **64.7°** and, while world tracking runs, pinned to a zoom range of exactly
+ `[1.0, 1.0]` (`docs/ZOOM-FLOOR-RESULT-2026-09-06.md`). The ultra-wide's **107.3°** is reachable only
+ by swapping the input, which means yielding the lens. *There is no third way; the probe closed that
+ door rather than leaving it to be re-argued.*
+
+ **`stepOut` → the concierge frames and taps → `capture` → wide frame, lens home, positioned 1×.**
+ `abort` is the other end for every exit that is not the shutter — a back button, a failure, an
+ unmount. ⛑ *A step-out has two ends and the second is the one that gets forgotten; that class has
+ seven instances in this codebase already.*
+
+ **The window's state lives natively**, not here: a second shutter press cannot enter it half-open,
+ which an adversarial review of an earlier design found a way to do.
+ */
+export const roomShotStepOut = () => requireCamera().roomShotStepOut();
+export const roomShotCapture = () => requireCamera().roomShotCapture();
+export const roomShotAbort = () => requireCamera().roomShotAbort();
 export const setZoneMode = (mode: ZoneMode) => requireCamera().setZoneMode({ mode });
 export const pauseZone = () => requireCamera().pauseZone();
 export const resumeZone = () => requireCamera().resumeZone();

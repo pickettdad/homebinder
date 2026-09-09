@@ -97,6 +97,35 @@ export interface FrameRoleMeta {
    *  hands — *I chose to stop here* — and never a claim that nothing was missed across the break.
    *  That claim is the desk's, and this field deliberately does not make it. */
   continuesFrom?: string;
+  /**
+   ⛑ **The device's own frame number, and a hole in it is the record of a missing vertex.**
+
+   ⚑ *Step 3 of the posed traverse.* The native counter increments for **every frame captured,
+   filed or discarded** — so `0, 1, 3, 4` means frame 2 was taken and dropped below the texture
+   floor. **Array position cannot say that**, and array position is the only order a leg carried
+   into the export until now.
+
+   ⚠️ **A reader must never renumber these.** Closing the gaps turns *"a vertex is missing here"*
+   into *"the line is continuous"* — which for a pipe run is the difference between a gap the desk
+   knows to bridge and a straight line drawn through something nobody photographed.
+   */
+  ordinal?: number;
+  /**
+   ⛑ **When THIS frame was taken — distinct from `capturedAt`, which is when the capture was
+   committed.**
+
+   ⚑ One press files a leg, so every frame of it shares one `capturedAt`. *That is correct and it
+   is also useless for a walk*: twenty-two frames spread over half a minute arrive stamped with the
+   moment the leg ended. **Without a per-frame time the desk cannot compute walking speed, cannot
+   see where the concierge paused, and cannot tell a forty-second leg from a four-second one** — the
+   difference between a trajectory and a bag of points.
+
+   ⚠️ **Milliseconds, and the shutter rather than the delivery.** At 1–2 Hz a whole-second stamp
+   gives two frames the same time, which is this defect one order of magnitude down; and a delivery
+   clock jitters with load by 60–90 ms, which a desk would read as the concierge speeding up and
+   slowing down.
+   */
+  takenAt?: string;
 }
 
 export interface CaptureMediaMeta {
@@ -247,6 +276,35 @@ export type CapturePositionMeta =
        * than a matter of trust. An honest orphan beats false continuity — the standing rule.
        */
       originEpoch?: number;
+      /**
+       ⛑ **The origin's NAME, and it is the field to compare — not the epoch.**
+
+       ⚑ *`originEpoch` is a per-process counter, so the first origin of every app launch is `1`.*
+       The 2026-09-06 export shows two separate runs in one zone both reporting `originEpoch: 1`,
+       each with `reinits: 1` and a pose within a millimetre of the origin — **two different frames
+       wearing the same number.** A desk comparing epochs would combine them and get a confident
+       wrong placement.
+
+       **Equal `originId` means one coordinate frame. Nothing else does.** *Different ids mean the
+       measurements must not be combined, however similar their epochs look.*
+
+       ⚠️ **And an app restart always mints a new one.** The world map is saved on pause and
+       `initialWorldMap` is never set, so nothing restores it: every launch starts a room over.
+       */
+      originId?: string;
+      /**
+       ⛑ **Why no surface was measured — and it is not one fact, it is three.**
+
+       ⚑ An absent `surface` could mean **beyond the sensor's ~8 m reach**, **depth thin on the
+       axis** (glass, a mirror, a dark chrome tank), or **the mesh budget stalled**. *Same empty
+       field, and the desk should act differently on each*: out-of-range is a fact about the room
+       and interpolating across it may be reasonable; a stalled budget is a fact about the app and
+       interpolating would be inventing geometry.
+
+       ⚠️ **Present only when `surface` is absent.** A measured surface says why it is there by
+       being there, and a reason beside a reading would be a field that could contradict its own row.
+       */
+      surfaceWhy?: string;
 
       /** ⚑ Reported, not acted on. A pose taken against very few tracked points is a pose taken in
        *  a room with nothing to hold on to — which is the mechanical room's own description. */

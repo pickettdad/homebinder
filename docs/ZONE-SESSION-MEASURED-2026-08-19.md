@@ -39,6 +39,31 @@ device reporting on itself.
 holds the camera — and **7 ms** when it is created at launch before the session starts. Same object,
 same device, three orders of magnitude apart.
 
+> ## ⛑ **CORRECTED 2026-09-06 — this section's conclusion is falsified by the field, and the fix it
+> recommended was built and did not work.**
+>
+> **The pre-build now exists.** `inputsPrepared {lenses: [normal, wide]}` is logged at **t = 0.00** of
+> every launch, verified on device. ⚠️ **And the first room-shot step-out of a launch still cost 9.00
+> seconds**, with the second, in the same zone and the same launch, costing **0.45 s**.
+>
+> ⚑ **A cost that survives the deletion of the operation it was attributed to was never that
+> operation's cost.** The ~9 s has now been measured on **three unrelated API calls, all within 4 ms
+> of each other** — `AVCaptureDeviceInput(device:)` at 9,008 ms, the preset write
+> (`beginConfiguration → sessionPreset → commitConfiguration`) at 9,004.5 ms, and `startRunning()` at
+> 9.00 s. *A physical renegotiation scatters. A constant that close is a deadline expiring.* Each time
+> one call was taken out of the path, **the nine seconds moved to the next call that touched the
+> device** rather than disappearing.
+>
+> ⛑ **And the experiment behind this section changed two variables at once.** `HSArProbe.probeStepOut`
+> does the round trip twice: the first pays 9,008 ms, the second is pre-built **and second**, and the
+> speed-up was credited to *pre-built*. Production separates them — pre-built on both, slow on the
+> first. **The variable that mattered was the ordinal.**
+>
+> **Best current attribution:** a fixed-deadline wait for the rear camera, paid by whichever
+> AVFoundation call is *first to demand the device after ARKit has held it* in that process. The
+> `startRunningMs` / `nth` / `captureSessionStarted` rows added on 2026-09-06 exist to settle it on
+> the next run, because **this section is what a plausible attribution looks like when it is wrong.**
+
 Build it once at launch and keep it. A step-out is then:
 
     pause 0 ms · startRunning 2–23 ms · [the shot] · stopRunning · session.run → normal 0 ms

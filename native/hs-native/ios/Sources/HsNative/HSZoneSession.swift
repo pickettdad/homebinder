@@ -5,6 +5,7 @@ import ARKit
 // out of ARKit's own imports.
 import AVFoundation
 import Foundation
+import ImageIO
 import RoomPlan
 import simd
 
@@ -169,7 +170,30 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      implementations of "is this plate readable" is a defect this project has already paid for
      twice.**
      */
-    var onAnalysisFrame: ((CVPixelBuffer) -> Void)?
+    /**
+     ⛑ **Everything a posed frame needs, as VALUES — the frame itself never leaves the callback.**
+
+     ⚑ *Step 2 of the posed traverse.* A trace that carries a pose per frame needs the transform, the
+     camera model and the instant, alongside the pixels. **Passing the `ARFrame` would be the obvious
+     way and is the one this file has already been burned by**: a retained frame keeps a slot in
+     ARKit's small pool, and enough of them stop the session delivering — *the viewfinder froze while
+     the shutter, containers and delete all kept working.* `onPreviewFrame` was rewritten to pass
+     values for the same reason and is the precedent.
+
+     `timestamp` is ARKit's own, in seconds since boot on the same clock as `CACurrentMediaTime` —
+     **the instant of exposure, not the instant of delivery.** *A per-frame time taken in a completion
+     is a delivery clock, and a trajectory measured on one cannot tell a pause from a sprint.*
+     */
+    struct AnalysisFrame {
+        let pixels: CVPixelBuffer
+        let transform: simd_float4x4
+        let intrinsics: simd_float3x3
+        let imageResolution: CGSize
+        let timestamp: TimeInterval
+        let tracking: String
+    }
+
+    var onAnalysisFrame: ((AnalysisFrame) -> Void)?
 
     /**
      ⚑ **A copy, because the original belongs to ARKit's frame pool.**
@@ -185,6 +209,17 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         guard CVPixelBufferCreate(nil, w, h, CVPixelBufferGetPixelFormatType(src),
                                   attrs as CFDictionary, &out) == kCVReturnSuccess,
               let dst = out else { return nil }
+        /* ⚑ **The colour attachments travel with the pixels, and they were being dropped.**
+
+           `CVPixelBufferCreate` makes a buffer with no attachments at all, so the YCbCr matrix,
+           colour primaries and transfer function ARKit tags its frames with — Apple documents the
+           first of these on `capturedImage` explicitly, *"you can verify this by checking the
+           kCVImageBufferYCbCrMatrixKey attachment"* — never reached the copy the encoder actually
+           reads. **CoreImage then had to guess the YCbCr→RGB conversion for every filed still.**
+
+           ⛑ *Same class as the orientation below: the thing consulted was not the thing that
+           governs.* A guess that is usually right is indistinguishable from a reading. */
+        CVBufferPropagateAttachments(src, dst)
         CVPixelBufferLockBaseAddress(src, .readOnly)
         CVPixelBufferLockBaseAddress(dst, [])
         defer {
@@ -293,6 +328,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         stopRoomCapture(keepSession: false)
         hideArPreview?()
         session.pause()
+        // The device it watches is about to stop being ours; a coordinator outliving that would
+        // report the last angle it saw as though it were current.
+        rotationCoordinator = nil
         releaseCamera?()
         let out: [String: Any] = [
             "zoneId": zoneId,
@@ -333,7 +371,36 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      comparable; different epochs mean the desk must not combine them** — an honest orphan rather
      than false continuity, which is this project's standing rule for exactly this shape of problem.
      */
+    /// ⛑ Delivered frame rate over a rolling five seconds — see `didUpdate`. Read into every pose and
+    /// every zone-log row, so a walk carries its own evidence of what the pipeline cost.
+    /// ⛑ The analysis cadence, owned here because this is where the copy is paid for. **2 matches the
+    /// traverse's own every-2nd-frame rule**, so moving the gate does not change what the consumer
+    /// sees — only where the cost is decided.
+    private static let analyseEveryNth = 2
+
+    private var deliveredFps: Double = 0
+    private var frameCount = 0
+    private var fpsWindowStart: Double = 0
+
     private var originEpoch = 0
+    /**
+     ⛑ **A NAME for the origin, because the counter cannot distinguish two of them.**
+
+     ⚑ *Found by the owner's question, 2026-09-06: "I have used the same zone for 2 tests about 25
+     minutes apart — has any of the positioning changed during those down times and app rebuilds?"*
+     **It had, completely**, and the export could not say so. The manifest shows both runs in one
+     zone reporting `originEpoch: 1`, each with `reinits: 1`, `sinceInitSec: 1.4` and a pose within
+     a millimetre of `(0,0,0)` — *two fresh origins wearing the same number.*
+
+     **`originEpoch` is a per-process counter.** A new launch starts it again, so the first origin of
+     every run is epoch 1 — and equal epochs are exactly what the desk is told means *comparable*.
+     ⚠️ **That is the false-continuity failure this field was built to prevent, committed by the
+     instrument itself.** *A stale frame silently vouching for a measurement nobody took in it.*
+
+     A uuid is minted wherever the origin is, so **equal ids mean one frame and nothing else does.**
+     The counter stays beside it: it is readable, and it still says how many times a run re-based.
+     */
+    private var originId = UUID().uuidString
 
     /// What the session is actually configured to do, so `enter` can tell a real change from a
     /// mode label change. Compared by value — two configs that differ in nothing must compare equal.
@@ -360,6 +427,30 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         case .roomplan:
             // RoomPlan configures the session itself; we only ensure it has one to configure.
             config.planeDetection = [.horizontal, .vertical]
+            /*
+             ⛑ **Reconstruction asked for during the floorplan too, because the floorplan is the
+             longest walk of the zone and it was building nothing.**
+
+             ⚑ *Field 2026-09-06, and the owner's challenge is what found it:* his first room shot
+             came back `surface: none` — depth thin at `0 of 121`, and `meshFrom: live` with nothing
+             to hit. **His photographs show why depth refused**: the centre of that frame is the far
+             end of a basement, well past LiDAR's ~5 m, while the second shot's centre is a bookshelf
+             and measured **4.55 m**. *The depth reading was right both times.* **The mesh fallback
+             was not there to catch it.**
+
+             This case set `planeDetection` and nothing else, so **a 168-second floorplan walk
+             accumulated no geometry at all** — reconstruction began only when positioning took over,
+             thirteen seconds before the room shot. *The one capture the desk lays a room out from is
+             taken at the exact moment the mesh is emptiest.*
+
+             ⚠️ **RoomPlan may override this**, since it runs its own configuration over the session
+             we hand it. Setting it costs nothing if so, and `harvestMesh`'s anchor count after a
+             floorplan-only zone is what will say — asked rather than assumed, and the answer is a
+             row in the log rather than a belief.
+             */
+            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+                config.sceneReconstruction = .mesh
+            }
         /*
          ⛑ **Mesh and positioning are ONE configuration, and writing them as two was the cost.**
 
@@ -452,13 +543,20 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         reinitCount += 1
         // ⚑ Only a RESET changes the frame. A re-init keeps it, which is the whole distinction the
         // desk needs and the one `reinits` alone could never express.
-        if mustReset { originEpoch += 1 }
+        if mustReset {
+            originEpoch += 1
+            // ⚑ A new frame is a new name. Minted here and nowhere else, beside the one line that
+            // creates the thing it names.
+            originId = UUID().uuidString
+        }
         lastInitAt = Date()
         HSZoneLog.record("enter", [
             "mode": next.rawValue, "reset": mustReset, "unmet": unmet, "reinits": reinitCount,
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
         ])
         session.run(config, options: mustReset ? [.resetTracking, .removeExistingAnchors] : [])
+        // ⚑ After `run`, never before: ARKit hands out no configurable device until it holds one.
+        armRotation()
         // ⚑ Cleared for RoomPlan rather than stored: it configures the session behind our back, so a
         // signature written here would describe a config that is about to stop being the live one.
         lastConfigSignature = next == .roomplan ? nil : signature
@@ -555,7 +653,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            the field populated. Two rooms were meshed on that walk; the difference between them is
            the entire question the desk is asking. */
         guard !anchors.isEmpty else {
-            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "originEpoch": originEpoch,
+            return ["anchors": 0, "faces": 0, "zoneId": zoneId, "originEpoch": originEpoch, "originId": originId,
                     "why": "nothing was meshed"]
         }
         var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
@@ -607,10 +705,29 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let fb = a.geometry.faces
             let perFace = fb.indexCountPerPrimitive
             idx.reserveCapacity(fb.count * perFace)
+            /*
+             ⛑ **`bytesPerIndex` is read here AND honoured — it used to be read and ignored.**
+
+             The line advanced by `fb.bytesPerIndex` and then read `UInt32` unconditionally. On a
+             16-bit buffer that walks 2 bytes and reads 4, so every index but the first is two halves
+             of two different numbers: ⚑ **not a crash and not an error — a room made of the wrong
+             triangles**, in the one payload the desk reconstructs geometry from.
+
+             *The comment two lines above already stated the rule* — `indexCountPerPrimitive` "is read
+             rather than assumed, for the same reason" — and then the next statement broke it. Three
+             readers of this buffer exist (`renderArPreview`, `HSSurface`, here); the other two branch
+             correctly, and **the one that got it wrong is the one that writes the export.**
+
+             *It has not bitten yet because ARKit ships 32-bit indices today.* That is precisely the
+             "works until an OS release" hazard the sibling comment names.
+             */
+            let indexBase = fb.buffer.contents()
+            let indexWidth = fb.bytesPerIndex
             for i in 0..<(fb.count * perFace) {
-                idx.append(Int(fb.buffer.contents()
-                    .advanced(by: i * fb.bytesPerIndex)
-                    .assumingMemoryBound(to: UInt32.self).pointee))
+                let p = indexBase.advanced(by: i * indexWidth)
+                idx.append(indexWidth == 2
+                    ? Int(p.assumingMemoryBound(to: UInt16.self).pointee)
+                    : Int(p.assumingMemoryBound(to: UInt32.self).pointee))
             }
             pieces.append([
                 "id": a.identifier.uuidString,
@@ -632,7 +749,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             "anchors": anchors.count,
             "faces": faces,
             // ⛑ Same frame question as the plan: geometry and poses combine only within one epoch.
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             // ⚑ Two rooms were meshed on the 2026-08-30 walk and neither payload could say which
             // it was. See the guard above.
             "zoneId": zoneId,
@@ -666,8 +783,41 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
         guard mode != nil else { return ["paused": false, "why": "no zone open"] }
         // Save before going quiet: this is the natural moment, and a crash while paused should cost
         // nothing at all.
-        saveWorldMap()
+        /*
+         ⛑ **Timed and LEFT IN PLACE — the step-out's nine seconds is measured across a window that
+         contains all of this and logged none of it.**
+
+         `roomShotStepOut → cameraReclaimed` spans a world-map save, an `ARSession.pause()`, a preview
+         teardown and the whole of `reclaimCamera`. With one row at each end **every one of them is a
+         suspect**, and the field's 9.00 s could belong to any.
+
+         ⚑ *`saveWorldMap` is the only thing in that window whose behaviour depends on elapsed time.*
+         It is gated at one save per 120 s, and in `.positioning` the per-frame saver never fires — so
+         a step-out at t=16 extracts a map and a step-out at t=54 is refused, **which is exactly the
+         first-slow / second-fast shape the field reported.** `getCurrentWorldMap` returns as soon as
+         it is enqueued, but the `session.pause()` on the next line — and therefore ARKit's release of
+         the camera — may queue behind the extraction. That is a mechanism, not a measurement, which is
+         the whole reason for these two clocks.
+
+         ⛑ **Measured, not removed.** The map is the zone's insurance against losing its coordinate
+         space to a crash. It has no reader today — `worldMapPath` and `zoneMapSaved` appear nowhere in
+         `src/` or `tests/` — but *insurance nobody has cashed is not insurance nobody needs*, and
+         **deleting a save to test a hypothesis spends the world to buy a number.** `mapRequested` plus
+         `arPauseMs` settles it on this device in one walk, and *then* the save can move to a moment
+         nobody is waiting on.
+        */
+        let mapFrom = CACurrentMediaTime()
+        // ⚑ The RETURN, not the call: the 120-second gate is the variable, and a row that only said
+        // "called" would read identically on the slow step-out and the fast one.
+        let mapRequested = saveWorldMap()
+        let mapMs = (CACurrentMediaTime() - mapFrom) * 1000
+        let arFrom = CACurrentMediaTime()
         session.pause()
+        HSZoneLog.record("zonePaused", [
+            "mapRequested": mapRequested,
+            "mapMs": mapMs,
+            "arPauseMs": (CACurrentMediaTime() - arFrom) * 1000,
+        ])
         paused = true
         armed = false
         /*
@@ -708,6 +858,84 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     private let encodeQueue = DispatchQueue(label: "hs.zone.encode", qos: .userInitiated)
 
     /**
+     ⛑ **One context for the zone, not one per photograph.**
+
+     Apple's guidance is blunt — a `CIContext` carries a Metal command queue and a compiled kernel
+     cache, and *"it is not recommended to create many CIContext instances"* — and this path built a
+     fresh one inside the encode of every still. At traverse cadence that is one heavyweight
+     allocation and one cold kernel compile **per frame**. It is documented immutable and
+     thread-safe, so a single instance serves `encodeQueue` for the life of the session.
+
+     ⚠️ **This does not make a photograph sharper, and it is not filed as though it might.**
+     Measured on the owner's own captures, 2026-09-07: the softness is shadow noise in a dim room —
+     shadow SNR **18.5** against **41.5** on a well-lit frame *from this same code path* — and no
+     encoder setting moves that. Recorded here so a later reader does not credit this line.
+     */
+    private let encodeContext = CIContext()
+
+    /// The one JPEG dial for stills, named so `TRAVERSE-STORAGE-SPEC-2026-09-07` §4 can turn it
+    /// without hunting a literal at a call site. Measured at ≈2.2 bits/pixel on 12 MP — at the top
+    /// of the band Apple's own camera writes, which is why §3 of that spec rules it out as a cause.
+    static let stillJpegQuality = 0.95
+
+    /**
+     **Which way up the iPad is, for the photograph this session takes itself.**
+
+     ⚑ *One rule, two sources, and the split is deliberate.* The angle→EXIF mapping stays in
+     `CameraController.imageOrientation(forRotationAngle:)` — the file that records what two
+     disagreeing rotation tables cost, and closes with *"two tables can disagree, one cannot."*
+     What differs here is only **whose device is being watched**: the controller builds its
+     coordinator against the AVFoundation handle, and inside a zone **ARKit holds a different one**.
+
+     ⛑ **Built once and kept.** The coordinator reads CoreMotion, so one constructed per shutter
+     would answer `0` before it had settled — *a plausible number arriving in place of a
+     measurement*, which is the failure this project keeps having to name.
+
+     ⚠️ **Observation only**, so it cannot disturb the session ARKit is running: it holds *weak*
+     references to the device and never configures it.
+     */
+    private var rotationCoordinator: AnyObject?
+
+    /// Start watching ARKit's camera. Called straight after `session.run`, because
+    /// `configurableCaptureDeviceForPrimaryCamera` has nothing to hand back until then.
+    private func armRotation() {
+        guard #available(iOS 17.0, *), rotationCoordinator == nil,
+              let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera
+        else { return }
+        rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+    }
+
+    /// The horizon-level capture angle, or `nil` when nothing is watching.
+    ///
+    /// ⛑ **`nil` rather than a default, and that is the whole lesson of this defect.** A stand-in
+    /// `90` is indistinguishable from a real portrait reading. An unstamped file is honest; a
+    /// wrongly-stamped one is the bug being fixed, wearing the fix's clothes.
+    private var captureAngle: CGFloat? {
+        guard #available(iOS 17.0, *),
+              let c = rotationCoordinator as? AVCaptureDevice.RotationCoordinator else { return nil }
+        return c.videoRotationAngleForHorizonLevelCapture
+    }
+
+    /**
+     ⚠️ **Telemetry, never the stamp.**
+
+     ARKit runs gravity-aligned, so the camera transform carries the same roll the coordinator
+     reports, and comparing them costs nothing. It is **not** the answer, and the reason is the
+     posture the owner actually adopts: with the iPad flat the optical axis is parallel to gravity,
+     both terms go to zero, and the roll genuinely does not exist — `atan2(0,0)` then flips on hand
+     tremor. `HSCameraPlugin` chose the coordinator for exactly that case, *"the state an iPad is in
+     whenever a plate on top of a furnace gets photographed."*
+
+     ⛑ Logged beside the stamp so **one ordinary walk** settles whether the two agree, and which way
+     round portrait falls — rather than a probe asking the owner to hold the iPad four ways.
+     */
+    private static func gravityAngle(_ camera: ARCamera) -> Double {
+        let t = camera.transform
+        let deg = atan2(Double(t.columns.0.y), Double(t.columns.1.y)) * 180 / .pi
+        return deg < 0 ? deg + 360 : deg
+    }
+
+    /**
      **A 12 MP still taken through the tracking session, with the pose of the frame it came from.**
 
      ⚑ **This is the whole architecture in one method.** ARKit and an `AVCaptureSession` cannot share
@@ -737,6 +965,26 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            burst that queues is honest where a dropped frame is not. */
         guard !stillInFlight else { completion(["ok": false, "why": "a capture is already in flight"]); return }
 
+        /*
+         ⛑ **A paused session is refused HERE, so no caller can read a frame out of one.**
+
+         ⚑ *Confirmed by five independent review lenses, 2026-09-06, against the room shot's
+         step-out.* `resume()` sets `armed = true` and nothing else — **it does not restart ARKit** —
+         and the only `wake()` in this file is `position()`'s. So a caller that paused, resumed and
+         then asked for a still got one of two wrong answers: **nil `currentFrame` on a zone whose
+         ARKit had never run**, or, worse, **the retained pre-pause frame, which still reports
+         `.normal`** — this file's own measured finding at `waitForTrackedFrame` — so both guards
+         below would pass and a pose from before the concierge moved would be stated as confidently
+         as a real one.
+
+         **The guard belongs on the value, not in the callers.** `waitForTrackedFrame` already
+         carries the `timestamp > stale` requirement for exactly this reason; `captureStill` had no
+         equivalent because until the step-out it was only ever called on a continuously-running
+         session. *That assumption is now false and this is where it stops being assumed.*
+         */
+        guard !paused else {
+            completion(["ok": false, "why": "positioning is paused", "recoverable": true]); return
+        }
         guard let live = session.currentFrame else {
             completion(["ok": false, "why": "no frame yet"]); return
         }
@@ -787,6 +1035,18 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             let torchLit = ARWorldTrackingConfiguration
                 .configurableCaptureDeviceForPrimaryCamera?.isTorchActive ?? false
 
+            /* ⚑ **Which way up, read at delivery and on the main thread** — beside the torch, and
+               for the torch's own stated reason: ARKit calls this completion on main, the rotation
+               coordinator publishes on main, and the exposure has already happened, so delivery is
+               the nearer instant to it than the request was.
+
+               ⛑ Captured into the encode hop as plain numbers. Everything crossing that hop is a
+               value, never an ARKit or AVFoundation object — this closure has been taught once what
+               holding a framework's own objects costs. */
+            let angle = self.captureAngle
+            let exif = angle.map { Int(CameraController.imageOrientation(forRotationAngle: $0).rawValue) }
+            let gravity = Self.gravityAngle(f.camera)
+
             /* ⚑ What the lens was aimed at, from THIS frame — and `HSSurface` is the one place
                that decides, which is why the ray that used to be written out here is gone. The
                optical axis is still the ray, and still for the reason it always was: it needs no
@@ -804,6 +1064,8 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "x": Double(p.x), "y": Double(p.y), "z": Double(p.z),
                 "transform": (0..<4).flatMap { c in (0..<4).map { r in Double(t[c][r]) } },
                 "mapping": mapping, "reinits": self.reinitCount, "originEpoch": self.originEpoch,
+                "fps": self.deliveredFps,
+                "originId": self.originId,
                 "sinceInitSec": Date().timeIntervalSince(self.lastInitAt),
                 "featurePoints": f.rawFeaturePoints?.points.count ?? 0,
                 /* ⚑ The camera model of the photograph itself, not of the tracking stream — the two
@@ -816,6 +1078,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 "projection": ["projectable": true],
             ]
             if let payload = aim.payload { position["surface"] = payload }
+            // ⛑ The refusal rides out with the pose. An absent surface and an absent REASON
+            // are the same row to a reader; only one of them can be acted on.
+            else if let why = aim.why { position["surfaceWhy"] = why }
 
             /*
              ⛑ **The pixels are copied out and the frame is released BEFORE the hop, and that
@@ -835,10 +1100,42 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 completion(["ok": false, "why": "could not copy the frame"]); return
             }
             self.encodeQueue.async {
-                let ci = CIImage(cvPixelBuffer: pixels)
-                guard let jpeg = CIContext().jpegRepresentation(
-                    of: ci, colorSpace: CGColorSpaceCreateDeviceRGB(),
-                    options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.95]
+                /*
+                 ⚑ **The orientation is STAMPED here, and reading it back was never the same act.**
+
+                 `CameraController.exifOrientation(of:)` states its own purpose in its own comment —
+                 *"so the zone session can stamp the SAME orientation on a still it took itself.
+                 Two implementations of 'which way up is this JPEG' is how a frame ends up sideways
+                 in one path and upright in the other"* — and this path called it to **read**.
+                 Nothing had written a tag, so it returned the specified default of `1`.
+
+                 ⛑ **That is not an absence; it is a positive claim that a sideways photograph is
+                 upright**, and it was believed by everything downstream — the desk, the browser,
+                 and `readAccurately`, which handed Vision every in-zone plate at `.up`. *A default
+                 rendered as a measurement*, the same shape as the fabricated `positioned: true`
+                 that `unposedIfTraverse` exists to prevent.
+
+                 ⚠️ **`settingProperties`, not an option on `jpegRepresentation`.** The JPEG writer
+                 accepts only quality, thumbnail and the depth/matte keys, so an orientation passed
+                 there **compiles, runs, and is silently dropped** — verified against this SDK
+                 rather than assumed, because a silent no-op here would look exactly like a fix.
+
+                 **Pixels stay in sensor orientation and only the tag is written**, which is the
+                 convention the rest of the app already keeps: *"2026-era Safari orients pixels
+                 itself, and manual rotation would double-rotate."*
+                 */
+                let raw = CIImage(cvPixelBuffer: pixels)
+                let ci = exif.map { raw.settingProperties([kCGImagePropertyOrientation as String: $0]) } ?? raw
+                /* ⚑ **sRGB, named.** `CGColorSpaceCreateDeviceRGB()` is device-dependent by
+                   definition, so the file carried no profile a reader could trust. `flattenPage`
+                   already names sRGB — **two encode sites disagreeing about colour is the same
+                   shape as two tables disagreeing about rotation**, and one of those has already
+                   shipped a bug in this repo. */
+                guard let jpeg = self.encodeContext.jpegRepresentation(
+                    of: ci,
+                    colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                    options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption:
+                                Self.stillJpegQuality]
                 ) else {
                     DispatchQueue.main.async { completion(["ok": false, "why": "could not encode the frame"]) }
                     return
@@ -851,6 +1148,10 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 }
                 var entry: [String: Any] = [
                     "path": url.path, "bytes": jpeg.count, "index": 0,
+                    /* ⛑ Still read off the written bytes, and **that is now worth something**:
+                       having stamped the tag above, this line stops fabricating a default and
+                       becomes the read-back that confirms the stamp took. `exifAsked` vs
+                       `exifWrote` in the log below is the pair that would show it had not. */
                     "exifOrientation": CameraController.exifOrientation(of: jpeg),
                     // `lens` stays a constant and is not the same kind of claim: world tracking is
                     // offered only the wide-angle device on this iPad (`HSLensProbe`, 2026-08-24),
@@ -865,6 +1166,15 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                 var row: [String: Any] = [
                     "ms": ms, "bytes": jpeg.count, "mapping": mapping, "tracking": tracking,
                     "w": w, "h": h,
+                    /* ⚑ Asked, written, and the independent second opinion — three numbers that
+                       cost nothing and settle by showing. `exifAsked == exifWrote` says the stamp
+                       took; `angle` against `gravityAngle` says whether ARKit's gravity agrees with
+                       CoreMotion, and which way round portrait falls. **A log row, not a banner:
+                       there is nothing to announce unless they disagree.** */
+                    "exifAsked": exif ?? -1,
+                    "exifWrote": CameraController.exifOrientation(of: jpeg),
+                    "angle": angle.map { Double($0) } ?? -1,
+                    "gravityAngle": gravity,
                 ]
                 for (key, value) in aim.log { row[key] = value }
                 HSZoneLog.record("stillThroughArkit", row)
@@ -872,6 +1182,11 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
                     completion([
                         "ok": true, "latencyMs": ms, "frames": [entry],
                         "position": position, "mode": self.mode?.rawValue ?? "positioning",
+                        /* ⛑ **The angle the zone actually used.** `CameraScreen` hard-coded `0`
+                           here because the zone never asked a photo connection for one — so the
+                           review panel printed `0° asked · exif 1`, a self-consistent pair of wrong
+                           halves, on the one screen built to catch exactly that disagreement. */
+                        "rotationAngle": angle.map { Double($0) } ?? -1,
                     ])
                 }
             }
@@ -1011,7 +1326,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             // ⚑ The three that let a desk age a pose. See the comments above and on `reinitCount`.
             "mapping": mapping,
             "reinits": reinitCount,
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             "sinceInitSec": Date().timeIntervalSince(lastInitAt),
             "featurePoints": frame.rawFeaturePoints?.points.count ?? 0,
             /*
@@ -1047,6 +1362,9 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
            precisely because there were two places to write it.* */
         let aim = HSSurface.ahead(of: frame, live: session.currentFrame)
         if let payload = aim.payload { out["surface"] = payload }
+        // ⛑ The refusal rides out with the pose. An absent surface and an absent REASON
+        // are the same row to a reader; only one of them can be acted on.
+        else if let why = aim.why { out["surfaceWhy"] = why }
         // The lens goes back in the `defer` above — on this path and on every other.
         var row: [String: Any] = ["ok": true, "tracking": state]
         for (key, value) in aim.log { row[key] = value }
@@ -1091,6 +1409,28 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      that took it.* ⛑ The old handler did the second, which produced the next `sensorFailed`, five
      times in nine minutes.
      */
+    /**
+     ⛑ **Wake ARKit and WAIT for a frame it stands behind — the step the room shot's far end needs
+     and `resume()` deliberately does not do.**
+
+     ⚑ `resume()` means *stop refusing*, by design: the camera is re-taken lazily inside
+     `position()`, which is why the traverse keeps its world — every `handLens("zone")` is followed by
+     a `takePosition()`. **The room shot substitutes `captureStill`, which has no such path**, so it
+     needed this one stated rather than inherited.
+
+     **Bounded, and the timeout is the answer rather than a failure to report later.** `wake()` runs
+     `enter(.positioning)`, whose `needCamera?()` stops the capture session synchronously first and
+     whose `mustReset` is false — so **the origin and `originEpoch` survive**, which is the whole
+     reason a step-out is affordable at all.
+
+     ⚠️ **Blocks. Never call it on the main thread** — `waitForTrackedFrame` sleeps in 50 ms steps.
+     */
+    func wakeForCapture(timeout: TimeInterval = 8.0) -> Bool {
+        guard mode != nil else { return false }
+        if paused { wake() }
+        return waitForTrackedFrame(timeout: timeout) != nil
+    }
+
     func retry() -> [String: Any] {
         guard let m = mode else { return ["ok": false, "why": "no zone open"] }
         failure = nil
@@ -1314,7 +1654,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
      USDZ. `confidence` travels with each one — RoomPlan says how sure it is and dropping that would
      be the same mistake as dropping `trackingState`.
      */
-    private static func describe(_ room: CapturedRoom, zoneId: String, originEpoch: Int) -> [String: Any] {
+    private static func describe(_ room: CapturedRoom, zoneId: String, originEpoch: Int, originId: String) -> [String: Any] {
         func surfaces(_ list: [CapturedRoom.Surface]) -> [[String: Any]] {
             list.map { s in
                 let p = s.transform.columns.3
@@ -1346,7 +1686,7 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
             /* ⛑ **The frame this plan is drawn in.** The desk places containers by combining the
                plan with posed photographs, so the plan must say which origin it belongs to — a plan
                and a pose from different epochs are both correct and not comparable. */
-            "originEpoch": originEpoch,
+            "originEpoch": originEpoch, "originId": originId,
             "walls": surfaces(room.walls),
             "doors": surfaces(room.doors),
             "windows": surfaces(room.windows),
@@ -1395,12 +1735,53 @@ final class HSZoneSession: NSObject, ARSessionDelegate {
     // MARK: - ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        /*
+         ⛑ **Delivered frame rate, counted here because nothing in the zone session counts it.**
+
+         ⚑ *Step 0 of the posed traverse, and it comes first because the cost of every later step is
+         invisible without it.* The only `fps()` in the package lives in `HSGateOne` — the 45-minute
+         probe — so a shipping build could lose frames to a shutter, a Vision pass or a preview and
+         **nobody would have a number.**
+
+         ⚠️ *And the existing evidence cannot see the thing that is about to change.* Gate 1's flat
+         "30.0 fps" was taken at **one high-resolution capture per fifteen seconds**; a 100 ms
+         interruption there is 0.67% of the frame budget and averages away. At the 1 Hz a posed
+         traverse wants it is 8–10%. **A number extrapolated fifteen-fold beyond its measurement is
+         an assumption wearing a measurement's clothes**, and this is the counter that settles it.
+
+         Cheap on purpose: two increments and a comparison, on a thread ARKit already owns.
+         */
+        frameCount += 1
+        let now = CACurrentMediaTime()
+        if fpsWindowStart == 0 { fpsWindowStart = now }
+        else if now - fpsWindowStart >= 5 {
+            deliveredFps = Double(frameCount) / (now - fpsWindowStart)
+            HSZoneLog.deliveredFps = deliveredFps
+            frameCount = 0
+            fpsWindowStart = now
+        }
         /* ⚑ Every frame, because the pipeline does its own cadence gate — it counts frames and
            analyses every Nth, and it must do that counting once rather than once per source. */
-        // ⚑ A COPY. See `copyBuffer` — handing ARKit's own buffer to another queue starves the
-        // frame pool, and a starved pool stops the session dead while the rest of the app runs on.
-        if onAnalysisFrame != nil, let copied = copyBuffer(frame.capturedImage) {
-            onAnalysisFrame?(copied)
+        /*
+         ⛑ **The cadence gate moved AHEAD of the copy** (step 2).
+
+         ⚑ *A dropped frame used to be copied first and dropped after.* `copyBuffer` is a ~4 MB memcpy
+         on the main thread, and the consumer analyses every Nth — so the copies that were thrown away
+         were main-thread work spent on nothing, at frame rate. **Deciding first costs a modulo.**
+
+         The gate lives here rather than in the consumer because this is the one place that knows what
+         it costs to say yes.
+         */
+        if onAnalysisFrame != nil, frameCount % Self.analyseEveryNth == 0,
+           let copied = copyBuffer(frame.capturedImage) {
+            onAnalysisFrame?(AnalysisFrame(
+                pixels: copied,
+                transform: frame.camera.transform,
+                intrinsics: frame.camera.intrinsics,
+                imageResolution: frame.camera.imageResolution,
+                // ⚑ ARKit's own timestamp — the exposure, not the delivery.
+                timestamp: frame.timestamp,
+                tracking: HSArProbe.describe(frame.camera.trackingState)))
         }
         // Cheap, and it is the only thing that runs per frame here.
         if mode == .mesh || mode == .roomplan { saveWorldMap() }
@@ -1519,7 +1900,7 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
                 let room = try await RoomBuilder(options: [.beautifyObjects]).capturedRoom(from: data)
                 HSZoneLog.record("roomBuilt", ["walls": room.walls.count])
                 self.capturedRoom = room
-                self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch))
+                self.deliverRoom(Self.describe(room, zoneId: self.zoneId, originEpoch: self.originEpoch, originId: self.originId))
             } catch {
                 self.roomError = error.localizedDescription
                 self.deliverRoom(["captured": false, "why": error.localizedDescription])
@@ -1556,7 +1937,7 @@ extension HSZoneSession: RoomCaptureSessionDelegate {
          * full room description at that rate is work spent redrawing a picture nobody read. */
         guard Date().timeIntervalSince(lastPlanAt) > 0.5 else { return }
         lastPlanAt = Date()
-        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId, originEpoch: originEpoch)])
+        onEvent?(["roomShape": Self.describe(room, zoneId: zoneId, originEpoch: originEpoch, originId: originId)])
     }
 
     func captureSession(_ session: RoomCaptureSession,
@@ -1682,6 +2063,33 @@ enum HSSurface {
          without asking where it came from, so anything admitted here is consumed as a measurement
          by construction.
          */
+        /**
+         ⛑ **Why nothing was measured — because an absence with no reason is three different facts
+         wearing one face.**
+
+         ⚑ *The reasons already exist and have never left the device.* `depthWhy`, `meshWhy`,
+         `meshFrom`, `triangles` and `budgetHit` live in `log` only, which reaches `HSZoneLog` — a
+         file shared by hand and **not part of the export**. So a desk holding an absent `surface`
+         cannot tell **"beyond the sensor's reach"** from **"depth thin on the axis"** from **"the
+         mesh budget stalled"** — *three absences with three different meanings for whether to bridge
+         a gap in a pipe line.*
+
+         **The distinction the whole field turns on**: out-of-range is a fact about the room and the
+         desk may reasonably interpolate across it; a stalled budget is a fact about the app and it
+         may not. **Same empty field, opposite instructions.**
+
+         *Emitted only when there is nothing to emit a point for* — a measured surface says why it is
+         there by being there.
+         */
+        var why: String? {
+            guard !source.measured else { return nil }
+            var parts: [String] = []
+            if !depthWhy.isEmpty { parts.append(depthWhy) }
+            if !meshWhy.isEmpty { parts.append(meshWhy) }
+            if budgetHit { parts.append("mesh budget reached") }
+            return parts.isEmpty ? "nothing measured on the axis" : parts.joined(separator: "; ")
+        }
+
         var payload: [String: Any]? {
             guard source.measured, let point else { return nil }
             var out: [String: Any] = [

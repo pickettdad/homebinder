@@ -1,3 +1,4 @@
+import type { RefusalAct } from "../engine/v2/events";
 /**
  * The single app store (Zustand): navigation + session state + dispatch.
  *
@@ -192,7 +193,8 @@ interface AppStore {
   discardMediaV2(mediaId: string): Promise<void>;
   /** ⚑ Record something the app could not do. See `AppRefused` — never used for a deletion. */
   recordRefusal(refusal: {
-    act: "floorplan" | "mesh" | "position" | "lens" | "traverse" | "capture" | "zone-session";
+    // ⛑ Imported, not re-declared. This copy had already diverged from the one in `events.ts`.
+    act: RefusalAct;
     zoneId?: string;
     pinId?: string;
     why: string;

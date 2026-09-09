@@ -17,8 +17,24 @@ Three states, and the third is the one worth building for.
 | `{ positioned: true, … }` | measured, with `tracking`, a full 4×4 `transform`, and `surface` when something **measured** the surface in front of the lens — see §1a |
 | `{ positioned: false, why }` | ⚑ **a refusal** — the app could take a position here and did not |
 | field absent, `owner.kind: "pin"` | this frame inherits from its container, which is the normal case |
-| field absent, `frame.role` is not `primary` | a **sibling** — the pose is on the `primary` frame of the same `frame.captureId` |
+| field absent, `frame.role` is not `primary`, **and `intent` is not `pan`** | a **sibling** — the pose is on the `primary` frame of the same `frame.captureId` |
+| field absent on a `pan` frame | ⚠️ **never inherit** — see the block below |
 | field absent, `owner.kind: "zone"`, no `frame` | ⛑ **nobody knows** — there is no container to inherit from |
+
+> ## ⚠️ **SCOPED AWAY FROM THE TRAVERSE, 2026-09-07 — inheritance here would be a silent fabrication.**
+>
+> **The rule above is right for a bracket** and wrong for a leg, and the difference is what the frames
+> are. ⚑ *A bracket is three exposures of one thing from one place* — one pose describes all three,
+> and inheriting it is true. **A traverse leg is twenty-two frames taken from twenty-two places.**
+>
+> **So a frame that failed to pose must file `{positioned: false, why}` and never simply omit the
+> field.** Under the old rule a desk following the contract stamps it with the leg's *primary* pose —
+> **a polyline that starts correctly and then piles vertices on the origin, with no error anywhere and
+> perfectly plausible geometry.** *That is worse than a gap: a gap is visible and a wrong point is not.*
+>
+> ⛑ **The emitter enforces it rather than the reader remembering it.** A rule that lives only in this
+> document is a rule the reader has to already know — which is the sentence this document uses about
+> `position.projection`, three sections down, for exactly the same reason.
 
 ⛑ **The distinction between the last three is the whole design.** *At least one frame per container
 carries a position; everything else inherits it.* So an absent `position` on nine frames of a
@@ -170,10 +186,26 @@ It now carries a measured position on the **first** frame and on the **last**, a
 **Read the leg, not the frame.** Frame order within the capture is the traversal order; the two
 anchors put that order in the room.
 
-⛑ **`projection.projectable` is `false` on both, with `projectableFrame: null`.** A traverse is
-shot **wide** and the run locks the lens for its whole length, so there is **no 1× frame anywhere in
-a traverse** — a real pose and nothing to project at all. *This is the case that field was built
-for.*
+> ## ⚠️ **CORRECTED 2026-09-07 — this paragraph is stale, and it is the document Builder reads.**
+>
+> It said `projection.projectable` is `false` on both traverse anchors with `projectableFrame: null`,
+> **because "a traverse is shot wide"**. ⚑ **That ruling was overturned by measurement on 2026-08-30:
+> wide scored texture 1.1–1.99 across 31 frames and every one was discarded.** `lensPolicyFor` has
+> returned **`normal`** for a traverse ever since, and its test asserts it.
+>
+> **So a traverse's frames are 1× and `projection.projectable` is `true`** — `projectionFor` emits
+> exactly that for a normal-lens frame. *The desk was being told not to project frames it can
+> project.*
+>
+> ⛑ **And the stale claim was load-bearing in the wrong direction.** The lens objection to giving
+> every traverse frame a pose rested on it — *the ultra-wide is not offered to world tracking, so a
+> wide traverse could never be posed.* **ARKit configures `builtInWideAngleCamera`, which is exactly
+> the lens a traverse now wants** (`ZOOM-FLOOR-RESULT-2026-09-06`), so the obstacle had already
+> dissolved and three files went on arguing it.
+>
+> **The posed traverse is being built on that basis** — every frame carrying its own pose and surface,
+> no handover — so the table above is about to change again. This block stays until it does, because
+> a reader arriving at the old paragraph would build against a rule that is twice wrong.
 
 ### ⚑ A voice note taken during a trace binds to its LEG — one note per leg, cycled at the boundary
 

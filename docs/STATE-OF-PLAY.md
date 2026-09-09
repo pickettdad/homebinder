@@ -29,6 +29,77 @@ near 5 cm and wandering. ⛑ *Bounded error, not drift.*
 
 ---
 
+## ⚑ The two-zone walk, 2026-09-06 — what it proved
+
+**A ~16-minute untethered walk, two zones (Bedroom A, kitchen): floorplan + mesh + objects + room
+shots + traverse legs in each.**
+
+| | |
+|---|---|
+| both zones exported separately | ✅ `bedroom-a-81b5ba` / `kitchen-e4b910` — the filename collision fix held |
+| mesh geometry | ✅ **946 KB and 2.4 MB** of real vertices, faces and transforms |
+| floorplans | ✅ every surface with dimensions, confidence, 4×4 transform (5 walls / 4 walls) |
+| positions | ✅ **all 15 measured by `sceneDepth`** — not one invented plane |
+| traverse frames | ✅ `kept 22 / 24 / 21`, **zero discarded** |
+| thermal | ✅ **nominal across all 287 rows**, matching Gate 1's 45 minutes — *while doing more* |
+| `originEpoch` | ✅ **1 throughout each zone** |
+
+⛑ **The robustness datapoint worth keeping.** The iPad went **sensor-face-down on a table for 123
+seconds** while the owner typed notes. Tracking went `limited(insufficientFeatures)` and came back
+`normal` — **with no re-initialisation, no reset, and the same origin.** *The session held the room
+through a two-minute blackout.* That is the case the old sleeping build could not have survived, and
+it arrived free from an ordinary walk rather than from a probe.
+
+⚠️ **Battery is not measurable on a short walk.** iOS reports `batteryLevel` in **5% steps**, so a
+16-minute walk draining ~3% reads as a flat 100% — indistinguishable from a broken instrument. The
+honest claim is **under 5% in 16 minutes**, consistent with Gate 1's 9%/46 min. *A longer untethered
+walk settles it.*
+
+**Still wrong after this walk:** the room shot produced **no wide sibling at all** (lens histogram
+across 82 media: `{normal: 76, absent: 6}`) — a workflow is designing the handover.
+
+## ⚑ The room shot's wide frame — it existed, and it cost the position every time
+
+**Owner, 2026-09-06: *"we did have room shot that took the wide angle and then the normal after. From
+what I saw it worked and then it was gone."* He is right, and the earlier export proves it** — 5
+`wide` frames, room shots filed as pairs at one timestamp: `primary lens=wide` + `insurance
+lens=normal`.
+
+⛑ **And every one of them carries this:**
+
+```
+primary   lens=wide    positioned=false   why="Required sensor failed."
+insurance lens=normal  position=null
+```
+
+⚑ **`Required sensor failed` is ARKit being refused the camera.** The lens swap knocked world tracking
+off the sensor on every room shot — so the pair arrived with **no position at all**, on either frame.
+*The picture worked and the thing the desk places with was destroyed to get it.*
+
+**So the continuous-session rebuild did not break the room shot. It removed the thing that was
+breaking tracking, and the wide frame went with it.** ⛑ *"It never worked" was wrong; so is "it
+worked". It produced two photographs and no pose.*
+
+**What the owner is asking for — wide for the visual placement, normal immediately after carrying the
+position and the raycast — has never existed in any build.** It is buildable, and the traverse is the
+proof: a deliberate yield and a deliberate reclaim, `kept 22 / 24 / 21` frames with none discarded and
+`originEpoch` unchanged. **The old room shot's swap was not deliberate — it collided.**
+
+⚠️ **Open before any of it is built:** `minAvailableVideoZoomFactor` and `constituentDevices` on the
+ARKit-configured device **have never been read**. The device *type* was measured twice; the zoom floor
+never once. *If a virtual dual-wide reports a sub-1.0 floor, the viewfinder and the capture both widen
+with no handover, no second session and no pre-build* — and the whole problem disappears.
+
+## ⛑ Operational rules the walk established
+
+- **Press Floorplan once you are standing in the room.** Creating a zone starts nothing — the ARKit
+  origin is minted by the first capture door. Tapping Floorplan half a second after creating the zone
+  scans wherever you are, which is the recorded cause of *"floorplan picked up some of the dining
+  room."*
+- **Press Finish mesh LAST.** It harvests everything the zone accumulated, not what was scanned while
+  mesh mode was on. Never pressing it discards all of it.
+
+
 ## ⛑ The defect that was open, and the fix that shipped 2026-09-06
 
 **The capture raycast does not hit the object.** Both sites use `allowing: .estimatedPlane`
@@ -80,6 +151,75 @@ case the mesh rung alone cannot. Unproven on hardware: it needs a tethered Debug
 TestFlight archive, per the build order.
 
 ---
+
+## ⚑ 2026-09-07 evening — the image-quality question, closed by measurement
+
+**The owner's ask:** *"I want the best solution for the image quality, not a bandaid — the step out
+seems like a bandaid."* He was right about the step-out: it would put a camera handover on every
+photograph, which is exactly what the continuous-session rebuild removed.
+
+### What shipped, and he confirmed it on the device
+
+⚑ **The in-zone still was never stamped with an orientation.** It encodes a `CVPixelBuffer`, which
+carries no metadata, and then called `CameraController.exifOrientation(of:)` — whose own comment says
+it exists *"so the zone session can stamp the SAME orientation on a still it took itself"* — **to
+read.** Nothing had written a tag, so it returned the specified default of `1`.
+
+⛑ **`1` is not an absence. It is a positive claim that a sideways photograph is upright**, and
+everything downstream believed it. **Including Vision:** `readAccurately` takes its orientation from
+that tag, so **every in-zone plate since 2026-09-05 was read at `.up` while lying on its side** — a
+silent OCR loss the desk cannot recover. It reached the traverse on 09-07 through
+`entry["exifOrientation"] ?? 1`.
+
+**Fixed** (`7418ea0`): the zone owns a `RotationCoordinator` against ARKit's device, the angle→EXIF
+mapping stays in `CameraController` (*"two tables can disagree, one cannot"*), and **no reading
+produces no tag** rather than a plausible default. ✅ **Owner verified upright on device.**
+
+Carried in the same commit, none of which can move sharpness and none of which is filed as though it
+could: **colour attachments now survive `copyBuffer`** (measured present on ARKit's buffers, so a
+real loss), **sRGB named** instead of uncalibrated deviceRGB, **one `CIContext`** instead of one per
+photograph, and `rotationAngle` stops being a hard-coded `0` on the TS side.
+
+### ⚠️ The softness: diagnosed, and it is not what this session first claimed
+
+**Scored on the Mac from the owner's own captures — no walk:** not motion blur (anisotropy 0.03–0.13),
+not defocus (no tile anywhere is sharp), not JPEG (≈2.2 bits/pixel, at the top of Apple's own band).
+⚑ **It is a dim room:** shadow SNR **18.5** against **41.5** on a well-lit frame *from the identical
+code path*, shadows at luma 23 vs 53, 1.6× the colour noise.
+
+**Every lever now has a number** (`PHOTO-SETTINGS-RESULT-2026-09-07`):
+
+| lever | measured | status |
+|---|---|---|
+| photo pipeline / fusion | — | 🔴 `.quality` **refused** (`ARError 107`), `.balanced` **inert** |
+| exposure 1/15–1/30 @ low ISO | **+27% shadow SNR, −37% noise** | ⚠️ tracking cost **unmeasured** |
+| torch | **+13%** | ✅ safe, small |
+| encode / colour / JPEG | **0** | ✅ fixed anyway |
+
+⛑ **The `.quality` refusal returns an `NSError`, not an exception** — so it was always safe to try,
+and is now known rather than assumed. *This session proposed it as "the non-bandaid answer" and was
+wrong; the document exists so the next session does not re-propose it.*
+
+### 🔴 What a desk can never answer — the owner named it
+
+Feature counts read **2–4** against Gate 1's median of **229**. This session read that as a
+textureless scene. **The owner's diagnosis is structural and better:** *"you are starting fresh in a
+space with no world-tracking history and expecting it to pick things up immediately?"*
+
+⚑ **ARKit triangulates feature points from parallax.** A stationary iPad seconds after a cold `run()`
+generates almost none, **so any stationary probe reads near-zero features whatever the scene.**
+*The cost half of the exposure question is only observable while walking.* The image half stands — a
+static scene is a fair test of a photograph.
+
+### The open decision, and it is the owner's
+
+**Exposure is the one real remaining code lever: +27% shadow SNR for object captures.** It cannot be
+shipped on the desk evidence alone, because a longer exposure could starve VIO during a walk and
+nothing here can see that. **So it is a walk to validate, for a 27% gain** — or it is deferred and
+the mechanical-room walk happens instead. *A trade-off between two defensible options is his call.*
+
+⚠️ **And the largest remaining variable is not in the code at all: it is how far the concierge stands
+from what they are photographing.**
 
 ## What is fixed and on the device
 

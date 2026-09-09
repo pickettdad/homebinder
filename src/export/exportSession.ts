@@ -14,6 +14,7 @@ import type { SessionState } from "../engine/fold";
 import type { SessionEvent } from "../engine/schema/events";
 import { buildManifest, type ExportManifest } from "../engine/export/manifest";
 import { sha256Hex } from "../engine/canonical";
+import { isNativePlatform } from "../app/platform";
 import { db } from "../storage/db";
 import { APP_VERSION } from "../storage/sessionRepo";
 
@@ -102,16 +103,40 @@ export async function planExport(args: {
 
 export type HandoffResult = "shared" | "downloaded" | "failed";
 
-/** Share one export file; falls back to an <a download> when share isn't available. */
+/**
+ * Share one export file, and **never report a delivery that did not happen.**
+ *
+ * ⚑ **This returned `"downloaded"` unconditionally.** After the share sheet was skipped or threw,
+ * it created an `<a download>`, clicked it, and declared success — and on the native shell that
+ * click does **nothing**: Capacitor's iOS runtime installs no `WKDownloadDelegate`, and an
+ * unmatched top-level navigation is handed to `UIApplication.open`, which cannot open a `blob:`
+ * URL. The row on the export screen then went green, `allHandled` went true, and **Finish recorded
+ * a verified export for a file still sitting on the iPad.**
+ *
+ * ⛑ **The failure mode is the one this project fears most: silent, and actively asserted as
+ * success.** It is also size-dependent — the sheet is likeliest to balk at the ~250 MB chunks a
+ * mechanical room produces, which is exactly the walk nobody wants to repeat. *Small walks worked,
+ * which is why nothing surfaced it.*
+ *
+ * **So the fallback is now gated on being able to work.** In the browser it is real and stays. On
+ * the native shell it is a no-op, so the honest answer is `"failed"` — the concierge can retry, and
+ * an export that refuses to be recorded is recoverable where one that lies is not.
+ */
 export async function handoffFile(file: File): Promise<HandoffResult> {
   if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file] });
       return "shared";
     } catch (err) {
+      // ⚑ A cancelled sheet and a broken sheet are both "not delivered". Neither may go green.
       if ((err as DOMException).name === "AbortError") return "failed";
-      // fall through to download
+      if (isNativePlatform()) return "failed";
+      // Browser only: fall through to a download that can actually happen.
     }
+  } else if (isNativePlatform()) {
+    /* ⚠️ No share sheet and no working download on this platform. Saying so is the whole fix:
+       a refusal the concierge can see beats a green tick over nothing. */
+    return "failed";
   }
   const url = URL.createObjectURL(file);
   const a = document.createElement("a");

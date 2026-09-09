@@ -86,11 +86,27 @@ export async function planExportV3(args: {
   );
 
   const shortId = state.sessionId.slice(0, 8);
+  /*
+   ⚑ **A stamp, because a visit is exported more than once and the names collided.**
+
+   The product actively encourages a mid-walk backup, and both exports were named
+   `housesteady-<sessionId>-<tag>[-partN].zip` with nothing to tell them apart. **In one folder the
+   second silently replaces the first** — and they are not the same bytes: chunk composition
+   changes between plans, so export-2's `-part1` holds different media than export-1's did, under
+   one name.
+
+   ⛑ *Same class as the zone-name collision `exportGroupTag` was written for, one level up:* that
+   fix made two zones distinguishable and left two **exports** of the same session identical.
+   Minute resolution is enough — two exports of one visit inside the same minute is not a case, and
+   a second-resolution stamp makes the names harder to read for no gain.
+   */
+  const stamp = new Date(state.startedAt ?? Date.now()).toISOString().slice(0, 10).replace(/-/g, "");
+  const runStamp = `${stamp}-${new Date().toISOString().slice(11, 16).replace(":", "")}`;
   const files: ExportFileV3[] = [];
 
   const manifestJson = JSON.stringify(manifest, null, 2);
   const manifestBlob = new Blob([manifestJson], { type: "application/json" });
-  const manifestName = `housesteady-${shortId}-manifest.json`;
+  const manifestName = `housesteady-${shortId}-${runStamp}-manifest.json`;
   files.push({
     name: manifestName,
     bytes: manifestBlob.size,
@@ -140,7 +156,7 @@ export async function planExportV3(args: {
     const tag = exportGroupTag(state, group);
     chunks.forEach((chunk, i) => {
       const suffix = chunks.length > 1 ? `-part${i + 1}` : "";
-      const name = `housesteady-${shortId}-${tag}${suffix}.zip`;
+      const name = `housesteady-${shortId}-${runStamp}-${tag}${suffix}.zip`;
       files.push({
         name,
         bytes: chunk.reduce((sum, m) => sum + m.bytes, 0),

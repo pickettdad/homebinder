@@ -699,8 +699,17 @@ export function CameraScreen({
       const blob = new Blob([JSON.stringify(plan)], { type: "application/json" });
       /* ⚑ Declared, not left to be guessed from a mime type. Without an intent a room's geometry
          arrives at the desk as an unlabelled JSON blob among the photographs. */
+      /* ⛑ **A swallowed write is a lost room.** This was `.catch(() => {})`: the geometry the desk
+         places everything else against could fail to file with no toast, no note and no refusal —
+         indistinguishable at the desk from a room nobody scanned. */
       await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json", undefined, "floorplan")
-        .catch(() => {});
+        .catch((err) => {
+          void recordRefusal({
+            act: "floorplan", zoneId,
+            why: `plan captured but could not be filed: ${err instanceof Error ? err.message : String(err)}`,
+            recoverable: false,
+          });
+        });
     }
     if (plan.captured) {
       const m = zoneMeasures(plan);
@@ -712,8 +721,26 @@ export function CameraScreen({
           `${m.ceilingHeight ? bothUnits(m.ceilingHeight) : "—"} high · ` +
           `${m.windows.count} windows · ${m.doors.count} doors`,
       );
-    } else setZoneNote(plan.why ?? "no plan");
-  }, []);
+    } else {
+      /*
+       ⚑ **A floorplan that fails at STOP recorded nothing, and it has already cost a room.**
+
+       `src/native/zone.ts` carries the incident: *"The full bath left the house with four objects,
+       34 photographs, six plate reads and nothing to place any of it on… Its floorplan was lost to
+       a sensor failure mid-stop."* A refusal was recorded only when the scan failed to **start**.
+
+       ⛑ *A scan that begins and does not deliver is the case the desk cannot see* — the zone simply
+       arrives without a plan, which reads exactly like a zone nobody scanned. On a one-shot handover
+       walk that turns a sensor hiccup into an unrepeatable, undateable loss.
+       */
+      void recordRefusal({
+        act: "floorplan", zoneId,
+        why: plan.why ?? "the scan stopped without delivering a plan",
+        recoverable: true,
+      });
+      setZoneNote(plan.why ?? "no plan");
+    }
+  }, [recordRefusal, zoneId]);
 
   const finishMesh = useCallback(async () => {
     setMeshing(false);
@@ -722,11 +749,35 @@ export function CameraScreen({
     /* ⚑ The geometry is the deliverable, so it is filed raw exactly as the floorplan is — the desk
        decides what to do with it. A count on screen is a receipt, not the record. */
     const mesh = (out as { mesh?: { anchors: number; faces: number; why?: string } } | null)?.mesh;
-    if (!mesh) return;
+    /* ⚑ **Three ways a mesh vanished, all silent, and the desk could tell none of them apart from
+       "nobody meshed this room."** No payload at all; a payload carrying zero faces; and a write
+       that threw. `harvestMesh` runs at exactly one moment — leaving mesh mode — so there is no
+       second chance at any of them. **Each now says which it was.** */
+    if (!mesh) {
+      void recordRefusal({
+        act: "mesh", zoneId,
+        why: "leaving mesh mode returned no geometry payload at all",
+        recoverable: true,
+      });
+      return;
+    }
     if (zoneId && mesh.faces > 0) {
       const blob = new Blob([JSON.stringify(mesh)], { type: "application/json" });
       await capturePhotoV2({ kind: "zone", id: zoneId }, blob, "application/json", undefined, "mesh")
-        .catch(() => {});
+        .catch((err) => {
+          void recordRefusal({
+            act: "mesh", zoneId,
+            why: `mesh harvested but could not be filed: ${err instanceof Error ? err.message : String(err)}`,
+            recoverable: false,
+          });
+        });
+    } else if (zoneId) {
+      // ⛑ Harvested and empty. Distinct from "never asked", and only this line can say so.
+      void recordRefusal({
+        act: "mesh", zoneId,
+        why: mesh.why ?? `mesh harvested with no faces (${mesh.anchors} anchors)`,
+        recoverable: true,
+      });
     }
     setZoneNote(
       mesh.faces > 0
@@ -1675,6 +1726,19 @@ export function CameraScreen({
           continuesFrom: result.continuesFrom ?? undefined,
           ordinal: f?.index,
           takenAt: f?.at,
+          /* ⛑ **On the primary only** — these describe the LEG, not the frame, and repeating them
+             on every sibling would invite a reader to sum them. The manifest's own rule already
+             says leg-level facts live on the primary of a `captureId`. */
+          ...(position === 0
+            ? {
+                legDiscarded: result.discarded,
+                legDiscardedTexture: result.discardedTexture,
+                legShutterLost: result.refusals,
+                legGaps: result.gaps,
+                legUnverified: result.unverified,
+                legUnmet: result.unmet?.length ? result.unmet : undefined,
+              }
+            : {}),
         });
         const blobFor = async (path: string) => (await fetch(frameUrl(path))).blob();
         /*
@@ -2561,7 +2625,7 @@ export function CameraScreen({
       </header>
 
       {showInstruments && status && (
-        <div className="absolute right-3 top-16 w-64 rounded-lg bg-slate-950/85 p-3 text-xs text-slate-300 ring-1 ring-slate-700">
+        <div className="absolute right-3 top-16 max-h-[calc(100dvh-5rem)] w-64 overflow-y-auto rounded-lg bg-slate-950/85 p-3 text-xs text-slate-300 ring-1 ring-slate-700">
           <p>thermal · <span className="font-mono text-slate-100">{status.thermalState}</span></p>
           <p>battery · <span className="font-mono text-slate-100">{Math.round(status.battery.level * 100)}%</span> {status.battery.state}</p>
           <p>

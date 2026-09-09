@@ -111,6 +111,26 @@ export interface FrameRoleMeta {
    */
   ordinal?: number;
   /**
+   * ⚑ **What the leg cost itself — on the PRIMARY frame only, because it describes the leg.**
+   *
+   * The device measures these, prints them on the panel, and used to drop them: `discarded` (frames
+   * the texture gate refused), `discardedTexture` (each refused frame's score, so the threshold can
+   * be re-cut from real walks), `shutterLost` (shutters the zone refused, with the reason), `gaps`
+   * and `unverified` (pairs that could not be registered).
+   *
+   * ⛑ **Without them a leg that quietly lost a third of its frames is indistinguishable from one
+   * that lost none.** `frame.ordinal` gaps tell the desk *that* a frame was dropped and can never
+   * tell it *why* — and a mechanical room, with its painted pipe and specular metal, is the surface
+   * class most likely to drop them. *The discarded frames themselves are gone; this is the only
+   * record that they existed.*
+   */
+  legDiscarded?: number;
+  legDiscardedTexture?: number[];
+  legShutterLost?: string[];
+  legGaps?: number;
+  legUnverified?: number;
+  legUnmet?: string[];
+  /**
    ⛑ **When THIS frame was taken — distinct from `capturedAt`, which is when the capture was
    committed.**
 

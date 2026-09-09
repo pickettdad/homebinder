@@ -2050,6 +2050,25 @@ final class CameraController: NSObject {
 
     /// The two moments a person actually asked for the lens back: pausing, and closing the zone.
     func giveCameraBackFromZone() {
+        /*
+         ⚑ **A leg abandoned by closing or pausing the zone left the DEVICE locked, and that
+         outlives the leg.**
+
+         `restoreContinuousModes` had two callers — `stopTraverse` and `stop()` — so pressing
+         *stop trace* was clean and every other way out of a leg was not. Closing the room, walking
+         into the next one, or pausing left `.custom` exposure, `.locked` focus and `.locked` white
+         balance on the device.
+
+         ⛑ **`apply(mode:)` re-asserts exposure and focus and never white balance**, and
+         `CameraController` lives for the whole process — so an abandoned leg **pinned colour
+         temperature for every photograph afterwards until the app was relaunched.** *That is the
+         exact failure `stop()`'s own comment records as fixed; the fix covered `stop()` and did not
+         cover the doors the concierge actually uses.*
+
+         **Here, because this is the moment the lens genuinely goes back** — both the pause and the
+         close arrive through it. The same handle that locked is the one released; see `lensDevice`.
+         */
+        if isTraversing { restoreContinuousModes() }
         zoneOwnsCamera = false
         reclaimCamera()
     }
@@ -4198,6 +4217,9 @@ final class CameraController: NSObject {
            ARKit's own — the format the frames actually arrive in. */
         var exposureWaitMs = 0.0
         var exposureSettled = true
+        // ⛑ Beside its twin, and reported beside it: a wait that silently timed out looks
+        //    identical to one that was never needed.
+        var focusSettled = true
         if let device = lensDevice {
             let began = CACurrentMediaTime()
             while device.isAdjustingExposure, CACurrentMediaTime() - began < 1.5 {
@@ -4224,8 +4246,31 @@ final class CameraController: NSObject {
                 }
                 if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
                 else { unmet.append("lockedWhiteBalance") }
-                if device.isFocusModeSupported(.locked) { device.focusMode = .locked }
-                else { unmet.append("lockedFocus") }
+                /*
+                 ⚑ **Wait for the lens to arrive before freezing it — the exposure wait's twin,
+                 twenty lines up, and focus never got it.**
+
+                 `focusMode = .locked` freezes the lens **wherever it currently is**. It does not
+                 focus first. The exposure path above already waits up to 1.5 s on
+                 `isAdjustingExposure` because *"the meter is right, the moment is wrong"* — and the
+                 lock lands ~300 ms after ARKit takes the camera, which is exactly mid-hunt.
+
+                 ⛑ **A lens frozen mid-hunt is soft for every frame of the leg, systematically** —
+                 the opposite of the lock's stated purpose, which was to stop one frame going soft
+                 while the lens hunted. *Two independent review passes named this on the same day,
+                 which is why it is fixed rather than noted.*
+
+                 ⚠️ **And a mechanical room is its worst case**: pipe at half a metre, back wall at
+                 four, one frozen focal plane for a two-minute walk.
+                 */
+                if device.isFocusModeSupported(.locked) {
+                    let focusBegan = CACurrentMediaTime()
+                    while device.isAdjustingFocus, CACurrentMediaTime() - focusBegan < 1.5 {
+                        Thread.sleep(forTimeInterval: 0.02)
+                    }
+                    focusSettled = !device.isAdjustingFocus
+                    device.focusMode = .locked
+                } else { unmet.append("lockedFocus") }
                 device.unlockForConfiguration()
             } catch {
                 unmet.append("configuration")
@@ -4271,6 +4316,7 @@ final class CameraController: NSObject {
                 "unmet": unmet,
                 "exposureWaitMs": exposureWaitMs,
                 "exposureSettled": exposureSettled,
+                "focusSettled": focusSettled,
             ]
             for (k, v) in exposureRecord { started["exp_\(k)"] = v }
             HSZoneLog.record("traverseStart", started)

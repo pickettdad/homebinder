@@ -42,7 +42,14 @@ export function ExportV2Screen() {
   const prepare = async () => {
     if (!beginWork("prepare")) return;
     try {
-      const p = await planExportV3({ state: v2Session, events: v2Events, configSnapshot: v2Config });
+      /* ⚑ **`verifyHash` on, because the banner below claims verification.**
+         It defaulted to `false` and was never passed, so *"all N media files verified"* meant
+         **existence and byte count** — a blob corrupted in place, at the same length, passed.
+         ⛑ On a handover walk that cannot be repeated, the cheap check is the wrong one: hashing is
+         seconds of the concierge's time against a re-walk. */
+      const p = await planExportV3({
+        state: v2Session, events: v2Events, configSnapshot: v2Config, verifyHash: true,
+      });
       setPlan(p);
       setStatuses(Object.fromEntries(p.files.map((f) => [f.name, "pending" as const])));
       if (!p.integrity.ok) showToast(`${p.integrity.problems.length} media problem(s) — see below`);
@@ -153,7 +160,21 @@ export function ExportV2Screen() {
 
       {plan && plan.integrity.ok && (
         <p className="rounded-xl bg-slate-800/60 p-3 text-sm text-emerald-300">
-          ✓ Integrity check passed — all {plan.integrity.checked} media files verified.
+          ✓ Integrity check passed — all {plan.integrity.checked} media files verified by content hash.
+        </p>
+      )}
+
+      {/* ⚑ **Media that reached storage and reached no manifest entry.**
+          `fold` sends a photo whose owner does not exist to `orphanEvents` — the blob is in
+          IndexedDB, in no `media[]` row, and therefore **in no zip**. Nothing surfaced the count, so
+          the export screen could report a clean, complete export while leaving captures behind.
+          ⛑ *A number the concierge can see is the whole fix; what to do about it is a judgement
+          nobody can make from here.* */}
+      {plan && plan.manifest.orphanEvents.length > 0 && (
+        <p className="rounded-xl bg-amber-900/40 p-3 text-sm text-amber-200">
+          ⚠ {plan.manifest.orphanEvents.length} event(s) could not be attached to a zone or pin.
+          Anything they carried is in the log but not in the media files. Worth a look before you
+          finish.
         </p>
       )}
 
